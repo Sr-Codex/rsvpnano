@@ -1,5 +1,7 @@
 #pragma once
 
+#include "library/CoverStore.h"
+
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -31,6 +33,30 @@ namespace screens {
         size_t selectedIndex() const {
             return selectedIndex_;
         }
+        // Shelf order (indexes into items): book being read first, then newest added.
+        const std::vector<size_t>& shelf() const {
+            return shelf_;
+        }
+        // Preview/test hook: shelf order and the book being read without touching the card.
+        void setShelf(std::vector<size_t> order, std::string readingPath) {
+            shelf_ = std::move(order);
+            shelfReadingPath_ = std::move(readingPath);
+        }
+        // Cover thumbnails (Lume shelf). The store is owned by the App; null disables covers.
+        void setCoverStore(covers::CoverStore* store) {
+            coverStore_ = store;
+        }
+        bool hasPendingCovers() const {
+            return !pendingCovers_.empty();
+        }
+        // Next book whose thumbnail must be built (main thread hands it to the background job).
+        std::string takePendingCover() {
+            if (pendingCovers_.empty())
+                return {};
+            std::string path = std::move(pendingCovers_.back());
+            pendingCovers_.pop_back();
+            return path;
+        }
 
     private:
         int32_t centeredOffset(const std::vector<LibraryItem>& items, size_t index, int16_t viewportWidth) const;
@@ -49,6 +75,16 @@ namespace screens {
         int32_t offset_ = 0;
         size_t selectedIndex_ = 0;
         std::vector<LibraryItem> items_;
+        std::vector<std::string> knownOrder_; // contents of /library/.order after reconcile
+        std::vector<size_t> shelf_;
+        std::string shelfReadingPath_;
+        size_t shelfPage_ = 0;
+        void updateShelf(StorageManager& storage, const ReadingSession& session, bool reloadOrderFile);
+        Action drawShelf(ui::Context& ui, const std::vector<LibraryItem>& items, uint32_t nowMs, Screen& screen);
+        covers::CoverStore* coverStore_ = nullptr;
+        std::vector<std::string> pendingCovers_; // stack: last = built first
+        int optionsFor_ = -1;                    // item index whose long-press sheet is open
+        int pressedSlot_ = -1;
         bool itemsValid_ = false;
         uint32_t itemsRevision_ = 0;
         ui::CarouselGesture carouselGesture_;

@@ -112,6 +112,7 @@ void App::begin() {
     startupStage(UiText::Library);
     readerScreen_.loadInitialBook(immediateUi_, storage_, prefs_, bootMs_);
     Logger::startupCheckpoint("book");
+    libraryScreen_.setCoverStore(&coverStore_);
     libraryScreen_.invalidate();
     // Leave the last real status (including failures) visible until the usual
     // transition. Do not introduce a second splash delay or fake a Ready state.
@@ -293,7 +294,13 @@ void App::renderScreen(uint32_t nowMs) {
         immediateUi_.beginFrame(static_cast<uint8_t>(screen_));
         const screens::Action result = libraryScreen_.draw(immediateUi_, items, nowMs, screen_);
         immediateUi_.endFrame();
-        if (result == screens::Action::OpenBook) {
+        if (!backgroundJobActive() && openAfterCoverJob_ < 0 && libraryScreen_.hasPendingCovers()) {
+            jobCoverPath_ = libraryScreen_.takePendingCover();
+            if (!jobCoverPath_.empty() && !startBackgroundJob(JobKind::Covers)) jobCoverPath_.clear();
+        }
+        if (result == screens::Action::OpenBook && jobKind_ == JobKind::Covers) {
+            openAfterCoverJob_ = int(libraryScreen_.selectedIndex()); // opens as soon as this thumbnail is done
+        } else if (result == screens::Action::OpenBook) {
             runBookOpen(libraryScreen_.selectedIndex(), nowMs);
         } else if (result == screens::Action::OpenBookSettings) {
             readerScreen_.pauseImmediately(prefs_, nowMs);
@@ -928,6 +935,17 @@ void App::updateBackgroundJob() {
             }
             immediateUi_.cancelTouchUntilRelease();immediateUi_.invalidate();renderScreen(millis());return;
         }
+        if (completed == JobKind::Covers) {
+            jobCoverPath_.clear();
+            if (openAfterCoverJob_ >= 0) {
+                const size_t index = size_t(openAfterCoverJob_);
+                openAfterCoverJob_ = -1;
+                runBookOpen(index, millis());
+                return;
+            }
+            if (screen_ == screens::Screen::Library) renderScreen(millis());
+            return;
+        }
         if (completed == JobKind::Library) {
             immediateUi_.cancelTouchUntilRelease();
             libraryScreen_.reset();
@@ -1138,6 +1156,14 @@ void App::runBackgroundJob() {
     case JobKind::Library:
         Logger::checkpoint("library_load");
         libraryScreen_.items(storage_, readerScreen_.store, readerScreen_.session);
+        break;
+    case JobKind::Covers:
+        if (!jobCoverPath_.empty()) {
+            const uint32_t started = millis();
+            const auto built = coverStore_.generate(jobCoverPath_);
+            if (built) ESP_LOGI("covers", "thumbnail %s in %lu ms", jobCoverPath_.c_str(), (unsigned long)(millis() - started));
+            else ESP_LOGW("covers", "thumbnail %s failed: %s", jobCoverPath_.c_str(), built.error().c_str());
+        }
         break;
     case JobKind::Typography:
         Logger::checkpoint("typography");

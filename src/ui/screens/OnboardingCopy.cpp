@@ -279,7 +279,8 @@ constexpr const char* words[][4] = {
     {"Install over Wi-Fi or copy the pack to SD. More languages are planned.", "Per WLAN installieren oder Paket auf SD kopieren. Weitere Sprachen sind geplant.", "Instalează prin Wi-Fi sau copiază pachetul pe SD. Plănuim să adăugăm și alte limbi.", "Instale pelo Wi-Fi ou copie o pacote para o SD. Mais idiomas estão planejados."},
     {"Look online", "Online suchen", "Caută online", "Buscar online"},
     {"Tap Look online for Wiktionary over Wi-Fi. Only the word is sent when you ask.", "Online suchen nutzt Wiktionary per WLAN. Das Wort wird nur auf Anfrage gesendet.", "Caută online folosește Wiktionary prin Wi-Fi. Cuvântul e trimis doar la cerere.", "Buscar online usa o Wiktionary via Wi-Fi. A palavra só é enviada se você pedir."},
-    {"Guides are unavailable in chunk mode. Switch to Word to use them.", "Hilfslinien sind im Gruppenmodus nicht verfügbar. Nutze dafür den Wortmodus.", "Ghidajele nu sunt disponibile în modul grup. Treci la Cuvânt pentru a le folosi.", "Guias não existem no modo grupos. Mude para Palavra para usá-las."}
+    {"Guides are unavailable in chunk mode. Switch to Word to use them.", "Hilfslinien sind im Gruppenmodus nicht verfügbar. Nutze dafür den Wortmodus.", "Ghidajele nu sunt disponibile în modul grup. Treci la Cuvânt pentru a le folosi.", "Guias não existem no modo grupos. Mude para Palavra para usá-las."},
+    {"Book settings", "Bucheinstellungen", "Setările cărții", "Ajustes do livro"}
 };
 }
 std::string_view copy(const ui::Context& ui, Copy key) {

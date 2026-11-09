@@ -10,6 +10,7 @@
 #include "storage/fs/StorageFiles.h"
 #include "storage/fs/StoragePaths.h"
 #include "library/IndexedBook.h"
+#include "library/CoverStore.h"
 #include "storage/migration/Migration.h"
 
 #ifndef RSVP_ON_DEVICE_DOCUMENT_CONVERSION
@@ -108,6 +109,9 @@ std::expected<void, std::error_code> StorageManager::removeBook(std::string_view
     Board::Storage::filesystem().remove(StoragePaths::indexedIndexPathFor(path).c_str());
     Board::Storage::filesystem().remove(StoragePaths::indexedDataPathFor(path).c_str());
     Board::Storage::filesystem().remove(StoragePaths::bookStatePathFor(path).c_str());
+    for (const auto& cover : covers::sourceCandidates(path))
+        Board::Storage::filesystem().remove(cover.c_str());
+    Board::Storage::filesystem().remove(covers::cachePath(path).c_str());
     library_.erase(library_.begin() + index);
     ++bookRevision_;
     return {};

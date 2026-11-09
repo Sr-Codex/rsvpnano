@@ -102,6 +102,8 @@ CompanionApi::OperationResult CompanionApi::startServer() {
         makeRoute("/api/v2/library", HTTP_POST, &CompanionApi::handleLibraryInstall),
         makeRoute("/api/v2/library/{id}", HTTP_DELETE, &CompanionApi::handle<&CompanionApi::deleteLibraryItem>),
         makeRoute("/api/v2/library/{id}/position", HTTP_PUT, &CompanionApi::handle<&CompanionApi::putBookPosition>),
+        makeRoute("/api/v2/library/{id}/cover", HTTP_PUT, &CompanionApi::handle<&CompanionApi::putBookCover>),
+        makeRoute("/api/v2/library/{id}/cover", HTTP_DELETE, &CompanionApi::handle<&CompanionApi::deleteBookCover>),
         makeRoute("/api/v2/library/{id}/language-fonts", HTTP_PUT,
                   &CompanionApi::handle<&CompanionApi::putBookLanguageFonts>),
         makeRoute("/api/v2/themes", HTTP_GET, &CompanionApi::handle<&CompanionApi::getThemes>),

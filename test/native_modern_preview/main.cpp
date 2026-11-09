@@ -6,6 +6,10 @@
 #include <cassert>
 #include "ui/screens/ModernScreens.h"
 #include "ui/screens/LibraryScreen.h"
+#include "library/CoverStore.h"
+#include <fstream>
+#include <iterator>
+#include <map>
 #include "ui/screens/ChaptersScreen.h"
 #include "ui/screens/ModernReaderChrome.h"
 #include "ui/screens/ReaderScreen.h"
@@ -371,6 +375,54 @@ namespace {
         assert(committed>0);std::puts("Page, locator and search: simple header, mode preserved, chrome fully restored, direct drag, explicit jump, previous place, keyboard, results preview and cancel verified.");
     }
 
+    void verifyShelf(Arduino_Canvas& panel,const std::filesystem::path& output) {
+        ui::Context ui(panel);auto theme=ui::themes::defaultTheme();ui.setTheme(theme);ui.setModernPresentation(true);
+        ui.setTouchSource({.surface={640,172},.poll=&poll});
+        // In-memory card with real (public-domain) covers decoded by the firmware path.
+        std::map<std::string,std::vector<uint8_t>> card;
+        const auto readFixture=[](const char* name){std::ifstream in(std::string{"test/fixtures/covers/"}+name,std::ios::binary);
+            return std::vector<uint8_t>{std::istreambuf_iterator<char>(in),{}};};
+        covers::Io io{
+            [&](const std::string& p,size_t max)->std::optional<std::vector<uint8_t>>{auto it=card.find(p);if(it==card.end())return std::nullopt;
+                return std::vector<uint8_t>(it->second.begin(),it->second.begin()+long(std::min(max,it->second.size())));},
+            [&](const std::string& p,std::span<const uint8_t> b){card[p].assign(b.begin(),b.end());return true;},
+            [&](const std::string& p){return card.erase(p)>0;},
+            [&](const std::string& p)->std::optional<size_t>{auto it=card.find(p);if(it==card.end())return std::nullopt;return it->second.size();}};
+        covers::CoverStore store(io);
+        const char* paths[]{"/library/books/dracula.rsvp","/library/books/carmilla.rsvp","/library/books/frankenstein.rsvp",
+                            "/library/books/sem-capa.rsvp","/library/books/walden.rsvp","/library/books/emma.rsvp"};
+        const char* covers[]{"dracula-baseline.jpg","dracula.png","dracula-palette.png",nullptr,"dracula-gray.png","dracula-wide.jpg"};
+        std::vector<BookLibrary::Entry> entries(6);
+        const char* titles[]{"Dracula","Carmilla","Frankenstein","Sem capa ainda","Walden","Emma"};
+        for(int i=0;i<6;++i){entries[size_t(i)].path=paths[i];entries[size_t(i)].title=titles[i];
+            if(covers[i]){card[covers::stem(paths[i])+(std::string_view{covers[i]}.ends_with(".png")?".cover.png":".cover.jpg")]=readFixture(covers[i]);
+                assert(store.generate(paths[i]).has_value());}}
+        std::vector<screens::LibraryItem> items;const uint8_t progress[]{42,0,100,0,12,0};
+        for(int i=0;i<6;++i)items.push_back({&entries[size_t(i)],{},progress[i]});
+        screens::LibraryScreen library;library.setCoverStore(&store);
+        library.setShelf({0,5,4,3,2,1},paths[0]); // reading first, then newest
+        auto screen=screens::Screen::Library;uint32_t now=900000;screens::Action last=screens::Action::None;
+        const auto frame=[&](bool down,int x,int y,uint32_t step=25){contact={down,uint16_t(x),uint16_t(y)};ui.pollTouch(now+=step);
+            ui.beginFrame(static_cast<uint8_t>(screen));last=library.draw(ui,items,now,screen);ui.endFrame();};
+        const auto save=[&](const char* name){auto* file=std::fopen((output/(std::string{name}+".ppm")).c_str(),"wb");assert(file);
+            std::fprintf(file,"P6\n640 172\n255\n");
+            for(int i=0;i<640*172;++i){const auto p=panel.getFramebuffer()[i];const unsigned char rgb[]{static_cast<unsigned char>(((p>>11)&31)*255/31),static_cast<unsigned char>(((p>>5)&63)*255/63),static_cast<unsigned char>((p&31)*255/31)};std::fwrite(rgb,1,3,file);}
+            std::fclose(file);};
+        ui.invalidate();frame(false,0,0);save("library-shelf");
+        // Swipe left -> page 2.
+        frame(true,520,80);for(int x=500;x>=300;x-=40)frame(true,x,80);frame(false,300,80);frame(false,0,0);save("library-shelf-2");
+        // Swipe right -> back to page 1; tap the first cover opens the book being read.
+        frame(true,200,80);for(int x=220;x<=420;x+=40)frame(true,x,80);frame(false,420,80);frame(false,0,0);
+        frame(true,134,80);frame(false,134,80);assert(last==screens::Action::OpenBook && library.selectedIndex()==0);
+        // Long press the third cover -> options sheet.
+        frame(false,0,0);frame(true,382,80);for(int i=0;i<40;++i)frame(true,382,80);frame(false,382,80);frame(false,0,0);save("library-shelf-options");
+        // Cancel closes the sheet.
+        frame(true,474,136);frame(false,474,136);frame(false,0,0);save("library-shelf-after-cancel");
+        // Paper theme.
+        theme=ui::modern::paperTheme();ui.setTheme(theme);ui.invalidate();frame(false,0,0);save("library-shelf-paper");
+        std::puts("Shelf: covers from JPEG/PNG via the firmware decoder, typographic stand-in, reading-first frame, swipe paging, tap-to-open, long-press sheet and both themes rendered.");
+    }
+
     void verifyBookSettings(Arduino_Canvas& panel,const std::filesystem::path& output) {
         ui::Context ui(panel);auto theme=ui::themes::defaultTheme();ui.setTheme(theme);ui.setModernPresentation(true);
         ui.setTouchSource({.surface={640,172},.poll=&poll});
@@ -557,6 +609,7 @@ int main(int argc, char** argv) {
     verifyAppearanceAndFocusRoutes(panel);
     verifyNavigation(panel,std::filesystem::path{argv[1]});
     verifyBookSettings(panel,std::filesystem::path{argv[1]});
+    verifyShelf(panel,std::filesystem::path{argv[1]});
     verifyFilledSliders(panel);
     verifyChunkFrames(panel);
     verifyChunkCenter(panel,std::filesystem::path{argv[1]});

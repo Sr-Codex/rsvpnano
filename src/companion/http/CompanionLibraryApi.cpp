@@ -9,6 +9,7 @@
 #include "board/BoardStorage.h"
 #include "companion/serial/CompanionBufferedRequest.h"
 #include "companion/http/CompanionUpload.h"
+#include "library/CoverStoreSd.h"
 #include "logging/Logger.h"
 #include "reader/ReadingLoop.h"
 #include "storage/fs/StorageFiles.h"
@@ -311,4 +312,45 @@ std::optional<size_t> CompanionApi::findBookIndex(std::string_view id) const {
             return index;
     }
     return std::nullopt;
+}
+
+// Lume covers: PUT stores/replaces the source image (JPEG or PNG) next to the book and drops the
+// thumbnail cache; the library rebuilds it in the background. DELETE returns to the stand-in.
+companion::api::Result<> CompanionApi::putBookCover(httpd_req_t& request) {
+    auto id = routeId(request, "/api/v2/library/", "/cover");
+    if (!id)
+        return std::unexpected(std::move(id.error()));
+    const auto index = findBookIndex(*id);
+    if (!index)
+        return std::unexpected(companion::api::httpError(HTTP_CODE_NOT_FOUND, "book_not_found", "Book not found", "id"));
+    auto body = readBody(request, covers::kMaxUploadBytes, "Cover exceeds 2 MB");
+    if (!body)
+        return std::unexpected(std::move(body.error()));
+    const std::span<const uint8_t> bytes{reinterpret_cast<const uint8_t*>(body->data()), body->size()};
+    const covers::Format format = covers::sniff(bytes);
+    if (format == covers::Format::Unknown)
+        return std::unexpected(companion::api::httpError(HTTP_CODE_BAD_REQUEST, "invalid_field",
+                                                         "Cover must be a JPEG or PNG image", "body"));
+    const std::string bookPath = storage_.books()[*index].path;
+    covers::CoverStore store(covers::sdIo());
+    if (auto stored = store.replaceSource(bookPath, format, bytes); !stored) {
+        ESP_LOGW("companion", "cover %s: %s", bookPath.c_str(), stored.error().c_str());
+        return std::unexpected(companion::api::httpError(HTTP_CODE_INTERNAL_SERVER_ERROR, "storage_error",
+                                                         "Cover could not be saved"));
+    }
+    libraryScreen_.invalidate();
+    return {};
+}
+
+companion::api::Result<> CompanionApi::deleteBookCover(httpd_req_t& request) {
+    auto id = routeId(request, "/api/v2/library/", "/cover");
+    if (!id)
+        return std::unexpected(std::move(id.error()));
+    const auto index = findBookIndex(*id);
+    if (!index)
+        return std::unexpected(companion::api::httpError(HTTP_CODE_NOT_FOUND, "book_not_found", "Book not found", "id"));
+    covers::CoverStore store(covers::sdIo());
+    store.removeFor(storage_.books()[*index].path);
+    libraryScreen_.invalidate();
+    return {};
 }

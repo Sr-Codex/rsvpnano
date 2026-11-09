@@ -121,6 +121,12 @@ namespace StoragePaths {
             return true;
         }
 
+        // Lume cover sidecars: Book.cover.jpg/.jpeg/.png (source) and Book.rcov (thumbnail cache).
+        if (hasExtension(name, ".rcov") || hasExtension(name, ".cover.jpg") || hasExtension(name, ".cover.jpeg")
+            || hasExtension(name, ".cover.png")) {
+            return true;
+        }
+
         return std::ranges::equal(name, "thumbs.db", {}, AsciiText::toLower, AsciiText::toLower)
             || std::ranges::equal(name, "desktop.ini", {}, AsciiText::toLower, AsciiText::toLower);
     }

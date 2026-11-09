@@ -1,4 +1,5 @@
 #include "conversion/epub/EpubConverter.h"
+#include "library/CoverStoreSd.h"
 #include <esp_log.h>
 
 #include <algorithm>
@@ -323,6 +324,21 @@ namespace {
         }
 
         const std::vector<ManifestItem> manifest = parseManifestItems(documents.opfXml, documents.opfBaseDir);
+        // Lume covers: keep the EPUB's cover next to the book unless the user already set one.
+        if (const std::string coverZipPath = EpubPackage::findCoverImagePath(documents.opfXml, manifest);
+            !coverZipPath.empty()) {
+            covers::CoverStore coverStore(covers::sdIo());
+            if (!coverStore.sourceFor(sourcePath)) {
+                std::string coverBytes;
+                if (zip.extractToString(coverZipPath, coverBytes, covers::kMaxUploadBytes)) {
+                    const std::span<const uint8_t> bytes{reinterpret_cast<const uint8_t*>(coverBytes.data()), coverBytes.size()};
+                    if (const auto format = covers::sniff(bytes); format != covers::Format::Unknown) {
+                        if (const auto saved = coverStore.replaceSource(sourcePath, format, bytes); !saved)
+                            ESP_LOGW("epub", "cover not saved: %s", saved.error().c_str());
+                    }
+                }
+            }
+        }
         const std::vector<std::string> readingOrder =
             buildReadingOrder(manifest, documents.opfXml, documents.opfBaseDir, options);
         if (readingOrder.empty()) {

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "library/CoverStoreSd.h"
+
 #include <Arduino.h>
 #include <Preferences.h>
 
@@ -51,6 +53,7 @@ private:
         OnlineDictionary,
         BookSettings,
         DictionaryInstall,
+        Covers,
     };
 
     struct JobUpdate {
@@ -105,6 +108,9 @@ private:
     Board::Power::BatteryState battery_;
     screens::ReaderScreen readerScreen_{Board::Display::gfx(), settingsStore_.settings().reading};
     screens::LibraryScreen libraryScreen_;
+    covers::CoverStore coverStore_{covers::sdIo()};
+    std::string jobCoverPath_;
+    int openAfterCoverJob_ = -1; // book tapped while a thumbnail was being built
     BookSettingsEditor bookSettings_;
     screens::ChaptersScreen chaptersScreen_;
     screens::InterfaceScreen interfaceScreen_;

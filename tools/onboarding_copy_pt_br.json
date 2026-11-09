@@ -275,5 +275,6 @@
   "dictionaryOfflineBody": "Instale pelo Wi-Fi ou copie o pacote para o SD. Mais idiomas estão planejados.",
   "dictionaryOnline": "Buscar online",
   "dictionaryOnlineBody": "Buscar online usa o Wiktionary via Wi-Fi. A palavra só é enviada se você pedir.",
-  "guidesUnavailableChunks": "Guias não existem no modo grupos. Mude para Palavra para usá-las."
+  "guidesUnavailableChunks": "Guias não existem no modo grupos. Mude para Palavra para usá-las.",
+  "shelfBookSettings": "Ajustes do livro"
 }

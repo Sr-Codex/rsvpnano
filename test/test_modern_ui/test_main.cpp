@@ -169,6 +169,7 @@ void test_filled_slider_uses_whole_tile_and_commits_after_drag() {
 }
 
 void test_library_arrows_and_book_settings_preserve_selection() {
+    // Lume shelf (layout A): covers at x = 86, 210, 334, 458 (96 px wide), y = 8..150.
     Fixture f;
     f.screen = screens::Screen::Library;
     screens::LibraryScreen library;
@@ -177,18 +178,30 @@ void test_library_arrows_and_book_settings_preserve_selection() {
     const std::vector<screens::LibraryItem> books{{&a, "Chapter one", 42}, {&b, "Chapter two", 17}};
     const auto draw = [&] { return library.draw(f.ui, books, f.time, f.screen); };
     f.frame(draw);
-    TEST_ASSERT_EQUAL(static_cast<int>(screens::Action::None), static_cast<int>(f.tap(draw, 434, 100)));
+    TEST_ASSERT_EQUAL(static_cast<int>(screens::Action::OpenBook), static_cast<int>(f.tap(draw, 258, 80)));
     TEST_ASSERT_EQUAL(1, library.selectedIndex());
-    f.tap(draw, 434, 100);
+    f.frame(draw);
+    TEST_ASSERT_EQUAL(static_cast<int>(screens::Action::OpenBook), static_cast<int>(f.tap(draw, 134, 80)));
     TEST_ASSERT_EQUAL(0, library.selectedIndex());
-    f.tap(draw, 40, 100);
+    // Empty slots do nothing.
+    f.frame(draw);
+    TEST_ASSERT_EQUAL(static_cast<int>(screens::Action::None), static_cast<int>(f.tap(draw, 506, 80)));
+    // Long press the second cover -> options sheet; "Book settings" keeps that selection.
+    const auto hold = [&](uint16_t x) { for (int i = 0; i < 40; ++i) f.frame(draw, true, x, 80); f.frame(draw, false, x, 80); f.frame(draw); };
+    hold(258);
     TEST_ASSERT_EQUAL(1, library.selectedIndex());
-    TEST_ASSERT_EQUAL(static_cast<int>(screens::Action::OpenBookSettings), static_cast<int>(f.tap(draw, 550, 110)));
+    TEST_ASSERT_EQUAL(static_cast<int>(screens::Action::OpenBookSettings), static_cast<int>(f.tap(draw, 474, 82)));
     f.frame(draw);
     TEST_ASSERT_EQUAL(1, library.selectedIndex());
-    TEST_ASSERT_EQUAL(static_cast<int>(screens::Action::OpenBook), static_cast<int>(f.tap(draw, 550, 68)));
+    // Cancel closes the sheet; open from the sheet opens the held book.
+    hold(134);
+    f.tap(draw, 474, 136);
+    f.frame(draw);
+    TEST_ASSERT_EQUAL(static_cast<int>(screens::Action::OpenBook), static_cast<int>(f.tap(draw, 258, 80)));
     TEST_ASSERT_EQUAL(1, library.selectedIndex());
-    TEST_ASSERT_EQUAL(static_cast<int>(screens::Screen::Library), static_cast<int>(f.screen));
+    hold(134);
+    TEST_ASSERT_EQUAL(static_cast<int>(screens::Action::OpenBook), static_cast<int>(f.tap(draw, 166, 82)));
+    TEST_ASSERT_EQUAL(0, library.selectedIndex());
 }
 
 void test_empty_library_has_no_open_action_and_can_add_books() {

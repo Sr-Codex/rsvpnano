@@ -35,5 +35,8 @@ namespace EpubPackage {
     std::vector<TocEntry> parseNavTocEntries(std::string_view markup, std::string_view tocPath,
                                              std::string_view bookTitle);
     const ManifestItem* findManifestItem(const std::vector<ManifestItem>& items, std::string_view id);
+    // Zip path of the cover image, or empty: EPUB3 properties="cover-image", then EPUB2
+    // <meta name="cover" content="id">, then an image whose id/path mentions "cover".
+    std::string findCoverImagePath(std::string_view opfXml, const std::vector<ManifestItem>& items);
 
 } // namespace EpubPackage

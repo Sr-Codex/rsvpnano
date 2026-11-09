@@ -38,6 +38,7 @@ copy.deviceHint=['Language, storage & updates','Sprache, Speicher & Updates','Li
 copy.displayExplain=['Choose your theme, sleep delay and screensaver. Brightness is in quick controls.','Wähle Farben, Ruhezeit und Bildschirmschoner. Helligkeit ist in der Lesesteuerung.','Alege tema, repausul și economizorul. Luminozitatea e în comenzile rapide.'];
 copy.deviceExplain=['Change the interface language, check storage and update firmware.','Wähle die Menüsprache, prüfe den Speicher und aktualisiere die Firmware.','Schimbă limba interfeței, verifică stocarea și actualizează firmware-ul.'];
 copy.menuLibrary=['Open a book or change its font and language with Book settings. Each book keeps its reading place.','Öffne ein Buch oder ändere Schrift und Sprache in den Bucheinstellungen. Die Lesestelle bleibt gespeichert.','Deschide o carte sau schimbă fontul și limba din setările cărții. Locul lecturii rămâne salvat.'];
+copy.shelfBookSettings=['Book settings','Bucheinstellungen','Setările cărții'];
 // Brazilian Portuguese lives in its own JSON (key -> text) so the Study 19 sources stay untouched.
 const ptBr=JSON.parse(fs.readFileSync(path.join(__dirname,'onboarding_copy_pt_br.json'),'utf8'));
 const missingPtBr=Object.keys(copy).filter(k=>typeof ptBr[k]!=='string'||!ptBr[k].length);

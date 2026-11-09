@@ -84,6 +84,8 @@ private:
     companion::api::Result<std::string> installLibraryItem(httpd_req_t& request);
     companion::api::Result<> deleteLibraryItem(httpd_req_t& request);
     companion::api::Result<> putBookPosition(httpd_req_t& request);
+    companion::api::Result<> putBookCover(httpd_req_t& request);
+    companion::api::Result<> deleteBookCover(httpd_req_t& request);
     companion::api::Result<> putBookLanguageFonts(httpd_req_t& request);
 
     // Themes, fonts, and locales

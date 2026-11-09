@@ -7,6 +7,9 @@
 #include "library/IndexedBook.h"
 #include "library/StorageManager.h"
 #include "library/ReadingProgress.h"
+#include "library/LibraryOrder.h"
+#include "board/BoardStorage.h"
+#include "storage/fs/StorageFiles.h"
 #include "ui/screens/ScreenCommon.h"
 
 namespace screens {
@@ -20,6 +23,32 @@ namespace screens {
     void LibraryScreen::invalidate() {
         items_.clear();
         itemsValid_ = false;
+    }
+
+    namespace {
+        constexpr const char* kOrderPath = "/library/.order";
+        constexpr const char* kOrderTemp = "/library/.order.tmp";
+        constexpr const char* kOrderBackup = "/library/.order.bak.tmp";
+    } // namespace
+
+    void LibraryScreen::updateShelf(StorageManager& storage, const ReadingSession& session, bool reloadOrderFile) {
+        std::vector<std::string> paths;
+        paths.reserve(storage.books().size());
+        for (const auto& book : storage.books()) paths.push_back(book.path);
+        if (reloadOrderFile) {
+            std::vector<std::string> stored;
+            if (const auto text = StorageFiles::readTextFile(Board::Storage::filesystem(), kOrderPath, 256 * 1024))
+                stored = library_order::parse(*text);
+            bool changed = false;
+            knownOrder_ = library_order::reconcile(stored, paths, &changed);
+            if (changed) {
+                const auto written = StorageFiles::writeFileAtomic(Board::Storage::filesystem(), kOrderPath, kOrderTemp,
+                                                                   kOrderBackup, library_order::serialize(knownOrder_));
+                if (!written) Logger::failure("library", "write shelf order", kOrderPath, written.error());
+            }
+        }
+        shelfReadingPath_ = session.sourcePath();
+        shelf_ = library_order::shelf(knownOrder_, paths, shelfReadingPath_);
     }
 
     bool LibraryScreen::needsItems(const StorageManager& storage) const {
@@ -37,6 +66,7 @@ namespace screens {
                 const auto* chapter = session.metadata.chapterAt(session.state.wordIndex);
                 current.chapter = chapter ? chapter->title : std::string{};
             }
+            if (shelfReadingPath_ != session.sourcePath()) updateShelf(storage, session, false);
             return items_;
         }
 
@@ -75,6 +105,16 @@ namespace screens {
             }
 
             items_.push_back(std::move(item));
+        }
+        updateShelf(storage, session, true);
+        pendingCovers_.clear();
+        if (coverStore_) {
+            coverStore_->clearMemory();
+            // Build pages in shelf order: push in reverse so the first visible covers pop first.
+            for (auto it = shelf_.rbegin(); it != shelf_.rend(); ++it) {
+                const auto& path = storage.books()[*it].path;
+                if (coverStore_->needsThumbnail(path)) pendingCovers_.push_back(path);
+            }
         }
         itemsValid_ = true;
         itemsRevision_ = storage.bookRevision();

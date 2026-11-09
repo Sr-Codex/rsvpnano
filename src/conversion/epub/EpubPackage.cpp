@@ -493,4 +493,56 @@ namespace EpubPackage {
         return item == items.end() ? nullptr : &(*item);
     }
 
+
+    namespace {
+        bool isImage(const ManifestItem& item) {
+            const std::string type = toLowerCopy(item.mediaType);
+            return type == "image/jpeg" || type == "image/jpg" || type == "image/png";
+        }
+
+        // Value of attribute `name` inside one tag (`<meta ... >`), quotes ' or ".
+        std::string_view coverTagAttribute(std::string_view tag, std::string_view name) {
+            size_t at = 0;
+            while ((at = tag.find(name, at)) != std::string_view::npos) {
+                const bool boundary = at == 0 || tag[at - 1] == ' ' || tag[at - 1] == '\t' || tag[at - 1] == '\n';
+                size_t eq = at + name.size();
+                while (eq < tag.size() && tag[eq] == ' ') ++eq;
+                if (boundary && eq < tag.size() && tag[eq] == '=') {
+                    size_t q = eq + 1;
+                    while (q < tag.size() && tag[q] == ' ') ++q;
+                    if (q < tag.size() && (tag[q] == '"' || tag[q] == '\'')) {
+                        const size_t end = tag.find(tag[q], q + 1);
+                        if (end != std::string_view::npos) return tag.substr(q + 1, end - q - 1);
+                    }
+                }
+                at += name.size();
+            }
+            return {};
+        }
+    } // namespace
+
+    std::string findCoverImagePath(std::string_view opfXml, const std::vector<ManifestItem>& items) {
+        for (const auto& item : items) { // EPUB3
+            if (!isImage(item)) continue;
+            const std::string props = " " + toLowerCopy(item.properties) + " ";
+            if (props.find(" cover-image ") != std::string::npos) return item.path;
+        }
+        size_t at = 0; // EPUB2 <meta name="cover" content="...">
+        while ((at = opfXml.find("<meta", at)) != std::string_view::npos) {
+            const size_t end = opfXml.find('>', at);
+            if (end == std::string_view::npos) break;
+            const std::string_view tag = opfXml.substr(at, end - at);
+            if (toLowerCopy(coverTagAttribute(tag, "name")) == "cover") {
+                if (const ManifestItem* item = findManifestItem(items, coverTagAttribute(tag, "content")); item && isImage(*item))
+                    return item->path;
+            }
+            at = end;
+        }
+        for (const auto& item : items) { // fallback
+            if (!isImage(item)) continue;
+            if (toLowerCopy(item.id).find("cover") != std::string::npos || toLowerCopy(item.path).find("cover") != std::string::npos)
+                return item.path;
+        }
+        return {};
+    }
 } // namespace EpubPackage

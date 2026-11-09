@@ -35,15 +35,15 @@ def main():
         "ui/screens/regular/InterfaceSettingsScreen.cpp", "ui/screens/InterfaceSettingsScreen.cpp",
         "ui/screens/ModernAppearanceScreen.cpp", "ui/screens/regular/FocusScreen.cpp",
         "focus/FocusTimers.cpp", "focus/FocusSession.cpp",
-        "ui/screens/ModernReaderControls.cpp", "ui/screens/OnboardingCopy.cpp", "ui/screens/OnboardingScreen.cpp", "ui/screens/OnboardingStorageScreen.cpp", "ui/screens/BookUploadScreen.cpp", "ui/screens/TouchCheckScreen.cpp", "drivers/touch/axs15231b_touch/axs15231b_touch.cpp",
+        "ui/screens/ModernReaderControls.cpp", "library/CoverStore.cpp", "library/CoverImage.cpp", "ui/screens/OnboardingCopy.cpp", "ui/screens/OnboardingScreen.cpp", "ui/screens/OnboardingStorageScreen.cpp", "ui/screens/BookUploadScreen.cpp", "ui/screens/TouchCheckScreen.cpp", "drivers/touch/axs15231b_touch/axs15231b_touch.cpp",
     ]
     sources += [str(p.relative_to(PROJECT / "src")) for p in (PROJECT / "src/screensavers").glob("*.cpp")]
     includes = [PROJECT / "test/native_modern_preview", PROJECT / "test/native_watch_preview", PROJECT / "test/native_canvas", PROJECT / "test/support",
-                PROJECT / "src", library, PROJECT / "lib/HarfBuzz/upstream/src",
+                PROJECT / "src", library, PROJECT / ".pio/libdeps/native_test/JPEGDEC/src", PROJECT / "lib/HarfBuzz/upstream/src",
                 PROJECT / "lib/SheenBidi/upstream/Headers", PROJECT / ".pio/libdeps/native_test/glaze/include"]
     archives = [next(args.native_build.glob(f"lib*/lib{name}.a"))
                 for name in ("HarfBuzz", "SheenBidi")]
-    flags = [shutil.which("g++"), "-std=c++23", "-O1", "-funsigned-char", "-ffunction-sections",
+    flags = [shutil.which("g++"), "-std=c++23", "-D__LINUX__", "-O1", "-funsigned-char", "-ffunction-sections",
              "-fdata-sections", "-DGLZ_DEFAULT_OPTIMIZATION_SIZE", "-DGLZ_DISABLE_ALWAYS_INLINE",
              *[f"-I{p}" for p in includes]]
     # Compiler dependency files keep iterative device-layout review incremental.
@@ -51,7 +51,7 @@ def main():
     cache = PROJECT / "build/native-modern-preview" / hashlib.sha256(repr(flags).encode()).hexdigest()[:12]
     cache.mkdir(parents=True, exist_ok=True)
     units = [Path(__file__).with_name("main.cpp"), Path(__file__).with_name("Fixtures.cpp"), Path(__file__).with_name("DictionaryFixture.cpp"), *[PROJECT / "src" / p for p in sources],
-             library / "Arduino_G.cpp", library / "Arduino_GFX.cpp", library / "canvas/Arduino_Canvas.cpp"]
+             PROJECT / ".pio/libdeps/native_test/JPEGDEC/src/JPEGDEC.cpp", library / "Arduino_G.cpp", library / "Arduino_GFX.cpp", library / "canvas/Arduino_Canvas.cpp"]
 
     def compile_unit(source):
         obj = cache / (source.stem + "-" + hashlib.sha256(str(source).encode()).hexdigest()[:10] + ".o")
@@ -69,7 +69,7 @@ def main():
         objects = list(pool.map(compile_unit, units))
     binary = cache / "preview"
     if not binary.exists() or any(p.stat().st_mtime_ns > binary.stat().st_mtime_ns for p in [*objects, *archives]):
-        subprocess.run([flags[0], *map(str, objects), *map(str, archives), "-Wl,--gc-sections", "-o", str(binary)], check=True)
+        subprocess.run([flags[0], *map(str, objects), *map(str, archives), "-Wl,--gc-sections", "-lz", "-o", str(binary)], check=True)
     subprocess.run([str(binary), str(args.output.resolve())], check=True)
     # Lossless screenshots for review; no resampling or synthetic browser text.
     from PIL import Image

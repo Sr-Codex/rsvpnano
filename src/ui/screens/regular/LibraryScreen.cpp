@@ -5,11 +5,13 @@
 #include <charconv>
 #include <climits>
 #include <cstdint>
+#include <cctype>
 #include <cstdlib>
 
 #include "text/AsciiText.h"
 #include "ui/screens/ScreenCommon.h"
 #include "ui/screens/ModernScreens.h"
+#include "ui/screens/OnboardingCopy.h"
 
 namespace screens {
     namespace {
@@ -132,47 +134,138 @@ namespace screens {
 
     } // namespace
 
+    // Lume "estante limpa" (layout A): four covers per page, no titles, no header.
+    // Book being read first (orange frame), then newest added; swipe or tap the dots
+    // to page; tap opens; long press opens the options sheet.
+    Action LibraryScreen::drawShelf(ui::Context& ui, const std::vector<LibraryItem>& items, uint32_t nowMs,
+                                    Screen& screen) {
+        (void)nowMs;
+        using ui::modern::button;
+        using ui::modern::Style;
+        namespace m = modern;
+        constexpr int16_t kW = covers::kThumbWidth, kH = covers::kThumbHeight, kGap = 28, kTop = 8;
+        constexpr int16_t kLeft = (640 - (4 * kW + 3 * kGap)) / 2;
+        const ui::Touch* touch = ui.touch();
+
+        if (items.empty()) {
+            if (const auto action = m::header(ui, ui.text(UiText::Library), screen, Screen::Read, {});
+                action != Action::None) return action;
+            ui.label({16, 52, 408, 60}, ui.text(UiText::NoLibraryItems), 3);
+            if (button(ui, {448, 80, 176, 56}, m::copy(ui, m::Copy::AddBooks), Style::Primary)) screen = Screen::Connections;
+            return Action::None;
+        }
+
+        std::vector<size_t> order = shelf_;
+        if (order.size() != items.size()) { order.resize(items.size()); for (size_t i = 0; i < order.size(); ++i) order[i] = i; }
+
+        // Long-press sheet.
+        if (optionsFor_ >= 0 && size_t(optionsFor_) < items.size()) {
+            const auto& item = items[size_t(optionsFor_)];
+            ui.label({16, 10, 600, 24}, title(item), 15);
+            ui::modern::rule(ui, {0, 43, 640, 1});
+            selectedIndex_ = size_t(optionsFor_);
+            if (button(ui, {16, 58, 300, 48}, m::copy(ui, m::Copy::OpenBook), Style::Primary, item.book != nullptr)) {
+                optionsFor_ = -1; return Action::OpenBook;
+            }
+            if (button(ui, {324, 58, 300, 48}, m::copy(ui, m::Copy::ShelfBookSettings), Style::Secondary, item.book != nullptr)) {
+                optionsFor_ = -1; return Action::OpenBookSettings;
+            }
+            if (button(ui, {16, 114, 300, 44}, "+ " + std::string{m::copy(ui, m::Copy::AddBooks)}, Style::Accent)) {
+                optionsFor_ = -1; screen = Screen::Connections; return Action::None;
+            }
+            if (button(ui, {324, 114, 300, 44}, m::copy(ui, m::Copy::Cancel), Style::Plain)) { optionsFor_ = -1; ui.invalidate(); }
+            return Action::None;
+        }
+
+        const size_t pages = (items.size() + 3) / 4;
+        shelfPage_ = std::min(shelfPage_, pages - 1);
+        if (const int delta = carouselGesture_.update(touch, {0, 0, 640, 172}); delta != 0 && pages > 1)
+            shelfPage_ = ui::rotateIndex(shelfPage_, pages, delta);
+
+        if (button(ui, {0, 0, 44, 40}, "‹", Style::Plain, true, {}, 16)) { screen = Screen::Read; return Action::None; }
+
+        const std::string_view reading = shelfReadingPath_;
+        for (int slot = 0; slot < 4; ++slot) {
+            const size_t pos = shelfPage_ * 4 + size_t(slot);
+            const int16_t x = int16_t(kLeft + slot * (kW + kGap));
+            const ui::Rect area{int16_t(x - 3), int16_t(kTop - 3), int16_t(kW + 6), int16_t(kH + 13)};
+            if (pos >= items.size()) {
+                if (ui.redraw(area, 0x51u + uint32_t(slot), true))
+                    ui.paint(area, [&](Arduino_GFX& gfx, ui::Rect r) { gfx.fillRect(r.x, r.y, r.w, r.h, ui.color(ui::themes::Background)); });
+                continue;
+            }
+            const size_t index = order[pos];
+            const LibraryItem& item = items[index];
+            const std::string_view path = item.book ? std::string_view{item.book->path} : std::string_view{};
+            const auto thumb = coverStore_ && item.book ? coverStore_->thumbnail(path) : nullptr;
+            const bool current = !reading.empty() && path == reading;
+            uint32_t sig = 2166136261u;
+            for (const char c : path) { sig ^= uint8_t(c); sig *= 16777619u; }
+            sig ^= uint32_t(reinterpret_cast<uintptr_t>(thumb.get())) * 31u ^ uint32_t(item.progress) << 8 ^ (current ? 0x80000000u : 0u);
+            if (ui.redraw(area, sig, true)) {
+                ui.paint(area, [&](Arduino_GFX& gfx, ui::Rect) {
+                    gfx.fillRect(area.x, area.y, area.w, area.h, ui.color(ui::themes::Background));
+                    if (thumb) {
+                        gfx.draw16bitRGBBitmap(x, kTop, const_cast<uint16_t*>(thumb->pixels.data()), kW, kH);
+                    } else { // abstract stand-in until (or unless) a cover exists: tone per book, title-like rules
+                        static constexpr uint16_t kTones[]{0x3A4B, 0x5A0C, 0x2C6A, 0x6B29, 0x4228, 0x31A9, 0x7A28, 0x2B0F};
+                        const std::string_view name = title(item);
+                        uint32_t h = 2166136261u; for (const char c : name) { h ^= uint8_t(c); h *= 16777619u; }
+                        gfx.fillRect(x, kTop, kW, kH, kTones[h % 8]);
+                        constexpr uint16_t ink = 0xE71C; // light rules readable on every tone, both themes
+                        gfx.fillRect(x + 14, kTop + 40, kW - 28, 4, ink);
+                        gfx.fillRect(x + 14, kTop + 52, kW - 44, 4, ink);
+                        gfx.fillRect(x + 14, kTop + kH - 30, kW - 60, 2, ink);
+                    }
+                    if (current) {
+                        const uint16_t accent = ui.color(ui::themes::Accent);
+                        gfx.drawRect(x - 3, kTop - 3, kW + 6, kH + 6, accent);
+                        gfx.drawRect(x - 2, kTop - 2, kW + 4, kH + 4, accent);
+                    }
+                    if (item.progress > 0) {
+                        gfx.fillRect(x, kTop + kH + 5, kW, 3, ui.color(ui::themes::ProgressTrack));
+                        gfx.fillRect(x, kTop + kH + 5, int16_t(int32_t(kW) * std::min<int>(item.progress, 100) / 100), 3,
+                                     ui.color(ui::themes::Accent));
+                    }
+                });
+            }
+            const ui::Rect hit{x, kTop, kW, kH};
+            if (touch && hasTouch(*touch, ui::TouchHold) && ui::contains(hit, touch->x, touch->y)) {
+                optionsFor_ = int(index);
+                ui.cancelTouchUntilRelease();
+                ui.invalidate();
+                return Action::None;
+            }
+            if (ui.tap(hit)) {
+                selectedIndex_ = index;
+                return Action::OpenBook;
+            }
+        }
+
+        // Page dots (tap to jump).
+        const ui::Rect dots{220, 158, 200, 14};
+        if (ui.redraw(dots, uint32_t(pages) << 16 | uint32_t(shelfPage_), true)) {
+            ui.paint(dots, [&](Arduino_GFX& gfx, ui::Rect) {
+                gfx.fillRect(dots.x, dots.y, dots.w, dots.h, ui.color(ui::themes::Background));
+                if (pages <= 1) return;
+                const int shown = int(std::min<size_t>(pages, 12));
+                for (int i = 0; i < shown; ++i) {
+                    const int cx = 320 + (i * 2 - (shown - 1)) * 6;
+                    gfx.fillCircle(cx, dots.y + 7, 3, ui.color(size_t(i) == shelfPage_ % 12 ? ui::themes::Accent : ui::themes::ProgressTrack));
+                }
+            });
+        }
+        if (pages > 1 && ui.tap(dots)) shelfPage_ = (shelfPage_ + 1) % pages;
+        return Action::None;
+    }
+
     Action LibraryScreen::draw(ui::Context& ui, const std::vector<LibraryItem>& items, uint32_t nowMs, Screen& screen) {
         (void)nowMs;
         Action result = Action::None;
         const ui::Touch* touch = ui.touch();
         selectedIndex_ = items.empty() ? 0 : std::min(selectedIndex_, items.size() - 1);
-        if (ui.modernPresentation()) {
-            using ui::modern::button;
-            using ui::modern::Style;
-            using ui::modern::Direction;
-            const auto count = std::to_string(items.empty() ? 0 : selectedIndex_ + 1) + " / "
-                             + std::to_string(items.size());
-            if (const auto action = modern::header(ui, ui.text(UiText::Library), screen, Screen::Read, count);
-                action != Action::None) return action;
-            if (items.empty()) {
-                ui.label({16, 52, 408, 60}, ui.text(UiText::NoLibraryItems), 3);
-                ui.label({16, 118, 408, 42}, "Add a book using the companion or USB.", 2, ui::themes::Muted,
-                         ui::TextAlign::Start, 2);
-                if (button(ui, {448, 80, 176, 56}, ui.text(UiText::Add), Style::Primary)) screen = Screen::Connections;
-                return Action::None;
-            }
-            const bool previous = ui::modern::arrow(ui, {16, 56, 56, 104}, Direction::Left, items.size() > 1);
-            const bool next = ui::modern::arrow(ui, {408, 56, 56, 104}, Direction::Right, items.size() > 1);
-            if (previous) selectedIndex_ = selectedIndex_ == 0 ? items.size() - 1 : selectedIndex_ - 1;
-            if (next) selectedIndex_ = (selectedIndex_ + 1) % items.size();
-            const auto& item = items[selectedIndex_];
-            const std::string_view author = item.book == nullptr || item.book->author.empty()
-                                             ? ui.text(UiText::Unknown) : std::string_view{item.book->author};
-            ui.label({84, 48, 312, 72}, title(item), 28, ui::themes::Foreground, ui::TextAlign::Start, 2);
-            ui.label({84, 120, 312, 20}, author, 13, ui::themes::Muted);
-            ui.progress({84, 150, 100, 2}, item.progress);
-            ui.label({194, 139, 202, 24}, std::to_string(item.progress) + "% · " + std::string{item.chapter}, 11,
-                         ui::themes::Muted);
-            ui::modern::rule(ui, {476, 56, 1, 104});
-            if (button(ui, {480, 52, 144, 36}, modern::caption(ui, UiText::Read, "Open book"), Style::Primary, item.book != nullptr))
-                return Action::OpenBook;
-            if (button(ui, {480, 96, 144, 32}, "Book settings", Style::Secondary, item.book != nullptr, {}, 13))
-                return Action::OpenBookSettings;
-            if (button(ui, {480, 136, 144, 28}, "+ " + std::string{ui.text(UiText::Add)}, Style::Accent))
-                screen = Screen::Connections;
-            return Action::None;
-        }
+        if (ui.modernPresentation())
+            return drawShelf(ui, items, nowMs, screen);
         if (const Action action = detail::navigation(ui, Screen::Library, screen); action != Action::None) {
             result = action;
         }
