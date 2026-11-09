@@ -533,6 +533,10 @@ void CompanionSerial::dispatchRequest(companion::BufferedRequest& buffered) {
         sendEmpty(api_.putBookPosition(request));
     else if (method == "PUT" && resourcePath(path, "/api/v2/library/", "/language-fonts"))
         sendEmpty(api_.putBookLanguageFonts(request));
+    else if (method == "PUT" && resourcePath(path, "/api/v2/library/", "/cover"))
+        sendEmpty(api_.putBookCover(request));
+    else if (method == "DELETE" && resourcePath(path, "/api/v2/library/", "/cover"))
+        sendEmpty(api_.deleteBookCover(request));
     else if (method == "DELETE" && resourcePath(path, "/api/v2/themes/"))
         sendEmpty(api_.deleteTheme(request));
     else if (method == "DELETE" && resourcePath(path, "/api/v2/fonts/"))
