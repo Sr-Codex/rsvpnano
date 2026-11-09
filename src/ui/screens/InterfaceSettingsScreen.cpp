@@ -8,9 +8,10 @@ namespace screens {
         std::string_view nextLocale(const locales::Catalog& catalog, std::string_view current) {
             if(current=="en")return "de";
             if(current=="de")return "ro";
-            bool returnNext = current == "ro";
+            if(current=="ro")return "pt-BR";
+            bool returnNext = current == "pt-BR";
             for (const auto& pack: catalog) {
-                if(pack.locale=="en"||pack.locale=="de"||pack.locale=="ro")continue;
+                if(pack.locale=="en"||pack.locale=="de"||pack.locale=="ro"||pack.locale=="pt-BR")continue;
                 if (returnNext)
                     return pack.locale;
                 returnNext = pack.locale == current;
@@ -21,7 +22,7 @@ namespace screens {
     } // namespace
 
     void InterfaceScreen::cycleLanguage(ui::Context& ui, settings::InterfaceSettings& config) {
-        config.locale = !languages_ ? (config.locale=="en"?"de":config.locale=="de"?"ro":"en")
+        config.locale = !languages_ ? (config.locale=="en"?"de":config.locale=="de"?"ro":config.locale=="ro"?"pt-BR":"en")
                                    : std::string{nextLocale(*languages_, config.locale)};
         ui.setLocale(config.locale);
     }

@@ -28,7 +28,7 @@ def classify(n):
  return 'system'
 def title(n):
  if n in TITLES:return TITLES[n]
- m=re.fullmatch(r'intro-(en|de|ro)-(\d+)',n)
+ m=re.fullmatch(r'intro-(en|de|ro|pt-BR)-(\d+)',n)
  if m:return 'Introduction · '+INTRO[int(m[2])]+' · '+m[1].upper()
  return n.replace('-',' ').capitalize()
 def route(g,n):

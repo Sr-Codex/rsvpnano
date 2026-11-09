@@ -141,8 +141,8 @@ Action OnboardingScreen::draw(ui::Context& ui,settings::DeviceSettings& settings
     if(step_==0){
         ui.label({16,50,310,68},t(C::WelcomeTitle),26,Foreground,ui::TextAlign::Start,2);
         ui.label({16,122,310,40},t(C::WelcomeBody),13,Muted,ui::TextAlign::Start,3);
-        constexpr std::string_view languages[]{"en","de","ro"},names[]{"English","Deutsch","Română"};
-        for(uint8_t i=0;i<3;++i)if(button(ui,{int16_t(350+i*94),54,88,42},names[i],settings.interface.locale==languages[i]?Style::Accent:Style::Secondary,true,{},13)){
+        constexpr std::string_view languages[]{"en","de","ro","pt-BR"},names[]{"English","Deutsch","Română","Português"};
+        for(uint8_t i=0;i<4;++i)if(button(ui,{int16_t(340+i*74),54,70,42},names[i],settings.interface.locale==languages[i]?Style::Accent:Style::Secondary,true,{},11)){
             settings.interface.locale=languages[i];ui.setLocale(languages[i]);settingsChanged_=true;loadSample(ui,nowMs);
         }
         if(button(ui,{350,116,282,44},t(C::ShowMe),Style::Primary)){

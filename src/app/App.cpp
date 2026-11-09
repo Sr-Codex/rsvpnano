@@ -1303,7 +1303,7 @@ void App::loadAppearanceSettings() {
     // The modern introduction ships these translations in flash. An empty SD
     // locale directory must not undo the language selected on Welcome/reboot.
     const bool bundledModernLocale=screens::modern::enabled(immediateUi_.width(),immediateUi_.height(),screens::Screen::Onboarding)
-        &&(current.interface.locale=="de"||current.interface.locale=="ro");
+        &&(current.interface.locale=="de"||current.interface.locale=="ro"||current.interface.locale=="pt-BR");
     if (!bundledModernLocale && current.interface.locale != Localization::kDefaultLocale
         && !locales::findPackForLocale(localeCatalog_, current.interface.locale)) {
         current.interface.locale = Localization::kDefaultLocale;

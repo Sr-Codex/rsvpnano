@@ -116,7 +116,7 @@ namespace {
         ui::Context ui(panel);ui.setModernPresentation(true);
         ui.setTouchSource({.surface={640,172},.poll=&poll});
         screens::InterfaceScreen display;settings::InterfaceSettings config;
-        for (auto language : {"de", "ro", "en"}) {
+        for (auto language : {"de", "ro", "pt-BR", "en"}) {
             display.cycleLanguage(ui,config);
             assert(config.locale==language && ui.locale()==language);
         }
@@ -732,7 +732,7 @@ int main(int argc, char** argv) {
         ui.beginFrame(static_cast<uint8_t>(screens::Screen::Onboarding),intro.surface());
         const auto result=intro.draw(ui,onboarding,introNow);ui.endFrame();return result;
     };
-    for(const auto locale:{"en","de","ro"}){
+    for(const auto locale:{"en","de","ro","pt-BR"}){
         ui.setTheme(theme);ui.setLocale(locale);onboarding.interface.locale=locale;intro.begin(ui,onboarding,0);
         for(int step=0;step<12;++step){introFrame(false,0,0);
             const std::vector<uint16_t> prior(panel.getFramebuffer(),panel.getFramebuffer()+640*172);
@@ -757,7 +757,7 @@ int main(int argc, char** argv) {
     int paletteIndex=0;
     for(const auto palette:{theme,ui::modern::paperTheme()}){
         ui.setTheme(palette);
-        for(const auto locale:{"en","de","ro"}){
+        for(const auto locale:{"en","de","ro","pt-BR"}){
             ui.setLocale(locale);onboarding.interface.locale=locale;
             const auto prefix=std::string{"setup-"}+std::to_string(paletteIndex)+"-"+locale;
             for(const auto state:{S::Checking,S::Ready,S::Unavailable,S::FoldersFailed,S::SaveFailed,S::TimedOut}){
