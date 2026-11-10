@@ -200,7 +200,7 @@ namespace screens {
         bool breakVisible() const { return manualActive_ && session_.phase() != focus::Phase::Focus
                                                     && session_.phase() != focus::Phase::PausedFocus; }
         std::string badge(uint32_t nowMs) const;
-
+        const focus::Session& session() const { return session_; }   // so leitura (App conta o foco no Tempo)
 
     private:
         Action drawModern(ui::Context& ui, uint32_t nowMs, Screen& screen);

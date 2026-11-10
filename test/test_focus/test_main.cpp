@@ -160,8 +160,24 @@ void test_manual_focus_wraparound_and_stop() {
     TEST_ASSERT_FALSE(s.consumeCompletionCue());
 }
 
+void test_focus_completions_count_only_finished_focus_phases() {
+    focus::Session s;
+    s.beginManual(shortTimer(1), 0);
+    TEST_ASSERT_EQUAL_UINT32(0, s.focusCompletions());
+    TEST_ASSERT_EQUAL_UINT16(1, s.focusMinutes());
+    s.update(60000, focus::Orientation::Unknown);   // foco acabou -> pausa
+    TEST_ASSERT_EQUAL_UINT32(1, s.focusCompletions());
+    s.update(120000, focus::Orientation::Unknown);  // pausa acabou: nao conta
+    TEST_ASSERT_EQUAL_UINT32(1, s.focusCompletions());
+    s.resume(130000);
+    s.update(140000, focus::Orientation::Unknown);
+    s.stop();                                       // parar no meio: nao conta
+    TEST_ASSERT_EQUAL_UINT32(1, s.focusCompletions());
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
+    RUN_TEST(test_focus_completions_count_only_finished_focus_phases);
     RUN_TEST(test_manual_focus_ignores_orientation_and_waits_after_each_break);
     RUN_TEST(test_manual_focus_wraparound_and_stop);
     RUN_TEST(test_focus_config_round_trip_and_validation);

@@ -124,6 +124,8 @@ private:
     Preferences prefs_;
     screens::FocusScreen focusScreen_;
     screens::TempoScreen tempoScreen_;
+    tempo::RastreadorLeitor focoLeitor_;   // foco do leitor contado no Tempo (App::contarFocoLeitor)
+    void contarFocoLeitor(uint32_t nowMs);
     screens::OnboardingScreen onboardingScreen_;
     screens::TouchCheckScreen touchCheckScreen_;
     dictionary::Dictionary dictionary_;

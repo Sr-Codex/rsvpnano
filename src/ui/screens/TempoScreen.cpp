@@ -595,6 +595,24 @@ namespace screens {
         fase_ = Fase::Nenhuma;
     }
 
+    bool TempoScreen::registrarFocoLeitor(uint32_t nowMs, fs::FS* filesystem, const tempo::RodadaLeitor& rodada,
+                                          std::string_view tituloLivro) {
+        if (filesystem == nullptr) return false;   // sem SD: nao grava (e nao quebra)
+        if (!carregado_) carregar(filesystem, true, nowMs);
+        garantirDia(nowMs);
+        const auto agora = tempo::agora(nowMs);
+        const std::string data = agora.valida ? tempo::textoData(agora.data) : std::string{};
+        const bool batalhaAtiva = battleActive() || fase_ == Fase::Reflexao;
+        const auto evento = tempo::liquidarFocoLeitor(estado_, rodada, batalhaAtiva, tituloLivro, data, horaTexto(agora));
+        if (!evento) return false;
+        TempoStorage::saveState(*filesystem, estado_);
+        if (agora.valida) {
+            TempoStorage::appendLog(*filesystem, agora.data, *evento);
+            TempoStorage::recordBattle(*filesystem, *evento, estado_.streak);   // resumo.json do Perfil
+        }
+        return true;
+    }
+
     bool TempoScreen::tick(uint32_t nowMs, fs::FS* filesystem) {
         if (fase_ == Fase::Descanso) {
             if (int64_t(tempo::ms(nowMs)) - int64_t(descansoInicioMs_) >= descansoMs_) {

@@ -6,6 +6,7 @@
 #include <functional>
 
 #include "storage/tempo/TempoStorage.h"
+#include "tempo/FocoLeitor.h"
 #include "tempo/Progressao.h"
 #include "tempo/Relogio.h"
 #include "ui/Rgb565.h"
@@ -476,7 +477,8 @@ namespace screens {
         for (int i = 0; i < kVisiveis && rolagem_ + i < total; ++i) {
             const auto& e = hoje_[size_t(rolagem_ + i)];
             const int y = 24 + i * 22;
-            std::string atividade = e.projetoId.empty() ? "Foco livre" + (e.categoria.empty() ? std::string{} : " · " + e.categoria) : e.projeto;
+            std::string atividade = e.origem == tempo::kOrigemLeitor ? "Leitura · " + (e.projeto.empty() ? std::string{"livro"} : e.projeto)
+                                  : e.projetoId.empty() ? "Foco livre" + (e.categoria.empty() ? std::string{} : " · " + e.categoria) : e.projeto;
             b.texto({16, y + 2, 44, 14}, e.hora.size() >= 5 ? e.hora.substr(0, 5) : std::string{"--:--"}, 10, cMudo);
             b.texto({64, y, 270, 18}, atividade, 12, cTexto);
             b.texto({340, y + 2, 62, 14}, e.focadoMin >= 60 ? horaMin(e.focadoMin) : std::to_string(e.focadoMin) + " min", 10, cMudo, TextAlign::Right);

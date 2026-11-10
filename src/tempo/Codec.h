@@ -70,6 +70,8 @@ namespace tempo {
         double cr = 0.0;
         double xp = 0.0;
         bool perfeita = false;   // vitoria sem nenhuma distracao (lume.5; logs antigos nao tem)
+        std::string origem;      // "" = batalha do Tempo; "leitor" = foco do leitor (logs antigos nao tem)
+        int palavras = 0;        // origem "leitor": palavras avancadas no periodo (logs antigos nao tem)
     };
 
     std::string linhaLog(const EventoLog& evento);   // 1 linha JSON terminada em '\n'

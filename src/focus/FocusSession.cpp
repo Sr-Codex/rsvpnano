@@ -49,6 +49,7 @@ namespace focus {
                 return;
             completionCuePending_ = true;
             if (phase_ == Phase::Focus) {
+                ++focusCompletions_;
                 // Every round ends with a break. Reading cannot restart on its own.
                 startPhase(Phase::Break, nowMs, Orientation::Unknown);
             } else {
@@ -149,6 +150,8 @@ namespace focus {
     }
 
     void Session::finishPhase(Orientation orientation) {
+        if (phase_ == Phase::Focus)
+            ++focusCompletions_;
         if (phase_ == Phase::Focus && round_ >= rounds_) {
             phase_ = Phase::Complete;
             durationMs_ = 0;

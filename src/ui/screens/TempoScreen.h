@@ -3,9 +3,11 @@
 #include <FS.h>
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "tempo/Codec.h"
+#include "tempo/FocoLeitor.h"
 #include "tempo/Motor.h"
 #include "tempo/Sessao.h"
 #include "ui/screens/ModernScreens.h"
@@ -64,6 +66,11 @@ namespace screens {
         void back(uint32_t nowMs, Screen& screen, fs::FS* filesystem);   // PWR curto
         // Recarrega so a lista de projetos do SD (apos a sync do TickTick). Ignorado durante preparo/batalha/reflexao.
         void recarregarProjetos(fs::FS* filesystem);
+        // Foco do leitor (src/focus/): liquida uma rodada como batalha de Foco livre em Leitura (sem reflexao).
+        // Chamar fora do desenho. Nao liquida se ha batalha/reflexao do Tempo em curso (sem dupla contagem).
+        // Devolve true se liquidou e gravou.
+        bool registrarFocoLeitor(uint32_t nowMs, fs::FS* filesystem, const tempo::RodadaLeitor& rodada,
+                                 std::string_view tituloLivro);
         bool battleActive() const { return fase_ == Fase::Lutando || fase_ == Fase::Pausada || fase_ == Fase::Descanso; }
         uint8_t surface() const {
             return static_cast<uint8_t>(static_cast<uint8_t>(fase_) * 4 + (distraido_ ? 1 : 0) + (overtime_ ? 2 : 0)

@@ -7,6 +7,7 @@
 #include <string>
 
 #include "tempo/Codec.h"
+#include "tempo/FocoLeitor.h"
 #include "tempo/Motor.h"
 #include "tempo/Parametros.h"
 #include "tempo/Perfil.h"
@@ -1122,6 +1123,211 @@ void test_perfil_proxima_conquista_e_contagem() {
     TEST_ASSERT_EQUAL_INT(1, proximaConquista(c));
 }
 
+// ------------------------------------------------------------------ Foco do leitor -> Tempo (lume.7)
+namespace {
+    EntradaFocoLeitor EL(FaseLeitor fase, uint32_t ms, uint32_t concluidas = 0, uint32_t palavra = 0, int plan = 25) {
+        EntradaFocoLeitor e;
+        e.fase = fase;
+        e.agoraMs = ms;
+        e.concluidas = concluidas;
+        e.palavra = palavra;
+        e.planejadoMin = plan;
+        return e;
+    }
+    constexpr uint32_t kMin = 60000;
+
+    RodadaLeitor rodadaCheia(int min = 25) {
+        RodadaLeitor rod;
+        rod.planejadoMin = min;
+        rod.focadoMin = min;
+        rod.concluida = true;
+        return rod;
+    }
+}
+
+void test_leitor_rodada_concluida_sem_pausa_e_perfeita() {
+    RastreadorLeitor r;
+    TEST_ASSERT_FALSE(r.observar(EL(FaseLeitor::Foco, 1000, 0, 100)).has_value());
+    TEST_ASSERT_FALSE(r.observar(EL(FaseLeitor::Foco, 1000 + 10 * kMin, 0, 2100)).has_value());
+    const auto rod = r.observar(EL(FaseLeitor::Fora, 1000 + 25 * kMin, 1, 5100));
+    TEST_ASSERT_TRUE(rod.has_value());
+    TEST_ASSERT_TRUE(rod->concluida);
+    TEST_ASSERT_EQUAL_INT(25, rod->focadoMin);
+    TEST_ASSERT_EQUAL_INT(0, rod->pausas);
+    TEST_ASSERT_EQUAL_UINT32(5000, rod->palavras);
+    TEST_ASSERT_FALSE(r.aberta());
+
+    Estado e;
+    abrirDia(e, D(2026, 11, 10));
+    const auto ev = liquidarFocoLeitor(e, *rod, false, "Dom Casmurro", "2026-11-10", "09:00:00");
+    TEST_ASSERT_TRUE(ev.has_value());
+    // 25 min de Leitura perfeita: cr = 25*0,20*1,25 = 6,25 ; XP = 25*1,5*1,25 = 46,875
+    NEAR(6.25, ev->cr);
+    NEAR(46.875, ev->xp);
+    TEST_ASSERT_TRUE(ev->perfeita);
+    TEST_ASSERT_EQUAL_STRING("vitoria", ev->resultado.c_str());
+    TEST_ASSERT_EQUAL_STRING("Leitura", ev->categoria.c_str());
+    TEST_ASSERT_EQUAL_STRING("leitor", ev->origem.c_str());
+    TEST_ASSERT_EQUAL_STRING("Dom Casmurro", ev->projeto.c_str());
+    TEST_ASSERT_TRUE(ev->projetoId.empty());
+    TEST_ASSERT_EQUAL_INT(5000, ev->palavras);
+    NEAR(6.25, e.saldo);
+    NEAR(46.875, e.xpTotal);
+    TEST_ASSERT_EQUAL_INT(25, e.dia.fochoPagoMin);
+    TEST_ASSERT_EQUAL_INT(25, e.dia.fochoValidoMin);
+}
+
+void test_leitor_pausa_tira_perfeita_mas_nao_vira_fuga() {
+    RastreadorLeitor r;
+    r.observar(EL(FaseLeitor::Foco, 0));
+    r.observar(EL(FaseLeitor::Foco, 10 * kMin));
+    r.observar(EL(FaseLeitor::Pausado, 10 * kMin + 50));
+    r.observar(EL(FaseLeitor::Pausado, 40 * kMin));          // 30 min parado: nao conta
+    r.observar(EL(FaseLeitor::Foco, 40 * kMin + 50));
+    const auto rod = r.observar(EL(FaseLeitor::Fora, 55 * kMin, 1));
+    TEST_ASSERT_TRUE(rod.has_value());
+    TEST_ASSERT_EQUAL_INT(1, rod->pausas);
+    TEST_ASSERT_TRUE(rod->concluida);
+    Estado e;
+    abrirDia(e, D(2026, 11, 10));
+    const auto ev = liquidarFocoLeitor(e, *rod, false, "Livro", "2026-11-10", "09:00:00");
+    TEST_ASSERT_TRUE(ev.has_value());
+    TEST_ASSERT_FALSE(ev->perfeita);
+    TEST_ASSERT_EQUAL_STRING("vitoria", ev->resultado.c_str());
+    NEAR(5.0, ev->cr);      // 25 * 0,20 sem bonus
+    NEAR(37.5, ev->xp);     // 25 * 1,5 sem bonus
+}
+
+void test_leitor_tempo_pausado_nao_conta_em_parada_parcial() {
+    RastreadorLeitor r;
+    r.observar(EL(FaseLeitor::Foco, 0));
+    r.observar(EL(FaseLeitor::Foco, 5 * kMin));
+    r.observar(EL(FaseLeitor::Pausado, 5 * kMin + 10));
+    r.observar(EL(FaseLeitor::Pausado, 60 * kMin));
+    const auto rod = r.observar(EL(FaseLeitor::Fora, 60 * kMin + 10));
+    TEST_ASSERT_TRUE(rod.has_value());
+    TEST_ASSERT_EQUAL_INT(5, rod->focadoMin);
+    TEST_ASSERT_FALSE(rod->concluida);
+}
+
+void test_leitor_parar_no_meio_liquida_minutos_parciais_como_fuga() {
+    RastreadorLeitor r;
+    r.observar(EL(FaseLeitor::Foco, 0, 0, 10));
+    r.observar(EL(FaseLeitor::Foco, 7 * kMin + 30000, 0, 910));
+    const auto rod = r.observar(EL(FaseLeitor::Fora, 7 * kMin + 40000, 0, 920));   // stop(): sem conclusao
+    TEST_ASSERT_TRUE(rod.has_value());
+    TEST_ASSERT_FALSE(rod->concluida);
+    TEST_ASSERT_EQUAL_INT(7, rod->focadoMin);
+    TEST_ASSERT_EQUAL_UINT32(910, rod->palavras);
+    Estado e;
+    abrirDia(e, D(2026, 11, 10));
+    const auto ev = liquidarFocoLeitor(e, *rod, false, "Livro", "2026-11-10", "09:00:00");
+    TEST_ASSERT_TRUE(ev.has_value());
+    TEST_ASSERT_EQUAL_STRING("fuga", ev->resultado.c_str());
+    NEAR(1.4, ev->cr);     // 7 * 0,20, leitura da credito mesmo na fuga (sem bonus)
+    NEAR(10.5, ev->xp);    // 7 * 1,5
+    TEST_ASSERT_EQUAL_INT(7, e.dia.fochoPagoMin);
+    TEST_ASSERT_EQUAL_INT(0, e.dia.fochoValidoMin);
+}
+
+void test_leitor_menos_de_um_minuto_nao_liquida() {
+    RastreadorLeitor r;
+    r.observar(EL(FaseLeitor::Foco, 0));
+    const auto rod = r.observar(EL(FaseLeitor::Fora, 40000));
+    TEST_ASSERT_TRUE(rod.has_value());
+    TEST_ASSERT_EQUAL_INT(0, rod->focadoMin);
+    Estado e;
+    abrirDia(e, D(2026, 11, 10));
+    TEST_ASSERT_FALSE(liquidarFocoLeitor(e, *rod, false, "Livro", "2026-11-10", "09:00:00").has_value());
+    NEAR(0.0, e.xpTotal);
+}
+
+void test_leitor_intervalo_nao_abre_rodada_e_cada_rodada_liquida_separado() {
+    RastreadorLeitor r;
+    TEST_ASSERT_FALSE(r.observar(EL(FaseLeitor::Fora, 0)).has_value());      // esperando foco
+    r.observar(EL(FaseLeitor::Foco, 1000));
+    TEST_ASSERT_TRUE(r.observar(EL(FaseLeitor::Fora, 1000 + 25 * kMin, 1)).has_value());   // foco acabou -> pausa
+    TEST_ASSERT_FALSE(r.observar(EL(FaseLeitor::Fora, 1000 + 30 * kMin, 1)).has_value());  // break: nada
+    TEST_ASSERT_FALSE(r.aberta());
+    r.observar(EL(FaseLeitor::Foco, 1000 + 31 * kMin, 1));                   // 2a rodada
+    const auto seg = r.observar(EL(FaseLeitor::Fora, 1000 + 56 * kMin, 2));
+    TEST_ASSERT_TRUE(seg.has_value());
+    TEST_ASSERT_EQUAL_INT(25, seg->focadoMin);
+}
+
+void test_leitor_conclusao_com_foco_ainda_ativo_fecha_e_reabre() {
+    RastreadorLeitor r;
+    r.observar(EL(FaseLeitor::Foco, 0));
+    TEST_ASSERT_TRUE(r.observar(EL(FaseLeitor::Foco, 25 * kMin, 1)).has_value());
+    TEST_ASSERT_FALSE(r.aberta());
+    r.observar(EL(FaseLeitor::Foco, 25 * kMin + 10, 1));
+    TEST_ASSERT_TRUE(r.aberta());
+}
+
+void test_leitor_anti_dupla_contagem_com_batalha_do_tempo_ativa() {
+    const RodadaLeitor rod = rodadaCheia();
+    TEST_ASSERT_FALSE(podeLiquidarLeitor(true));
+    TEST_ASSERT_TRUE(podeLiquidarLeitor(false));
+    Estado e;
+    abrirDia(e, D(2026, 11, 10));
+    TEST_ASSERT_FALSE(liquidarFocoLeitor(e, rod, true, "Livro", "2026-11-10", "09:00:00").has_value());
+    NEAR(0.0, e.saldo);
+    NEAR(0.0, e.xpTotal);
+    TEST_ASSERT_EQUAL_INT(0, e.dia.fochoPagoMin);
+}
+
+void test_leitor_leitura_da_creditos_e_nunca_por_prazer() {
+    const auto in = paraEntradaBatalha(rodadaCheia());
+    TEST_ASSERT_TRUE(in.categoria == Categoria::Leitura);
+    TEST_ASSERT_FALSE(in.porPrazer);
+    Estado e;
+    abrirDia(e, D(2026, 11, 10));
+    TEST_ASSERT_TRUE(liquidarBatalha(e, in).cr > 0.0);
+}
+
+void test_leitor_titulo_vazio_e_longo() {
+    const RodadaLeitor rod = rodadaCheia();
+    Estado e;
+    abrirDia(e, D(2026, 11, 10));
+    TEST_ASSERT_EQUAL_STRING("Leitura", liquidarFocoLeitor(e, rod, false, "", "2026-11-10", "09:00:00")->projeto.c_str());
+    const std::string longo(300, 'a');
+    TEST_ASSERT_TRUE(liquidarFocoLeitor(e, rod, false, longo, "2026-11-10", "09:00:00")->projeto.size() <= 80);
+}
+
+void test_leitor_evento_ida_e_volta_no_log_e_logs_antigos_continuam_legiveis() {
+    RodadaLeitor rod = rodadaCheia();
+    rod.palavras = 4321;
+    Estado e;
+    abrirDia(e, D(2026, 11, 10));
+    const auto ev = liquidarFocoLeitor(e, rod, false, "Ensaio sobre a Cegueira", "2026-11-10", "09:00:00");
+    EventoLog lido;
+    TEST_ASSERT_TRUE(lerLinhaLog(linhaLog(*ev), lido));
+    TEST_ASSERT_EQUAL_STRING("leitor", lido.origem.c_str());
+    TEST_ASSERT_EQUAL_INT(4321, lido.palavras);
+    TEST_ASSERT_EQUAL_STRING("Ensaio sobre a Cegueira", lido.projeto.c_str());
+
+    // log antigo (sem origem/palavras/perfeita) continua legivel, com padroes
+    EventoLog velho;
+    TEST_ASSERT_TRUE(lerLinhaLog(
+        R"({"data":"2026-11-01","hora":"08:00:00","tipo":"batalha","projeto":"Foco livre","categoria":"Estudo","resultado":"vitoria","planejadoMin":25,"focadoMin":25,"cr":10,"xp":30})",
+        velho));
+    TEST_ASSERT_TRUE(velho.origem.empty());
+    TEST_ASSERT_EQUAL_INT(0, velho.palavras);
+    TEST_ASSERT_EQUAL_INT(25, velho.focadoMin);
+}
+
+void test_leitor_resumo_conta_leitura_como_foco_livre() {
+    Estado e;
+    abrirDia(e, D(2026, 11, 10));
+    const auto ev = liquidarFocoLeitor(e, rodadaCheia(), false, "Livro", "2026-11-10", "09:00:00");
+    Resumo res;
+    registrarEvento(res, *ev, e.streak);
+    TEST_ASSERT_EQUAL_INT(1, res.batalhas);
+    TEST_ASSERT_EQUAL_INT(25, res.focoLivreMin);
+    TEST_ASSERT_EQUAL_INT(2, chipDoEvento(*ev));   // chip Leitura
+}
+
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_datas);
@@ -1184,5 +1390,17 @@ int main(int, char**) {
     RUN_TEST(test_perfil_madrugador_5_dias_antes_das_7h);
     RUN_TEST(test_perfil_dia_perfeito_exige_todas_perfeitas_e_2h);
     RUN_TEST(test_perfil_proxima_conquista_e_contagem);
+    RUN_TEST(test_leitor_rodada_concluida_sem_pausa_e_perfeita);
+    RUN_TEST(test_leitor_pausa_tira_perfeita_mas_nao_vira_fuga);
+    RUN_TEST(test_leitor_tempo_pausado_nao_conta_em_parada_parcial);
+    RUN_TEST(test_leitor_parar_no_meio_liquida_minutos_parciais_como_fuga);
+    RUN_TEST(test_leitor_menos_de_um_minuto_nao_liquida);
+    RUN_TEST(test_leitor_intervalo_nao_abre_rodada_e_cada_rodada_liquida_separado);
+    RUN_TEST(test_leitor_conclusao_com_foco_ainda_ativo_fecha_e_reabre);
+    RUN_TEST(test_leitor_anti_dupla_contagem_com_batalha_do_tempo_ativa);
+    RUN_TEST(test_leitor_leitura_da_creditos_e_nunca_por_prazer);
+    RUN_TEST(test_leitor_titulo_vazio_e_longo);
+    RUN_TEST(test_leitor_evento_ida_e_volta_no_log_e_logs_antigos_continuam_legiveis);
+    RUN_TEST(test_leitor_resumo_conta_leitura_como_foco_livre);
     return UNITY_END();
 }

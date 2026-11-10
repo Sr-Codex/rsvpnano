@@ -137,6 +137,24 @@ void App::begin() {
     ESP_LOGI("startup", "ready");
 }
 
+// Foco do leitor -> Tempo: cada fase de foco (concluida ou interrompida) vira uma batalha de Foco livre em Leitura.
+// Roda no update (fora do desenho); sem SD montado nao grava.
+void App::contarFocoLeitor(uint32_t nowMs) {
+    const auto& sessao = focusScreen_.session();
+    tempo::EntradaFocoLeitor entrada;
+    const auto fase = sessao.phase();
+    entrada.fase = fase == focus::Phase::Focus ? tempo::FaseLeitor::Foco
+                 : fase == focus::Phase::PausedFocus ? tempo::FaseLeitor::Pausado : tempo::FaseLeitor::Fora;
+    entrada.concluidas = sessao.focusCompletions();
+    entrada.planejadoMin = sessao.focusMinutes();
+    entrada.agoraMs = nowMs;
+    entrada.palavra = readerScreen_.session.state.wordIndex;
+    if (const auto rodada = focoLeitor_.observar(entrada)) {
+        tempoScreen_.registrarFocoLeitor(nowMs, storage_.mounted() ? &Board::Storage::filesystem() : nullptr, *rodada,
+                                         ReadingProgress::title(readerScreen_.session, storage_));
+    }
+}
+
 void App::update(uint32_t nowMs) {
     if (focusScreen_.active()) {
         if (focusScreen_.update(nowMs)) Board::Audio::beep();
@@ -146,6 +164,7 @@ void App::update(uint32_t nowMs) {
             screen_ = screens::Screen::FocusSession;
         }
     }
+    contarFocoLeitor(nowMs);
     if(onboardingJobActive()){
         onboardingScreen_.update(nowMs);
         if(screen_!=screens::Screen::Onboarding || !onboardingScreen_.active()
@@ -1578,6 +1597,7 @@ void App::powerOff(uint32_t nowMs) {
     if (companionApi_.active())
         companionApi_.end();
     focusScreen_.close();
+    contarFocoLeitor(nowMs);   // desligar no meio de um foco: liquida os minutos ja focados
     ReadingProgress::save(readerScreen_.session, prefs_, true, nowMs);
     ReadingProgress::mirror(readerScreen_.session, readerScreen_.store);
     ReadingLoop::pause(readerScreen_.session);

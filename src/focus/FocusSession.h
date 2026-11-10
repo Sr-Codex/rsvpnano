@@ -44,6 +44,13 @@ namespace focus {
         uint32_t remainingMs(uint32_t nowMs) const;
         uint16_t progressPermille(uint32_t nowMs) const;
         bool consumeCompletionCue();
+        // Contador monotonico de fases de FOCO que terminaram pelo tempo (stop()/begin() nao contam).
+        uint32_t focusCompletions() const {
+            return focusCompletions_;
+        }
+        uint16_t focusMinutes() const {
+            return static_cast<uint16_t>(focusDurationMs_ / 60000UL);
+        }
 
     private:
         static bool shortSide(Orientation orientation);
@@ -64,6 +71,7 @@ namespace focus {
         bool targetPresentAtWaitStart_ = false;
         bool completionCuePending_ = false;
         bool manual_ = false;
+        uint32_t focusCompletions_ = 0;
     };
 
 } // namespace focus
