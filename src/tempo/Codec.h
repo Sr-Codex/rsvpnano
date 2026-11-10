@@ -63,6 +63,9 @@ namespace tempo {
         int focadoMin = 0;
         int distraidoMin = 0;
         int distracoes = 0;
+        int overtimeMin = 0;     // minutos de bonus (apos derrotar o inimigo)
+        int humor = 0;           // reflexao: 0 = sem resposta, 1..5 = Pessimo..Otimo (nao rende cr/XP)
+        int distraiu = 0;        // reflexao: 0 = sem resposta, 1 = Nao, 2 = Um pouco, 3 = Muito
         double cr = 0.0;
         double xp = 0.0;
     };

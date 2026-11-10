@@ -11,26 +11,29 @@
 
 namespace screens {
 
-    // App "Tempo" v1: Hoje, Batalha (foco = luta contra o "inimigo" do projeto) e Vitoria.
-    // Textos em pt-BR direto no codigo (fora do pacote de idiomas). Retangulos simples no lugar
-    // dos personagens: os quadros 3D entram no passo 4.
+    // App "Tempo" v1: Hoje, Batalha (preparo, foco, overtime, pausa) e Reflexao (tela "C3": dois aneis
+    // estilo Apple). Textos em pt-BR direto no codigo (fora do pacote de idiomas).
+    // Reflexao reaproveita Screen::TempoVitoria (a enumeracao nao muda).
     class TempoScreen {
     public:
         static bool owns(Screen screen) {
             return screen == Screen::TempoHoje || screen == Screen::TempoBatalha || screen == Screen::TempoVitoria;
         }
 
-        // Avanca a batalha (acumula tempo) e a encerra quando o inimigo chega a 0 HP.
-        // Devolve true uma vez, no instante em que uma batalha termina com vitoria.
+        // Avanca a batalha (acumula tempo), entra em overtime quando o inimigo zera, conclui no teto de +100 %,
+        // cuida da pausa de 5 min e do auto-salvar da reflexao. Devolve true quando o app deve dar um bipe
+        // (inimigo derrotado, fim do overtime/pausa, "presenca" a cada 10 min, aviso 2 min antes do fim).
         bool tick(uint32_t nowMs, fs::FS* filesystem);
         Action draw(ui::Context& ui, uint32_t nowMs, Screen& screen, fs::FS* filesystem);
         void boot(uint32_t nowMs, Screen& screen, fs::FS* filesystem);   // BOOT curto
         void back(uint32_t nowMs, Screen& screen, fs::FS* filesystem);   // PWR curto
-        bool battleActive() const { return fase_ == Fase::Lutando || fase_ == Fase::Pausada; }
-        uint8_t surface() const { return static_cast<uint8_t>(fase_) * 2 + (distraido_ ? 1 : 0); }
+        bool battleActive() const { return fase_ == Fase::Lutando || fase_ == Fase::Pausada || fase_ == Fase::Descanso; }
+        uint8_t surface() const {
+            return static_cast<uint8_t>(static_cast<uint8_t>(fase_) * 4 + (distraido_ ? 1 : 0) + (overtime_ ? 2 : 0));
+        }
 
     private:
-        enum class Fase : uint8_t { Nenhuma, Preparo, Lutando, Pausada, Resultado };
+        enum class Fase : uint8_t { Nenhuma, Preparo, Lutando, Pausada, Descanso, Reflexao };
 
         void carregar(fs::FS* filesystem, bool recarregarEstado, uint32_t nowMs);
         void abrirPreparo(size_t indiceProjeto);
@@ -39,10 +42,15 @@ namespace screens {
         void alternarDistracao(uint32_t nowMs);
         void acumular(uint32_t nowMs);
         void finalizar(uint32_t nowMs, bool abandonou, fs::FS* filesystem);
+        void iniciarDescanso(uint32_t nowMs, bool voltaParaBatalha);
+        void encerrarDescanso();
+        void salvarReflexao(fs::FS* filesystem);
         void garantirDia(uint32_t nowMs);
         void salvar(fs::FS* filesystem);
         int64_t restanteMs() const;      // vida restante do inimigo (ms)
+        int64_t overtimeMs() const;      // foco alem do necessario para zerar o inimigo (ms)
         int pontosDeVida() const;        // 0..100
+        tempo::LiquidacaoBatalha estimar(bool preparo) const;
         Action drawHoje(ui::Context& ui, uint32_t nowMs, Screen& screen);
         Action drawBatalha(ui::Context& ui, uint32_t nowMs, Screen& screen);
         Action drawVitoria(ui::Context& ui, uint32_t nowMs, Screen& screen);
@@ -63,9 +71,23 @@ namespace screens {
         uint64_t focadoMs_ = 0;
         uint64_t distraidoMs_ = 0;
         uint64_t distracaoAtualMs_ = 0;
+        uint64_t comboMs_ = 0;               // foco continuo sem distracao
         bool distraido_ = false;
+        bool overtime_ = false;              // inimigo derrotado, seguindo no bonus
         int numDistracoes_ = 0;
         int maiorDistracaoMin_ = 0;
+        int ultimoBipeFocoMin_ = 0;          // ultimo multiplo de 10 min de foco ja avisado
+        bool avisoFimDado_ = false;
+        bool arrastando_ = false;            // dedo no anel do preparo
+        uint64_t descansoInicioMs_ = 0;
+        bool descansoVolta_ = false;         // pausa veio do overtime: volta para a batalha (pausada)
+
+        // reflexao
+        uint32_t reflexaoInicioMs_ = 0;
+        int humor_ = -1;                     // 0..4 (Pessimo..Otimo), -1 = sem resposta
+        int distraiu_ = -1;                  // 0 Nao, 1 Um pouco, 2 Muito, -1 = sem resposta
+        tempo::EventoLog eventoPendente_;
+        tempo::Data dataPendente_;
 
         struct Resultado {
             tempo::LiquidacaoBatalha liq;

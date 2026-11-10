@@ -776,7 +776,13 @@ void test_log_linha_e_caminho() {
     ev.focadoMin = 25;
     ev.cr = 10.0;
     ev.xp = 25.0;
+    ev.overtimeMin = 3;
+    ev.humor = 4;
+    ev.distraiu = 2;
     const std::string linha = linhaLog(ev);
+    TEST_ASSERT_TRUE(linha.find("\"overtimeMin\":3") != std::string::npos);
+    TEST_ASSERT_TRUE(linha.find("\"humor\":4") != std::string::npos);
+    TEST_ASSERT_TRUE(linha.find("\"distraiu\":2") != std::string::npos);
     TEST_ASSERT_TRUE(!linha.empty());
     TEST_ASSERT_EQUAL_CHAR('\n', linha.back());
     TEST_ASSERT_EQUAL_INT(1, static_cast<int>(std::count(linha.begin(), linha.end(), '\n')));
