@@ -7,12 +7,13 @@
 
 #include "tempo/Codec.h"
 #include "tempo/Motor.h"
+#include "tempo/Sessao.h"
 #include "ui/screens/ModernScreens.h"
 
 namespace screens {
 
-    // App "Tempo" v1: Hoje, Batalha (preparo, foco, overtime, pausa) e Reflexao (tela "C3": dois aneis
-    // estilo Apple). Textos em pt-BR direto no codigo (fora do pacote de idiomas).
+    // App "Tempo": Inicio (estilo Session: aneis + foco + categoria + ciclo pomodoro) com seletor de foco, Batalha
+    // (foco, overtime, pausa) e Reflexao (tela "C3": dois aneis estilo Apple). Screen::TempoHoje = o Inicio. Textos em pt-BR direto no codigo (fora do pacote de idiomas).
     // Reflexao reaproveita Screen::TempoVitoria (a enumeracao nao muda).
     // Aneis estilo Apple em miniatura (launcher): externo = voce (laranja, azul no bonus), interno = inimigo (carmim).
     // (cx, cy) = centro; raio = raio da linha central do anel externo. Pinta direto no `g` (regiao opaca do chamador).
@@ -27,10 +28,11 @@ namespace screens {
         bool bonus = false;
         int vocePct = 0;                 // 0..100
         int inimigoPct = 100;            // 0..100
-        std::string projeto;             // batalha: projeto em curso; livre: primeiro da lista
+        std::string projeto;             // batalha: foco em curso; livre: foco escolhido no Inicio
         std::string centro;              // mm:ss (ou +mm:ss) / planejado
         std::string saldo;               // "214" (creditos)
         bool temProjetos = false;
+        bool livre = true;               // foco escolhido = Foco livre
         int planejadoMin = 25;
         uint32_t assinatura = 0;         // muda quando o resumo muda
     };
@@ -39,7 +41,8 @@ namespace screens {
     public:
         ResumoTempo resumo(fs::FS* filesystem, uint32_t nowMs);   // carrega o SD na 1a chamada
         void abrirBatalha(Screen& screen);                         // "Voltar a batalha" / "Responder"
-        bool comecar(Screen& screen);                              // abre o preparo do 1o projeto
+        bool comecar(Screen& screen);                              // abre o Inicio com o proximo projeto pre-selecionado
+        void focoRapido(uint32_t nowMs, Screen& screen, fs::FS* filesystem);   // BOOT no launcher: Foco livre ja
         static bool owns(Screen screen) {
             return screen == Screen::TempoHoje || screen == Screen::TempoBatalha || screen == Screen::TempoVitoria;
         }
@@ -53,29 +56,34 @@ namespace screens {
         void back(uint32_t nowMs, Screen& screen, fs::FS* filesystem);   // PWR curto
         bool battleActive() const { return fase_ == Fase::Lutando || fase_ == Fase::Pausada || fase_ == Fase::Descanso; }
         uint8_t surface() const {
-            return static_cast<uint8_t>(static_cast<uint8_t>(fase_) * 4 + (distraido_ ? 1 : 0) + (overtime_ ? 2 : 0));
+            return static_cast<uint8_t>(static_cast<uint8_t>(fase_) * 4 + (distraido_ ? 1 : 0) + (overtime_ ? 2 : 0)
+                                        + (seletor_ ? 32 : 0));
         }
 
     private:
-        enum class Fase : uint8_t { Nenhuma, Preparo, Lutando, Pausada, Descanso, Reflexao };
+        enum class Fase : uint8_t { Nenhuma, Lutando, Pausada, Descanso, Reflexao };
 
         void carregar(fs::FS* filesystem, bool recarregarEstado, uint32_t nowMs);
-        void abrirPreparo(size_t indiceProjeto);
-        void iniciar(uint32_t nowMs);
+        void comecarSessao(uint32_t nowMs);                    // inicia a batalha (ou o ciclo) com a escolha do Inicio
+        void ligarBatalha(uint32_t nowMs);                     // zera contadores e entra em Lutando
+        void concluirRodada(uint32_t nowMs, fs::FS* filesystem);   // ciclo: liquida a rodada e entra na pausa
+        void salvarPreferencias();
+        void escolher(int indice);                              // -1 = Foco livre
         void pausarOuRetomar(uint32_t nowMs);
         void alternarDistracao(uint32_t nowMs);
         void acumular(uint32_t nowMs);
         void finalizar(uint32_t nowMs, bool abandonou, fs::FS* filesystem);
         void iniciarDescanso(uint32_t nowMs, bool voltaParaBatalha);
-        void encerrarDescanso();
+        void encerrarDescanso(uint32_t nowMs);
         void salvarReflexao(fs::FS* filesystem);
         void garantirDia(uint32_t nowMs);
         void salvar(fs::FS* filesystem);
         int64_t restanteMs() const;      // vida restante do inimigo (ms)
         int64_t overtimeMs() const;      // foco alem do necessario para zerar o inimigo (ms)
         int pontosDeVida() const;        // 0..100
-        tempo::LiquidacaoBatalha estimar(bool preparo) const;
-        Action drawHoje(ui::Context& ui, uint32_t nowMs, Screen& screen);
+        tempo::LiquidacaoBatalha estimar() const;
+        Action drawInicio(ui::Context& ui, uint32_t nowMs, Screen& screen);
+        Action drawSeletor(ui::Context& ui, uint32_t nowMs, Screen& screen);
         Action drawBatalha(ui::Context& ui, uint32_t nowMs, Screen& screen);
         Action drawVitoria(ui::Context& ui, uint32_t nowMs, Screen& screen);
 
@@ -85,11 +93,20 @@ namespace screens {
         tempo::Estado estado_;
         tempo::ListaProjetos lista_;
         std::vector<std::string> titulos_;   // titulos limpos (sem emoji), 1:1 com lista_.projetos
-        size_t primeiro_ = 0;                // primeiro projeto visivel (rolagem)
+        size_t primeiro_ = 0;                // primeira linha visivel do seletor (rolagem)
+        bool seletor_ = false;               // seletor de foco aberto (Screen::TempoHoje)
+        int escolha_ = -1;                   // foco escolhido no Inicio: -1 = Foco livre, senao indice do projeto
+        tempo::Categoria categoria_ = tempo::Categoria::Trabalho;   // chip selecionado
+        int duracaoMin_ = 25;                // duracao do anel do Inicio (5..60)
+        bool pomodoro_ = false;              // interruptor do ciclo
+        tempo::Ciclo ciclo_;                 // ciclo em curso (ativo = false: sessao unica)
+        int64_t descansoMs_ = 5 * 60 * 1000;
+        tempo::Categoria categoriaBatalha_ = tempo::Categoria::Trabalho;   // da batalha em curso
+        std::string nomeBatalha_;            // "Foco livre · Estudo" ou titulo do projeto
         ui::modern::ListSwipe swipe_;
 
         Fase fase_ = Fase::Nenhuma;
-        size_t projeto_ = 0;
+        int projeto_ = -1;                   // projeto da batalha em curso (-1 = Foco livre)
         int planejadoMin_ = 25;
         uint64_t ultimoMs_ = 0;
         uint64_t focadoMs_ = 0;

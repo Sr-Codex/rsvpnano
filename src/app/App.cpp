@@ -885,6 +885,10 @@ void App::handleInput(Input::ActionMask actions, uint32_t nowMs) {
     if (Input::hasAction(actions, Input::ActionSelect) || Input::hasAction(actions, Input::ActionPlayPause)) {
         if (screen_ == screens::Screen::Reader && !typographyJobActive()) {
             readerScreen_.toggle(prefs_, nowMs);
+        } else if (screen_ == screens::Screen::Home) {
+            // BOOT no launcher: Foco livre imediato (ultima categoria/duracao do Tempo)
+            tempoScreen_.focoRapido(nowMs, screen_, storage_.mounted() ? &Board::Storage::filesystem() : nullptr);
+            renderScreen(nowMs);
         }
     }
 }

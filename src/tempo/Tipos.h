@@ -205,6 +205,10 @@ namespace tempo {
         // equipamento e dia
         Equipamento equip;
         Dia dia;
+        // preferencias da tela inicial do Tempo (lembradas entre sessoes)
+        int ultimaCategoria = 0;       // Categoria (enum) da ultima sessao
+        int ultimaDuracaoMin = 25;     // 5..60
+        bool ciclopomodoro = false;    // interruptor "ciclo pomodoro 4x"
     };
 
     // ---------------------------------------------------------------- resumo

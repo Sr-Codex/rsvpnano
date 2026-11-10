@@ -160,23 +160,19 @@ namespace screens {
                 linha2 = "responda para salvar a batalha";
                 botao = "Responder";
             } else if (batalha) {
-                nome = r.descanso ? "Pausa de 5 min" : r.projeto.empty() ? "Batalha" : r.projeto;
+                nome = r.descanso ? "Pausa" : r.projeto.empty() ? "Batalha" : r.projeto;
                 linha2 = "você " + std::to_string(r.vocePct) + "% · inimigo " + std::to_string(r.inimigoPct) + "%";
                 botao = "Voltar à batalha";
-            } else if (r.temProjetos) {
-                nome = r.projeto.empty() ? "(sem título)" : r.projeto;
+            } else {
+                nome = r.projeto.empty() ? "Foco livre" : r.projeto;   // foco escolhido no Inicio do Tempo
                 linha2 = "inimigo 100% · " + std::to_string(r.planejadoMin) + " min";
                 botao = "Começar";
-            } else {
-                nome = "Abra o Tempo para começar";
-                linha2 = "nenhum projeto em /tempo";
-                botao = "Abrir o Tempo";
             }
             const std::string leitura = info.temLivro ? "Leitura: " + info.livro + " · " + std::to_string(info.livroPct) + "%"
                                                       : std::string{"Nenhum livro aberto"};
             Bloco bloco(ui, cartao, SurfaceMuted, 12, uint32_t(r.estado) + 10);
             bloco.texto({26, 30, 200, 18}, titulo, 11, kLaranja);
-            if (r.estado != Estado::Reflexao && (batalha || r.temProjetos)) bloco.texto({40, 91, 60, 18}, r.centro, 11, cTexto, TextAlign::Center);
+            if (r.estado != Estado::Reflexao) bloco.texto({40, 91, 60, 18}, r.centro, 11, cTexto, TextAlign::Center);
             bloco.texto({124, 48, 196, 24}, nome, 14, cTexto);
             bloco.texto({124, 76, 196, 18}, linha2, 11, cMudo);
             bloco.texto({124, 100, 196, 18}, leitura, 11, cMudo);
@@ -188,13 +184,12 @@ namespace screens {
                 g.fillRoundRect(areaBotao.x + dx, areaBotao.y + dy, areaBotao.w, areaBotao.h, 10, kLaranja);
                 ui.drawText(g, layoutBotao, kTinta, dx, dy, kLaranja);
                 const double voce = batalha ? r.vocePct / 100.0 : 0.0;
-                const double inimigo = batalha ? r.inimigoPct / 100.0 : r.temProjetos ? 1.0 : 0.0;
+                const double inimigo = batalha ? r.inimigoPct / 100.0 : 1.0;
                 desenharAneisMini(ui, g, cartao.x + dx + 58, cartao.y + dy + 76, 38, voce, inimigo, r.bonus);
             });
             if (ui.tap(areaBotao)) {
                 if (r.estado == Estado::Reflexao || batalha) tempo.abrirBatalha(screen);
-                else if (r.temProjetos) tempo.comecar(screen);
-                else screen = Screen::TempoHoje;
+                else tempo.comecar(screen);   // abre o Inicio com o proximo projeto pre-selecionado
             }
         }
 
@@ -211,14 +206,14 @@ namespace screens {
             Bloco cartaoApp(ui, rect, SurfaceMuted, 12, 100 + i * 7 + breve);
             cartaoApp.texto({int16_t(cx - 42), int16_t(cy + 5), 84, 18}, breve ? "em breve" : kNomes[i], 11, breve ? kAmbar : cTexto,
                             TextAlign::Center);
-            if (!infoCanto.empty()) cartaoApp.texto({int16_t(cx - 14), int16_t(cy - 28), 52, 13}, infoCanto, 9, cMudo, TextAlign::Right);
+            if (!infoCanto.empty()) cartaoApp.texto({int16_t(cx), int16_t(cy - 28), 40, 13}, infoCanto, 9, cMudo, TextAlign::Right);
             if (i == 0) cartaoApp.marca(r.assinatura);
             cartaoApp.desenhar([&](Arduino_GFX& g, int dx, int dy) {
                 const int X = rect.x + dx + 42, Y = rect.y + dy + 22;
                 switch (i) {
                 case 0: {
                     const bool batalha = r.estado == Estado::Batalha;
-                    desenharAneisMini(ui, g, X - 8, Y, 13, batalha ? r.vocePct / 100.0 : 0.62, batalha ? r.inimigoPct / 100.0 : 0.38, r.bonus);
+                    desenharAneisMini(ui, g, X - 14, Y + 1, 12, batalha ? r.vocePct / 100.0 : 0.62, batalha ? r.inimigoPct / 100.0 : 0.38, r.bonus);
                     break;
                 }
                 case 1: iconeLivro(g, X, Y, kRoxo); break;

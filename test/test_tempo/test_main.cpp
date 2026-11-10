@@ -11,6 +11,7 @@
 #include "tempo/Parametros.h"
 #include "tempo/Progressao.h"
 #include "tempo/Relogio.h"
+#include "tempo/Sessao.h"
 
 using namespace tempo;
 
@@ -817,6 +818,101 @@ void test_relogio_escala_e_ancora() {
     TEST_ASSERT_EQUAL_UINT32(1, escala());
 }
 
+// ---- Tela inicial: Foco livre e ciclo pomodoro --------------------------------------------------------------
+void test_foco_livre_liquida_pela_categoria() {
+    struct Caso { Categoria cat; double cr; double xp; Atributo attr; };
+    // 25 min de foco sem distracao = vitoria perfeita (+25 %): taxa * 25 * 1,25
+    const Caso casos[] = {
+        {Categoria::Trabalho, 6.25, 31.25, Atributo::Oficio},     // 0,20 cr/min, 1,0 XP/min
+        {Categoria::Estudo, 12.5, 37.5, Atributo::Mente},         // 0,40 cr/min, 1,2 XP/min
+        {Categoria::Leitura, 6.25, 46.875, Atributo::Mente},      // 0,20 cr/min, 1,5 XP/min
+        {Categoria::Meditacao, 6.25, 62.5, Atributo::Mente},      // 0,20 cr/min, 2,0 XP/min
+        {Categoria::Projetos, 12.5, 31.25, Atributo::Oficio},     // 0,40 cr/min, 1,0 XP/min
+    };
+    for (const auto& c : casos) {
+        Estado e = novoEstado();
+        const double antes = e.saldo;
+        const LiquidacaoBatalha r = aplicarBatalha(e, perfeita(c.cat, 25));
+        TEST_ASSERT_TRUE(r.vitoria);
+        NEAR(c.cr, r.cr);
+        NEAR(c.xp, r.xp);
+        TEST_ASSERT_EQUAL_INT(static_cast<int>(c.attr), static_cast<int>(r.atributo));
+        NEAR(antes + c.cr, e.saldo);   // creditos entram na carteira
+        NEAR(c.xp, e.xpTotal);
+    }
+    TEST_ASSERT_EQUAL_STRING("Foco livre · Estudo", nomeFocoLivre(Categoria::Estudo).c_str());
+    TEST_ASSERT_EQUAL_STRING("Foco livre · Meditação", nomeFocoLivre(Categoria::Meditacao).c_str());
+    // chips <-> categorias
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Categoria::Trabalho), static_cast<int>(categoriaDoChip(0)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Categoria::Projetos), static_cast<int>(categoriaDoChip(4)));
+    for (int i = 0; i < static_cast<int>(kNumChips); ++i) TEST_ASSERT_EQUAL_INT(i, chipDaCategoria(categoriaDoChip(i)));
+}
+
+void test_ciclo_pomodoro_sequencia() {
+    TEST_ASSERT_FALSE(Ciclo{}.ativo);
+    Ciclo c = iniciarCiclo();
+    // 4 rodadas: foco 25 -> pausa 5 (3 vezes), foco 25 -> pausa longa 15, fim
+    for (int rodada = 1; rodada <= kCicloRodadas; ++rodada) {
+        TEST_ASSERT_TRUE(c.ativo);
+        TEST_ASSERT_EQUAL_INT(rodada, c.rodada);
+        TEST_ASSERT_EQUAL_INT(static_cast<int>(PassoCiclo::Foco), static_cast<int>(c.passo));
+        TEST_ASSERT_EQUAL_INT(25, duracaoCicloMin(c));
+        c = avancarCiclo(c);   // foco terminou
+        TEST_ASSERT_TRUE(c.ativo);
+        TEST_ASSERT_EQUAL_INT(rodada, c.rodada);
+        if (rodada < kCicloRodadas) {
+            TEST_ASSERT_EQUAL_INT(static_cast<int>(PassoCiclo::PausaCurta), static_cast<int>(c.passo));
+            TEST_ASSERT_EQUAL_INT(5, duracaoCicloMin(c));
+        } else {
+            TEST_ASSERT_EQUAL_INT(static_cast<int>(PassoCiclo::PausaLonga), static_cast<int>(c.passo));
+            TEST_ASSERT_EQUAL_INT(15, duracaoCicloMin(c));
+        }
+        c = avancarCiclo(c);   // pausa terminou
+    }
+    TEST_ASSERT_FALSE(c.ativo);                 // ciclo acabou depois da pausa longa
+    TEST_ASSERT_FALSE(avancarCiclo(c).ativo);   // inativo continua inativo
+}
+
+void test_ciclo_pomodoro_cada_rodada_liquida_separado() {
+    Estado e = novoEstado();
+    double soma = 0.0;
+    for (int rodada = 1; rodada <= kCicloRodadas; ++rodada) {
+        const LiquidacaoBatalha r = aplicarBatalha(e, perfeita(Categoria::Estudo, kCicloFocoMin));
+        NEAR(12.5, r.cr);   // cada rodada de 25 min paga igual, sem acumular com a anterior
+        soma += r.cr;
+    }
+    NEAR(50.0, soma);
+    NEAR(50.0, e.saldo - novoEstado().saldo);
+}
+
+void test_estado_preferencias_da_tela_inicial() {
+    Estado e = novoEstado();
+    TEST_ASSERT_EQUAL_INT(25, e.ultimaDuracaoMin);
+    TEST_ASSERT_FALSE(e.ciclopomodoro);
+    e.ultimaCategoria = static_cast<int>(Categoria::Leitura);
+    e.ultimaDuracaoMin = 45;
+    e.ciclopomodoro = true;
+    Estado lido;
+    TEST_ASSERT_TRUE(lerEstado(serializarEstado(e), lido));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Categoria::Leitura), lido.ultimaCategoria);
+    TEST_ASSERT_EQUAL_INT(45, lido.ultimaDuracaoMin);
+    TEST_ASSERT_TRUE(lido.ciclopomodoro);
+    Estado antigo;   // estado.json antigo (sem os campos novos) cai nos padroes
+    TEST_ASSERT_TRUE(lerEstado("{\"saldo\": 1}", antigo));
+    TEST_ASSERT_EQUAL_INT(25, antigo.ultimaDuracaoMin);
+    TEST_ASSERT_FALSE(antigo.ciclopomodoro);
+}
+
+void test_log_foco_livre_registra_categoria() {
+    EventoLog ev;
+    ev.tipo = "batalha";
+    ev.projeto = "Foco livre";
+    ev.categoria = "Estudo";
+    const std::string linha = linhaLog(ev);
+    TEST_ASSERT_TRUE(linha.find("\"projeto\":\"Foco livre\"") != std::string::npos);
+    TEST_ASSERT_TRUE(linha.find("\"categoria\":\"Estudo\"") != std::string::npos);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_datas);
@@ -859,5 +955,10 @@ int main(int, char**) {
     RUN_TEST(test_log_linha_e_caminho);
     RUN_TEST(test_relogio_epoch_e_validade);
     RUN_TEST(test_relogio_escala_e_ancora);
+    RUN_TEST(test_foco_livre_liquida_pela_categoria);
+    RUN_TEST(test_ciclo_pomodoro_sequencia);
+    RUN_TEST(test_ciclo_pomodoro_cada_rodada_liquida_separado);
+    RUN_TEST(test_estado_preferencias_da_tela_inicial);
+    RUN_TEST(test_log_foco_livre_registra_categoria);
     return UNITY_END();
 }

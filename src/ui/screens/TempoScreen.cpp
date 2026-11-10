@@ -148,7 +148,6 @@ namespace screens {
         constexpr Cor kPreto{0, 0, 0};
         constexpr int kCx = 86, kCy = 86;      // centro dos aneis
         constexpr int kRaioFora = 70, kRaioDentro = 48, kEspessura = 18;
-        constexpr int64_t kDescansoMs = 5 * 60 * 1000;
         constexpr int kAutoSalvarSeg = 60;
 
         uint16_t c565(Cor c) { return rgb565(uint8_t(c.r), uint8_t(c.g), uint8_t(c.b)); }
@@ -275,6 +274,7 @@ namespace screens {
         r.saldo = std::to_string(static_cast<long>(std::lround(estado_.saldo)));   // inteiro: cabe no cartao do launcher
         r.temProjetos = !titulos_.empty();
         r.planejadoMin = planejadoMin_;
+        r.livre = escolha_ < 0;
         if (fase_ == Fase::Reflexao) {
             r.estado = ResumoTempo::Estado::Reflexao;
         } else if (battleActive()) {
@@ -282,15 +282,17 @@ namespace screens {
             r.pausada = fase_ == Fase::Pausada;
             r.descanso = fase_ == Fase::Descanso;
             r.bonus = overtime_ && !r.descanso;
-            r.projeto = projeto_ < titulos_.size() ? titulos_[projeto_] : std::string{};
+            r.projeto = nomeBatalha_;
             const int64_t plano = std::max<int64_t>(1, int64_t(planejadoMin_) * 60000);
             r.inimigoPct = r.descanso ? 0 : pontosDeVida();
             r.vocePct = r.descanso ? 100 : int(std::min<int64_t>(100, int64_t(focadoMs_) * 100 / plano));
             if (r.descanso) r.centro = "pausa";
             else r.centro = r.bonus ? "+" + fmtRelogio(overtimeMs() / 1000) : fmtRelogio((restanteMs() + 999) / 1000);
         } else {
-            r.projeto = titulos_.empty() ? std::string{} : titulos_.front();
-            r.centro = fmtRelogio(int64_t(planejadoMin_) * 60);
+            r.projeto = escolha_ >= 0 && size_t(escolha_) < titulos_.size() ? titulos_[escolha_]
+                                                                           : tempo::nomeFocoLivre(categoria_);
+            r.centro = fmtRelogio(int64_t(ciclo_.ativo || pomodoro_ ? tempo::kCicloFocoMin : duracaoMin_) * 60);
+            r.planejadoMin = pomodoro_ ? tempo::kCicloFocoMin : duracaoMin_;
         }
         r.assinatura = ui::Context::signature(r.projeto + "|" + r.centro + "|" + r.saldo,
                                               uint32_t(r.estado) * 1000003U + r.pausada * 7U + r.descanso * 11U + r.bonus * 13U
@@ -302,11 +304,48 @@ namespace screens {
         screen = fase_ == Fase::Reflexao ? Screen::TempoVitoria : Screen::TempoBatalha;
     }
 
+    // Botao do cartao AGORA (sem batalha): abre o Inicio com o proximo projeto (o 1o da lista) ja escolhido.
     bool TempoScreen::comecar(Screen& screen) {
-        if (battleActive() || fase_ == Fase::Reflexao || lista_.projetos.empty()) return false;
-        abrirPreparo(0);
-        screen = Screen::TempoBatalha;
+        if (battleActive() || fase_ == Fase::Reflexao) return false;
+        seletor_ = false;
+        if (!lista_.projetos.empty()) escolher(0);
+        screen = Screen::TempoHoje;
         return true;
+    }
+
+    // BOOT curto no launcher: Foco livre imediato com a ultima categoria/duracao (ignora o ciclo pomodoro).
+    void TempoScreen::focoRapido(uint32_t nowMs, Screen& screen, fs::FS* filesystem) {
+        if (!carregado_) carregar(filesystem, true, nowMs);
+        if (battleActive() || fase_ == Fase::Reflexao) {
+            abrirBatalha(screen);
+            return;
+        }
+        seletor_ = false;
+        escolha_ = -1;
+        ciclo_ = tempo::Ciclo{};
+        planejadoMin_ = duracaoMin_;
+        categoriaBatalha_ = categoria_;
+        projeto_ = -1;
+        nomeBatalha_ = tempo::nomeFocoLivre(categoriaBatalha_);
+        salvarPreferencias();
+        ligarBatalha(nowMs);
+        screen = Screen::TempoBatalha;
+    }
+
+    void TempoScreen::escolher(int indice) {
+        if (indice >= 0 && size_t(indice) < lista_.projetos.size()) {
+            escolha_ = indice;
+            categoria_ = tempo::Categoria::Projetos;   // com projeto, a categoria vai para Projetos
+        } else {
+            escolha_ = -1;
+        }
+    }
+
+    void TempoScreen::salvarPreferencias() {
+        estado_.ultimaCategoria = static_cast<int>(categoria_);
+        estado_.ultimaDuracaoMin = duracaoMin_;
+        estado_.ciclopomodoro = pomodoro_;
+        salvar(fs_);
     }
 
     // ====================================================================== estado
@@ -328,6 +367,10 @@ namespace screens {
             if (filesystem != nullptr) TempoStorage::loadState(*filesystem, estado_);
             garantirDia(nowMs);
             carregado_ = true;
+            categoria_ = estado_.ultimaCategoria >= 0 && estado_.ultimaCategoria < int(tempo::kNumCategorias)
+                             ? static_cast<tempo::Categoria>(estado_.ultimaCategoria) : tempo::Categoria::Trabalho;
+            duracaoMin_ = std::clamp(estado_.ultimaDuracaoMin / 5 * 5, 5, 60);
+            pomodoro_ = estado_.ciclopomodoro;
             salvar(filesystem);
         }
         lista_ = tempo::ListaProjetos{};
@@ -335,6 +378,7 @@ namespace screens {
         if (filesystem != nullptr) TempoStorage::loadProjects(*filesystem, lista_);
         for (const auto& projeto : lista_.projetos) titulos_.push_back(tempo::limparTitulo(projeto.titulo));
         primeiro_ = 0;
+        if (escolha_ >= int(titulos_.size())) escolha_ = -1;
     }
 
     void TempoScreen::acumular(uint32_t nowMs) {
@@ -368,17 +412,15 @@ namespace screens {
         return static_cast<int>(std::min<int64_t>(100, restanteMs() * 100 / std::max<int64_t>(1, plano)));
     }
 
-    // Estimativa do motor: preparo/foco = "ao terminar" (zera o inimigo no plano + cura); overtime = "ate agora".
-    tempo::LiquidacaoBatalha TempoScreen::estimar(bool preparo) const {
+    // Estimativa do motor: foco = "ao terminar" (zera o inimigo no plano + cura); overtime = "ate agora".
+    tempo::LiquidacaoBatalha TempoScreen::estimar() const {
         tempo::EntradaBatalha e;
-        e.categoria = tempo::Categoria::Projetos;
+        e.categoria = categoriaBatalha_;
         e.minutosPlanejados = planejadoMin_;
         e.minutosDistraidos = static_cast<int>(distraidoMs_ / 60000);
         e.numDistracoes = numDistracoes_;
         e.maiorDistracaoMin = std::max(maiorDistracaoMin_, static_cast<int>(distracaoAtualMs_ / 60000));
-        if (preparo) {
-            e.minutosFocados = planejadoMin_;
-        } else if (overtime_) {
+        if (overtime_) {
             e.minutosFocados = static_cast<int>(focadoMs_ / 60000);
         } else {
             e.minutosFocados = planejadoMin_ + std::min(e.minutosDistraidos, planejadoMin_);
@@ -386,9 +428,25 @@ namespace screens {
         return tempo::liquidarBatalha(estado_, e);
     }
 
-    void TempoScreen::abrirPreparo(size_t indice) {
-        projeto_ = indice;
-        fase_ = Fase::Preparo;
+    // Comeca a batalha (ou o ciclo pomodoro) com a escolha do Inicio.
+    void TempoScreen::comecarSessao(uint32_t nowMs) {
+        if (battleActive() || fase_ == Fase::Reflexao) return;
+        if (escolha_ >= 0 && size_t(escolha_) < titulos_.size()) {
+            projeto_ = escolha_;
+            categoriaBatalha_ = categoria_;
+            nomeBatalha_ = titulos_[escolha_].empty() ? std::string{"Projeto"} : titulos_[escolha_];
+        } else {
+            projeto_ = -1;
+            categoriaBatalha_ = categoria_;
+            nomeBatalha_ = tempo::nomeFocoLivre(categoriaBatalha_);
+        }
+        ciclo_ = pomodoro_ ? tempo::iniciarCiclo() : tempo::Ciclo{};
+        planejadoMin_ = pomodoro_ ? tempo::kCicloFocoMin : duracaoMin_;
+        salvarPreferencias();
+        ligarBatalha(nowMs);
+    }
+
+    void TempoScreen::ligarBatalha(uint32_t nowMs) {
         focadoMs_ = distraidoMs_ = distracaoAtualMs_ = comboMs_ = 0;
         distraido_ = false;
         overtime_ = false;
@@ -396,10 +454,6 @@ namespace screens {
         numDistracoes_ = maiorDistracaoMin_ = 0;
         ultimoBipeFocoMin_ = 0;
         avisoFimDado_ = false;
-    }
-
-    void TempoScreen::iniciar(uint32_t nowMs) {
-        if (fase_ != Fase::Preparo) return;
         ultimoMs_ = tempo::ms(nowMs);
         fase_ = Fase::Lutando;
     }
@@ -427,12 +481,24 @@ namespace screens {
     void TempoScreen::iniciarDescanso(uint32_t nowMs, bool voltaParaBatalha) {
         if (voltaParaBatalha) acumular(nowMs);   // congela o relogio da batalha
         descansoVolta_ = voltaParaBatalha;
+        if (!ciclo_.ativo) descansoMs_ = int64_t(tempo::kCicloPausaMin) * 60000;
         descansoInicioMs_ = tempo::ms(nowMs);
         fase_ = Fase::Descanso;
     }
 
-    void TempoScreen::encerrarDescanso() {
+    void TempoScreen::encerrarDescanso(uint32_t nowMs) {
         if (fase_ != Fase::Descanso) return;
+        if (ciclo_.ativo) {   // ciclo pomodoro: a pausa emenda na proxima rodada (ou acaba apos a pausa longa)
+            ciclo_ = tempo::avancarCiclo(ciclo_);
+            descansoVolta_ = false;
+            if (ciclo_.ativo) {
+                planejadoMin_ = tempo::duracaoCicloMin(ciclo_);
+                ligarBatalha(nowMs);
+            } else {
+                fase_ = Fase::Nenhuma;
+            }
+            return;
+        }
         fase_ = descansoVolta_ ? Fase::Pausada : Fase::Nenhuma;
         descansoVolta_ = false;
     }
@@ -445,7 +511,7 @@ namespace screens {
         }
         garantirDia(nowMs);
         tempo::EntradaBatalha entrada;
-        entrada.categoria = tempo::Categoria::Projetos;
+        entrada.categoria = categoriaBatalha_;
         entrada.minutosPlanejados = planejadoMin_;
         entrada.minutosFocados = static_cast<int>(focadoMs_ / 60000);
         entrada.minutosDistraidos = static_cast<int>(distraidoMs_ / 60000);
@@ -454,7 +520,7 @@ namespace screens {
         entrada.abandonou = abandonou;
         const auto liquidacao = tempo::aplicarBatalha(estado_, entrada);
 
-        const std::string titulo = projeto_ < titulos_.size() ? titulos_[projeto_] : std::string{};
+        const std::string titulo = nomeBatalha_;
         resultado_ = {liquidacao, titulo, planejadoMin_, entrada.minutosFocados,
                       tempo::nivelAtributo(estado_, liquidacao.atributo), estado_.streak, abandonou};
 
@@ -466,8 +532,9 @@ namespace screens {
         evento.data = agora.valida ? tempo::textoData(agora.data) : std::string{};
         evento.hora = horaTexto(agora);
         evento.tipo = "batalha";
-        evento.projeto = titulo;
-        evento.projetoId = projeto_ < lista_.projetos.size() ? lista_.projetos[projeto_].id : std::string{};
+        evento.projeto = projeto_ < 0 ? std::string{"Foco livre"} : titulo;
+        evento.categoria = tempo::nomeCategoria(categoriaBatalha_);
+        evento.projetoId = projeto_ >= 0 && size_t(projeto_) < lista_.projetos.size() ? lista_.projetos[projeto_].id : std::string{};
         evento.resultado = liquidacao.vitoria ? "vitoria" : "fuga";
         evento.planejadoMin = planejadoMin_;
         evento.focadoMin = entrada.minutosFocados;
@@ -485,6 +552,16 @@ namespace screens {
         if (filesystem != nullptr) TempoStorage::saveState(*filesystem, estado_);
     }
 
+    // Ciclo pomodoro: a rodada terminou (inimigo derrotado). Liquida a batalha sozinha, grava o log sem a reflexao
+    // (nao da para pedir resposta no meio do ciclo) e entra na pausa curta ou longa.
+    void TempoScreen::concluirRodada(uint32_t nowMs, fs::FS* filesystem) {
+        finalizar(nowMs, false, filesystem);
+        salvarReflexao(filesystem);
+        ciclo_ = tempo::avancarCiclo(ciclo_);   // foco -> pausa
+        descansoMs_ = int64_t(tempo::duracaoCicloMin(ciclo_)) * 60000;
+        iniciarDescanso(nowMs, false);
+    }
+
     void TempoScreen::salvarReflexao(fs::FS* filesystem) {
         if (fase_ != Fase::Reflexao) return;
         eventoPendente_.humor = humor_ >= 0 ? humor_ + 1 : 0;
@@ -496,8 +573,8 @@ namespace screens {
 
     bool TempoScreen::tick(uint32_t nowMs, fs::FS* filesystem) {
         if (fase_ == Fase::Descanso) {
-            if (int64_t(tempo::ms(nowMs)) - int64_t(descansoInicioMs_) >= kDescansoMs) {
-                encerrarDescanso();
+            if (int64_t(tempo::ms(nowMs)) - int64_t(descansoInicioMs_) >= descansoMs_) {
+                encerrarDescanso(nowMs);
                 return true;
             }
             return false;
@@ -510,6 +587,10 @@ namespace screens {
         acumular(nowMs);
         if (fase_ != Fase::Lutando) return false;
         const int64_t plano = int64_t(planejadoMin_) * 60000;
+        if (!overtime_ && restanteMs() == 0 && ciclo_.ativo) {   // ciclo: inimigo derrotado = fim da rodada
+            concluirRodada(nowMs, filesystem);
+            return true;
+        }
         if (!overtime_ && restanteMs() == 0) {   // inimigo derrotado: nao encerra, segue em overtime
             overtime_ = true;
             return true;
@@ -539,19 +620,20 @@ namespace screens {
             salvarReflexao(filesystem);
             screen = Screen::TempoHoje;
         } else if (screen == Screen::TempoBatalha) {
-            if (fase_ == Fase::Preparo) iniciar(nowMs);
-            else if (fase_ == Fase::Lutando || fase_ == Fase::Pausada) pausarOuRetomar(nowMs);
-            else if (fase_ == Fase::Descanso) encerrarDescanso();
+            if (fase_ == Fase::Lutando || fase_ == Fase::Pausada) pausarOuRetomar(nowMs);
+            else if (fase_ == Fase::Descanso) encerrarDescanso(nowMs);
             else if (fase_ == Fase::Reflexao) screen = Screen::TempoVitoria;
             else screen = Screen::TempoHoje;
+        } else if (seletor_) {
+            // seletor aberto: BOOT nao faz nada (escolha por toque)
         } else if (battleActive()) {
             screen = Screen::TempoBatalha;
         } else if (fase_ == Fase::Reflexao) {
             screen = Screen::TempoVitoria;
         } else if (!carregado_) {
             carregar(filesystem, true, nowMs);
-        } else if (primeiro_ < lista_.projetos.size()) {
-            abrirPreparo(primeiro_);
+        } else {
+            comecarSessao(nowMs);   // BOOT no Inicio = Comecar
             screen = Screen::TempoBatalha;
         }
     }
@@ -559,10 +641,13 @@ namespace screens {
     void TempoScreen::back(uint32_t nowMs, Screen& screen, fs::FS* filesystem) {
         (void)nowMs;
         if (screen == Screen::TempoHoje) {
-            screen = Screen::Home;
+            if (seletor_) seletor_ = false;
+            else {
+                if (carregado_) salvarPreferencias();
+                screen = Screen::Home;
+            }
         } else {
             if (screen == Screen::TempoVitoria || fase_ == Fase::Reflexao) salvarReflexao(filesystem);   // sem resposta
-            else if (screen == Screen::TempoBatalha && fase_ == Fase::Preparo) fase_ = Fase::Nenhuma;
             screen = Screen::TempoHoje;  // batalha em curso continua em segundo plano
         }
     }
@@ -574,121 +659,22 @@ namespace screens {
         if (!carregado_) carregar(filesystem, true, nowMs);
         else if (reentrada && screen == Screen::TempoHoje) carregar(filesystem, false, nowMs);
         tick(nowMs, filesystem);
-        if (screen == Screen::TempoHoje) return drawHoje(ui, nowMs, screen);
+        if (screen != Screen::TempoHoje) seletor_ = false;
+        if (screen == Screen::TempoHoje) return seletor_ ? drawSeletor(ui, nowMs, screen) : drawInicio(ui, nowMs, screen);
         if (screen == Screen::TempoBatalha) return drawBatalha(ui, nowMs, screen);
         return drawVitoria(ui, nowMs, screen);
     }
 
-    Action TempoScreen::drawHoje(ui::Context& ui, uint32_t nowMs, Screen& screen) {
+    // ====================================================================== Inicio (estilo Session)
+    // Layout 640x172: aneis a esquerda (0..172), foco/categoria/botoes no meio (x = 182), painel HOJE a direita.
+    Action TempoScreen::drawInicio(ui::Context& ui, uint32_t nowMs, Screen& screen) {
         if (fase_ == Fase::Reflexao) { screen = Screen::TempoVitoria; return Action::None; }
         garantirDia(nowMs);
-        const auto agora = tempo::agora(nowMs);
+        const bool emBatalha = battleActive();
+        const bool ciclo = pomodoro_;
 
-        // cabecalho
-        if (button(ui, {8, 0, 94, 43}, "‹ Início", Style::Plain, true, {}, 13)) { screen = Screen::Home; return Action::None; }
-        ui.label({112, 0, 250, 43}, "HOJE · " + dataCabecalho(agora), 13, Muted);
-        ui.label({372, 0, 130, 43}, "Foco " + fmtHoraMin(estado_.dia.fochoPagoMin), 13, Foreground, TextAlign::Right);
-        ui.label({508, 0, 124, 43}, fmtNum(estado_.saldo) + " cr", 17, Accent, TextAlign::Right);
-        ui::modern::rule(ui, {0, 43, 640, 1});
-
-        // cartao AGORA
-        const Rect cartao{12, 52, 300, 112};
-        Bloco agoraCartao(ui, cartao, SurfaceMuted, 8, battleActive() ? 1 : 2);
-        const bool lutando = battleActive();
-        const bool descanso = fase_ == Fase::Descanso;
-        agoraCartao.texto({28, 58, 200, 20}, lutando ? (descanso ? "AGORA · PAUSA" : fase_ == Fase::Pausada ? "AGORA · PAUSADA"
-                                                         : overtime_ ? "AGORA · BÔNUS" : "AGORA · LUTANDO")
-                                                     : "AGORA", 11, Accent);
-        if (lutando) {
-            const std::string nome = descanso && !descansoVolta_ ? std::string{"Pausa de 5 min"}
-                                   : projeto_ < titulos_.size() ? titulos_[projeto_] : std::string{};
-            agoraCartao.texto({28, 78, 200, 24}, nome, 15, Foreground);
-            const int64_t restDescanso = std::max<int64_t>(0, kDescansoMs - (int64_t(tempo::ms(nowMs)) - int64_t(descansoInicioMs_)));
-            agoraCartao.texto({28, 102, 190, 40},
-                              descanso ? fmtRelogio((restDescanso + 999) / 1000)
-                              : overtime_ ? "+" + fmtRelogio(overtimeMs() / 1000)
-                                          : fmtRelogio((restanteMs() + 999) / 1000), 30, Foreground);
-            const int vida = descanso ? int(restDescanso * 100 / kDescansoMs) : pontosDeVida();
-            agoraCartao.marca(static_cast<uint32_t>(vida));
-            agoraCartao.texto({28, 146, 200, 16}, (descanso ? std::string{"de 5 min"} : "de " + std::to_string(planejadoMin_) + " min")
-                                                   + " · toque para abrir", 11, Muted);
-            const bool pausada = fase_ == Fase::Pausada;
-            agoraCartao.marca(pausada);
-            agoraCartao.desenhar([&](Arduino_GFX& g, int dx, int dy) {
-                const int cx = cartao.x + dx + 258, cy = cartao.y + dy + 50;
-                g.fillCircle(cx, cy, 26, ui.color(AccentBar));
-                const auto tinta = ui.color(OnAccent);
-                if (pausada) g.fillTriangle(cx - 9, cy - 13, cx - 9, cy + 13, cx + 13, cy, tinta);
-                else { g.fillRect(cx - 10, cy - 12, 7, 24, tinta); g.fillRect(cx + 3, cy - 12, 7, 24, tinta); }
-                const int barra = cartao.x + dx + 28, by = cartao.y + dy + 82, bw = 190;  // vida do inimigo
-                g.fillRoundRect(barra, by, bw, 6, 3, ui.color(ProgressTrack));
-                if (vida > 0) g.fillRoundRect(barra, by, std::max(6, bw * vida / 100), 6, 3, ui.color(AccentBar));
-            });
-            if (ui.tap(cartao)) { screen = Screen::TempoBatalha; return Action::None; }
-        } else {
-            agoraCartao.texto({28, 80, 260, 24}, "Nenhuma batalha em curso", 15, Foreground);
-            agoraCartao.texto({28, 106, 190, 36}, fmtHoraMin(estado_.dia.fochoPagoMin), 30, Foreground);
-            agoraCartao.texto({28, 146, 270, 16}, "foco de hoje · escolha um projeto", 11, Muted);
-            agoraCartao.desenhar();
-        }
-
-        // lista de projetos
-        const size_t total = titulos_.size();
-        primeiro_ = std::min(primeiro_, total > kLinhasVisiveis ? total - kLinhasVisiveis : 0);
-        ui.label({324, 48, 190, 16}, "PROJETOS DO DIA", 11, Muted);
-        if (total > kLinhasVisiveis)
-            ui.label({520, 48, 108, 16},
-                     std::to_string(primeiro_ + 1) + "–" + std::to_string(std::min<size_t>(total, primeiro_ + kLinhasVisiveis))
-                         + " / " + std::to_string(total),
-                     11, Muted, TextAlign::Right);
-        const int giro = swipe_.update(ui, {324, 64, 304, kLinhasVisiveis * kAlturaLinha});
-        if (giro > 0 && primeiro_ + kLinhasVisiveis < total) primeiro_ += 1;
-        if (giro < 0 && primeiro_ > 0) primeiro_ -= 1;
-        if (total == 0) {
-            ui.label({324, 70, 304, 96}, "Sem projetos. Copie projetos.json para a pasta /tempo do cartão SD.", 13, Muted,
-                     TextAlign::Start, 3);
-            return Action::None;
-        }
-        for (int i = 0; i < kLinhasVisiveis && primeiro_ + i < total; ++i) {
-            const size_t indice = primeiro_ + i;
-            const Rect linha{324, static_cast<int16_t>(64 + i * kAlturaLinha), 304, kAlturaLinha};
-            const auto& projeto = lista_.projetos[indice];
-            Bloco item(ui, linha, Background, 0, 3);
-            const std::string nome = titulos_[indice].empty() ? "(sem título)" : titulos_[indice];
-            item.texto({static_cast<int16_t>(linha.x + 28), linha.y, 222, linha.h}, nome, 15, Foreground);
-            std::string vence;
-            if (projeto.vence && projeto.vence->size() >= 10)  // AAAA-MM-DD...
-                vence = projeto.vence->substr(8, 2) + "/" + projeto.vence->substr(5, 2);
-            item.texto({static_cast<int16_t>(linha.x + 252), linha.y, 52, linha.h}, vence, 11, Muted, TextAlign::Right);
-            item.desenhar([&](Arduino_GFX& g, int dx, int dy) {
-                g.drawCircle(linha.x + dx + 10, linha.y + dy + linha.h / 2, 8, ui.color(Muted));
-                g.drawCircle(linha.x + dx + 10, linha.y + dy + linha.h / 2, 7, ui.color(Muted));
-                g.fillRect(linha.x + dx, linha.y + dy + linha.h - 1, linha.w, 1, ui.color(Outline));
-            });
-            if (ui.tap(linha)) {
-                abrirPreparo(indice);
-                screen = Screen::TempoBatalha;
-                return Action::None;
-            }
-        }
-        return Action::None;
-    }
-
-    // Batalha "C3": preparo, foco, distraido, overtime e pausa. Layout 640x172: aneis a esquerda (0..172),
-    // texto e botoes no meio (x = 182), painel a direita (488..630).
-    Action TempoScreen::drawBatalha(ui::Context& ui, uint32_t nowMs, Screen& screen) {
-        if (fase_ == Fase::Reflexao) { screen = Screen::TempoVitoria; return Action::None; }
-        if (fase_ == Fase::Nenhuma) { screen = Screen::TempoHoje; return Action::None; }
-        const bool preparo = fase_ == Fase::Preparo;
-        const bool descanso = fase_ == Fase::Descanso;
-        const bool pausada = fase_ == Fase::Pausada;
-        const bool bonus = overtime_ && !preparo && !descanso;
-        const bool distr = distraido_;
-        const std::string nome = projeto_ < titulos_.size() && !titulos_[projeto_].empty() ? titulos_[projeto_] : "Projeto";
-        const int64_t planoMs = int64_t(planejadoMin_) * 60000;
-
-        // ---- preparo: arrastar o dedo em volta do anel externo ajusta 5..60 min em passos de 5
-        if (preparo) {
+        // ---- arrastar o dedo em volta do anel externo ajusta 5..60 min em passos de 5 (so sem batalha e sem ciclo)
+        if (!emBatalha && !ciclo) {
             if (const auto* t = ui.touch()) {
                 const double dx = double(t->x) - kCx, dy = double(t->y) - kCy;
                 const double dist = std::sqrt(dx * dx + dy * dy);
@@ -699,11 +685,203 @@ namespace screens {
                     if (f < 0) f += 1.0;
                     int m = int(std::lround(f * 12));
                     if (m == 0) m = f < 0.5 ? 1 : 12;
-                    planejadoMin_ = std::clamp(m, 1, 12) * 5;
+                    duracaoMin_ = std::clamp(m, 1, 12) * 5;
                 }
                 if (hasTouch(*t, ui::TouchCancel) || hasTouch(*t, ui::TouchRelease)) arrastando_ = false;
             }
+        } else {
+            arrastando_ = false;
         }
+        const int minutos = ciclo ? tempo::kCicloFocoMin : duracaoMin_;
+
+        // ---- aneis + minutos no centro
+        {
+            Bloco aneis(ui, {0, 0, 172, 172}, Background, 0, 20);
+            aneis.textoCor(Rect{int16_t(kCx - 40), int16_t(kCy - 18), 80, 28}, std::to_string(minutos), 22, ui.color(Foreground),
+                           TextAlign::Center);
+            aneis.textoCor(Rect{int16_t(kCx - 40), int16_t(kCy + 6), 80, 16}, "min", 9, ui.color(Muted), TextAlign::Center);
+            aneis.marca(static_cast<uint32_t>(minutos));
+            const Cor fundo = deRole(ui, Background);
+            aneis.desenhar([&](Arduino_GFX& g, int dx, int dy) {
+                anel(g, dx, dy, kCx, kCy, kRaioFora, kEspessura, minutos / 60.0, kLaranja, kAmbar, fundo, kLaranja);
+                anel(g, dx, dy, kCx, kCy, kRaioDentro, kEspessura, 1.0, kCarmim, kVinho, fundo, kCarmim);
+            });
+        }
+
+        const uint16_t cMudo = ui.color(Muted), cTexto = ui.color(Foreground), cBg = ui.color(Background);
+        const uint16_t cLaranja = c565(kLaranja), cPainel = ui.color(SurfaceMuted);
+        const bool livre = escolha_ < 0 || size_t(escolha_) >= titulos_.size();
+
+        // ---- "QUAL E O SEU FOCO?" + caixa
+        {
+            Bloco rotulo(ui, {182, 6, 288, 18}, Background, 0, 41);
+            rotulo.textoCor({182, 6, 288, 18}, "QUAL É O SEU FOCO?", 10, cMudo);
+            rotulo.desenhar();
+
+            const Rect caixa{182, 26, 288, 30};
+            Bloco bloco(ui, caixa, SurfaceMuted, 10, 42);
+            const std::string nome = livre ? std::string{"Foco livre"} : titulos_[escolha_].empty() ? std::string{"(sem título)"} : titulos_[escolha_];
+            bloco.textoCor({194, 26, int16_t(livre ? 150 : 192), 30}, nome, 14, cTexto);
+            bloco.textoCor(livre ? Rect{350, 26, 108, 30} : Rect{392, 26, 66, 30}, livre ? "escolher projeto ›" : "trocar ›", 10, livre ? cLaranja : cMudo, TextAlign::Right);
+            bloco.desenhar();
+            if (ui.tap(caixa, !emBatalha)) { seletor_ = true; primeiro_ = 0; return Action::None; }
+        }
+
+        // ---- chips de categoria (1 toque seleciona)
+        {
+            static constexpr Cor kCorChip[tempo::kNumChips] = {{255, 140, 60}, {150, 120, 235}, {60, 190, 170}, {90, 200, 255}, {255, 196, 80}};
+            int x = 182;
+            for (int i = 0; i < int(tempo::kNumChips); ++i) {
+                const char* nome = tempo::nomeCategoria(tempo::categoriaDoChip(i));
+                int letras = 0;
+                for (const char* c = nome; *c; ++c) letras += (static_cast<unsigned char>(*c) & 0xC0) != 0x80;
+                const int w = int(letras * 6.3) + 8;   // largura estimada da fonte (tamanho 9)
+                const bool sel = categoria_ == tempo::categoriaDoChip(i);
+                if (botao(ui, {int16_t(x), 66, int16_t(w), 20}, nome, sel ? c565(kCorChip[i]) : cPainel, sel ? cBg : cMudo, 9, !emBatalha))
+                    categoria_ = tempo::categoriaDoChip(i);
+                x += w + 3;
+            }
+        }
+
+        // ---- dica + interruptor do ciclo pomodoro
+        {
+            const Rect area{182, 92, 288, 28};
+            Bloco bloco(ui, area, Background, 0, 43);
+            bloco.textoCor({182, 92, 258, 28},
+                           ciclo ? "ciclo 4×: 25 foco · 5 pausa · 15 longa" : "anel: 5–60 min  ·  ciclo pomodoro 4×", 9, cMudo);
+            bloco.marca(ciclo);
+            const uint16_t cTrilho = rgb565(50, 52, 50), cBotao = ui.color(Foreground);
+            bloco.desenhar([&](Arduino_GFX& g, int dx, int dy) {
+                const int x = 446 + dx, y = 100 + dy;
+                g.fillRoundRect(x, y - 1, 22, 12, 6, ciclo ? cLaranja : cTrilho);
+                g.fillCircle(x + (ciclo ? 16 : 6), y + 5, 4, cBotao);
+            });
+            if (ui.tap({330, 92, 140, 28}, !emBatalha)) pomodoro_ = !pomodoro_;
+        }
+
+        // ---- botoes
+        if (emBatalha) {
+            if (botao(ui, {182, 124, 288, 36}, "Voltar à batalha", cLaranja, cBg, 14)) screen = Screen::TempoBatalha;
+        } else {
+            if (botao(ui, {182, 124, 178, 36}, "Começar", cLaranja, cBg, 14)) {
+                comecarSessao(nowMs);
+                screen = Screen::TempoBatalha;
+                return Action::None;
+            }
+            if (botao(ui, {370, 124, 100, 36}, "Pausa", cPainel, cMudo, 12)) {
+                ciclo_ = tempo::Ciclo{};
+                descansoMs_ = int64_t(tempo::kCicloPausaMin) * 60000;
+                iniciarDescanso(nowMs, false);
+                screen = Screen::TempoBatalha;
+                return Action::None;
+            }
+        }
+
+        // ---- painel HOJE
+        {
+            int sessoes = 0;
+            for (const auto& ev : estado_.dia.eventos) sessoes += ev.tipo == tempo::TipoEvento::Batalha;
+            const Rect area{488, 10, 142, 152};
+            Bloco painel(ui, area, SurfaceMuted, 10, 44);
+            const std::string foco = fmtHoraMin(estado_.dia.fochoPagoMin);
+            painel.textoCor({502, 18, 100, 16}, "HOJE", 10, cMudo);
+            painel.textoCor({502, 34, 66, 28}, foco, 18, cTexto);
+            painel.textoCor({566, 42, 60, 16}, "de foco", 10, cMudo);
+            painel.textoCor({502, 84, 124, 16}, sessoes <= 6 ? std::to_string(sessoes) + " de 6 sessões" : std::to_string(sessoes) + " sessões",
+                            10, cMudo);
+            painel.textoCor({502, 106, 124, 20}, fmtNum(estado_.saldo) + " cr", 14, cLaranja);
+            painel.textoCor({502, 128, 124, 16}, "‹ Início", 10, cMudo);
+            painel.marca(static_cast<uint32_t>(std::min(sessoes, 6)));
+            painel.desenhar([&](Arduino_GFX& g, int dx, int dy) {
+                for (int i = 0; i < 6; ++i) {
+                    const int cx = 506 + i * 11 + dx, cy = 74 + dy;
+                    if (i < sessoes) g.fillCircle(cx, cy, 4, cLaranja);
+                    else g.drawCircle(cx, cy, 4, cMudo);
+                }
+            });
+            if (ui.tap({488, 118, 142, 44})) {
+                salvarPreferencias();
+                screen = Screen::Home;
+            }
+        }
+        return Action::None;
+    }
+
+    // Seletor de foco: "Foco livre" primeiro, depois os projetos do TickTick. Escolher volta ao Inicio.
+    Action TempoScreen::drawSeletor(ui::Context& ui, uint32_t nowMs, Screen& screen) {
+        (void)nowMs;
+        (void)screen;
+        if (button(ui, {8, 0, 100, 30}, "‹ Voltar", Style::Plain, true, {}, 12)) { seletor_ = false; return Action::None; }
+        ui.label({120, 6, 340, 18}, "ESCOLHA O FOCO (opcional)", 10, Muted);
+
+        const size_t total = 1 + titulos_.size();
+        constexpr int kLinhas = 4;
+        constexpr int kPasso = 34;
+        primeiro_ = std::min(primeiro_, total > size_t(kLinhas) ? total - kLinhas : 0);
+        const int giro = swipe_.update(ui, {12, 28, 458, 136});
+        if (giro > 0 && primeiro_ + kLinhas < total) primeiro_ += 1;
+        if (giro < 0 && primeiro_ > 0) primeiro_ -= 1;
+
+        const uint16_t cMudo = ui.color(Muted), cTexto = ui.color(Foreground), cLaranja = c565(kLaranja);
+        for (int i = 0; i < kLinhas && primeiro_ + i < total; ++i) {
+            const size_t linha = primeiro_ + i;               // 0 = Foco livre; n = projeto n-1
+            const int y = 28 + i * kPasso;
+            const Rect rect{12, static_cast<int16_t>(y), 458, 30};
+            const bool sel = int(linha) - 1 == escolha_;
+            std::string titulo, sub;
+            if (linha == 0) {
+                titulo = "Foco livre";
+                sub = "sem projeto · você escolhe a categoria";
+            } else {
+                const auto& projeto = lista_.projetos[linha - 1];
+                titulo = titulos_[linha - 1].empty() ? std::string{"(sem título)"} : titulos_[linha - 1];
+                sub = "PROJETOS · ";
+                if (projeto.vence && projeto.vence->size() >= 10)
+                    sub += "vence " + projeto.vence->substr(8, 2) + "/" + projeto.vence->substr(5, 2);
+                else sub += "TickTick";
+            }
+            Bloco item(ui, rect, SurfaceMuted, 8, 50 + sel);
+            item.textoCor({26, int16_t(y), 430, 18}, titulo, 12, cTexto);
+            item.textoCor({26, int16_t(y + 16), 430, 13}, sub, 10, cMudo);
+            item.desenhar([&](Arduino_GFX& g, int dx, int dy) {
+                if (!sel) return;
+                g.drawRoundRect(rect.x + dx, rect.y + dy, rect.w, rect.h, 8, cLaranja);
+                g.drawRoundRect(rect.x + dx + 1, rect.y + dy + 1, rect.w - 2, rect.h - 2, 7, cLaranja);
+            });
+            if (ui.tap(rect)) {
+                escolher(int(linha) - 1);
+                seletor_ = false;
+                return Action::None;
+            }
+        }
+        if (total > size_t(kLinhas))
+            ui.label({300, 160, 170, 12},
+                     std::to_string(primeiro_ + 1) + "–" + std::to_string(std::min<size_t>(total, primeiro_ + kLinhas)) + " de "
+                         + std::to_string(total) + " · arraste",
+                     10, Muted, TextAlign::Right);
+
+        Bloco dica(ui, {488, 10, 142, 152}, SurfaceMuted, 10, 55);
+        dica.textoCor({502, 18, 100, 16}, "DICA", 10, cMudo);
+        dica.textoCor({502, 38, 124, 18}, "Sem projeto =", 11, cTexto);
+        dica.textoCor({502, 54, 124, 18}, "Foco livre.", 11, cTexto);
+        dica.textoCor({502, 80, 124, 16}, "Projetos vêm do", 10, cMudo);
+        dica.textoCor({502, 94, 124, 16}, "TickTick (tag", 10, cMudo);
+        dica.textoCor({502, 108, 124, 16}, "Projeto).", 10, cMudo);
+        dica.desenhar();
+        return Action::None;
+    }
+
+    // Batalha "C3": foco, distraido, overtime e pausa. Layout 640x172: aneis a esquerda (0..172),
+    // texto e botoes no meio (x = 182), painel a direita (488..630).
+    Action TempoScreen::drawBatalha(ui::Context& ui, uint32_t nowMs, Screen& screen) {
+        if (fase_ == Fase::Reflexao) { screen = Screen::TempoVitoria; return Action::None; }
+        if (fase_ == Fase::Nenhuma) { screen = Screen::TempoHoje; return Action::None; }
+        const bool descanso = fase_ == Fase::Descanso;
+        const bool pausada = fase_ == Fase::Pausada;
+        const bool bonus = overtime_ && !descanso;
+        const bool distr = distraido_;
+        const std::string nome = nomeBatalha_.empty() ? std::string{"Foco livre"} : nomeBatalha_;
+        const int64_t planoMs = int64_t(planejadoMin_) * 60000;
 
         // ---- numeros dos aneis
         double voce = 0.0, inimigo = 1.0;
@@ -711,12 +889,9 @@ namespace screens {
         std::string centro, rotulo;
         Cor corCentro = deRole(ui, Foreground);
         int64_t restDescanso = 0;
-        if (preparo) {
-            centro = std::to_string(planejadoMin_);
-            rotulo = "min";
-        } else if (descanso) {
-            restDescanso = std::max<int64_t>(0, kDescansoMs - (int64_t(tempo::ms(nowMs)) - int64_t(descansoInicioMs_)));
-            voce = 1.0 - double(restDescanso) / kDescansoMs;
+        if (descanso) {
+            restDescanso = std::max<int64_t>(0, descansoMs_ - (int64_t(tempo::ms(nowMs)) - int64_t(descansoInicioMs_)));
+            voce = 1.0 - double(restDescanso) / double(descansoMs_);
             inimigo = 0.0;
             corVoce0 = kAgua; corVoce1 = kAgua2;
             centro = fmtRelogio((restDescanso + 999) / 1000);
@@ -740,46 +915,37 @@ namespace screens {
         // ---- aneis + centro
         {
             Bloco aneis(ui, {0, 0, 172, 172}, Background, 0, 20 + surface());
-            const bool grande = preparo;
+            const bool grande = false;
             aneis.textoCor(Rect{int16_t(kCx - 40), int16_t(kCy - (grande ? 18 : 15)), 80, int16_t(grande ? 28 : 24)}, centro, grande ? 22 : bonus ? 14 : 17,
                            c565(corCentro), TextAlign::Center);
             aneis.textoCor(Rect{int16_t(kCx - 40), int16_t(kCy + (grande ? 6 : 5)), 80, 16}, rotulo, 9, ui.color(Muted), TextAlign::Center);
             aneis.marca(static_cast<uint32_t>(voce * 720) * 1031U + static_cast<uint32_t>(inimigo * 720));
             const Cor fundo = deRole(ui, Background);
-            const double previa = preparo ? planejadoMin_ / 60.0 : 0.0;
             aneis.desenhar([&](Arduino_GFX& g, int dx, int dy) {
                 const int ox = dx, oy = dy;
-                anel(g, ox, oy, kCx, kCy, kRaioFora, kEspessura, preparo ? previa : voce,
-                     preparo ? mistura(fundo, kLaranja, 0.5) : corVoce0, preparo ? mistura(fundo, kAmbar, 0.5) : corVoce1, fundo, corVoce0);
-                if (preparo) {  // previa da duracao: arco apagado + marcador na ponta (arraste o dedo)
-                    const double ang = (-90 + 360 * previa) * 3.14159265358979 / 180.0;
-                    const int px = ox + kCx + int(std::lround(kRaioFora * std::cos(ang)));
-                    const int py = oy + kCy + int(std::lround(kRaioFora * std::sin(ang)));
-                    g.fillCircle(px, py, 8, c565(mistura(fundo, kLaranja, 0.75)));
-                    g.fillCircle(px, py, 4, c565(kAmbar));
-                }
+                anel(g, ox, oy, kCx, kCy, kRaioFora, kEspessura, voce, corVoce0, corVoce1, fundo, corVoce0);
                 anel(g, ox, oy, kCx, kCy, kRaioDentro, kEspessura, descanso ? 0.0 : inimigo, kCarmim, kVinho, fundo, kCarmim);
             });
         }
 
         // ---- texto central
-        const auto estimativa = estimar(preparo);
+        const auto estimativa = estimar();
         Bloco texto(ui, {176, 4, 308, 118}, Background, 0, 40 + surface());
         const uint16_t cLaranja = c565(kLaranja), cAzul = c565(kAzul), cCarmim = c565(kCarmim), cAgua = c565(kAgua);
         const uint16_t cMudo = ui.color(Muted), cTexto = ui.color(Foreground);
         const auto agora = tempo::agora(nowMs);
-        const int nivel = tempo::nivelDeXp(estado_.xpTotal);
-        if (preparo) {
-            texto.textoCor({182, 8, 300, 18}, "INIMIGO · nível " + std::to_string(nivel), 10, cMudo);
-            texto.textoCor({182, 24, 300, 28}, nome, 18, cTexto);
-            texto.textoCor({182, 53, 300, 20}, "anel de fora: você ganhando vida", 11, cLaranja);
-            texto.textoCor({182, 71, 300, 20}, "anel de dentro: o inimigo morrendo", 11, cCarmim);
-            texto.textoCor({182, 92, 300, 18}, "arraste o dedo no anel de fora: 5 a 60 min", 10, cMudo);
-        } else if (descanso) {
-            texto.textoCor({182, 8, 300, 18}, "PAUSA", 10, cAgua);
-            texto.textoCor({182, 24, 300, 28}, "Pausa de 5 minutos", 18, cTexto);
+        const std::string rodadaTxt = ciclo_.ativo ? "rodada " + std::to_string(ciclo_.rodada) + " de " + std::to_string(tempo::kCicloRodadas)
+                                                   : std::string{};
+        if (descanso) {
+            const int pausaMin = int(descansoMs_ / 60000);
+            const bool longa = ciclo_.ativo && ciclo_.passo == tempo::PassoCiclo::PausaLonga;
+            texto.textoCor({182, 8, 300, 18}, ciclo_.ativo ? "PAUSA · " + rodadaTxt : std::string{"PAUSA"}, 10, cAgua);
+            texto.textoCor({182, 24, 300, 28}, std::string{longa ? "Pausa longa de " : "Pausa de "} + std::to_string(pausaMin) + " minutos", 18, cTexto);
             texto.textoCor({182, 53, 300, 20}, "respire; um bipe avisa quando acabar", 11, cMudo);
-            texto.textoCor({182, 71, 300, 20}, descansoVolta_ ? "depois você volta ao bônus" : "depois você volta ao Hoje", 11, cMudo);
+            texto.textoCor({182, 71, 300, 20},
+                           ciclo_.ativo ? (longa ? std::string{"depois o ciclo termina"}
+                                                 : "depois: rodada " + std::to_string(ciclo_.rodada + 1) + " de " + std::to_string(tempo::kCicloRodadas))
+                                        : descansoVolta_ ? "depois você volta ao bônus" : "depois você volta ao Início", 11, cMudo);
         } else if (bonus) {
             texto.textoCor({182, 8, 300, 18}, pausada ? "PAUSADO · INIMIGO DERROTADO" : "INIMIGO DERROTADO · CONTINUANDO", 10, cAzul);
             texto.textoCor({182, 24, 300, 28}, nome, 18, cTexto);
@@ -797,7 +963,7 @@ namespace screens {
             std::string linha;
             if (distr) linha = "volte ao foco e o anel vermelho volta a esvaziar";
             else {
-                linha = "rodada de " + std::to_string(planejadoMin_) + " min";
+                linha = (ciclo_.ativo ? rodadaTxt + " · " : std::string{"rodada de "}) + std::to_string(planejadoMin_) + " min";
                 if (agora.valida && !pausada)
                     linha += " · termina " + fmtHoraRelogio(agora.minutoDoDia + int((restanteMs() + 59999) / 60000));
             }
@@ -808,16 +974,7 @@ namespace screens {
         // ---- painel direito
         Bloco painel(ui, {488, 10, 142, 152}, SurfaceMuted, 10, 60 + surface());
         const uint16_t cVerde = c565(kVerde);
-        if (preparo) {
-            painel.textoCor({502, 18, 120, 16}, "RECOMPENSA", 10, cMudo);
-            painel.textoCor({502, 36, 120, 24}, "+" + fmtNum(estimativa.cr) + " cr", 18, cLaranja);
-            painel.textoCor({502, 60, 122, 18}, "+" + fmtNum(estimativa.xp) + " XP · " + nomeAtributo(estimativa.atributo), 12, cTexto);
-            int sessoes = 0;
-            for (const auto& ev : estado_.dia.eventos) sessoes += ev.tipo == tempo::TipoEvento::Batalha;
-            painel.textoCor({502, 90, 120, 16}, "Hoje", 10, cMudo);
-            painel.textoCor({502, 108, 124, 18}, fmtHoraMin(estado_.dia.fochoPagoMin) + " foco · " + std::to_string(sessoes)
-                                                   + (sessoes == 1 ? " sessão" : " sessões"), 11, cTexto);
-        } else if (descanso) {
+        if (descanso) {
             painel.textoCor({502, 18, 120, 16}, "PAUSA", 10, cMudo);
             painel.textoCor({502, 36, 120, 24}, fmtRelogio((restDescanso + 999) / 1000), 18, cAgua);
             painel.textoCor({502, 62, 122, 18}, "restantes", 12, cTexto);
@@ -840,11 +997,8 @@ namespace screens {
 
         // ---- botoes
         const uint16_t cFundoBtn = ui.color(SurfaceMuted), cBg = ui.color(Background);
-        if (preparo) {
-            if (botao(ui, {182, 124, 168, 36}, "Começar batalha", cLaranja, cBg, 13)) iniciar(nowMs);
-            if (botao(ui, {360, 124, 110, 36}, "Pausa", cFundoBtn, cMudo, 12)) iniciarDescanso(nowMs, false);
-        } else if (descanso) {
-            if (botao(ui, {182, 124, 168, 36}, "Encerrar pausa", c565(kAgua), cBg, 13)) encerrarDescanso();
+        if (descanso) {
+            if (botao(ui, {182, 124, 168, 36}, "Encerrar pausa", c565(kAgua), cBg, 13)) encerrarDescanso(nowMs);
         } else if (bonus) {
             if (botao(ui, {182, 124, 138, 36}, "Concluir", cLaranja, cBg, 13)) {
                 finalizar(nowMs, false, fs_);
@@ -861,8 +1015,10 @@ namespace screens {
                 acumular(nowMs);
                 if (focadoMs_ < 60000) {   // menos de 1 min de foco: cancela sem log nem recompensa
                     fase_ = Fase::Nenhuma;
+                    ciclo_ = tempo::Ciclo{};
                     screen = Screen::TempoHoje;
                 } else {
+                    ciclo_ = tempo::Ciclo{};   // encerrar no meio abandona o ciclo
                     finalizar(nowMs, true, fs_);
                     screen = Screen::TempoVitoria;
                 }

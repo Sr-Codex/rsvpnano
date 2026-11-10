@@ -58,6 +58,7 @@ namespace tempo {
         std::string tipo;        // "batalha", ...
         std::string projeto;     // titulo exibido
         std::string projetoId;
+        std::string categoria;   // Trabalho/Estudo/Leitura/Meditação/Projetos ("Foco livre" = projeto vazio de id)
         std::string resultado;   // "vitoria" | "fuga"
         int planejadoMin = 0;
         int focadoMin = 0;

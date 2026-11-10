@@ -23,7 +23,7 @@ namespace screens {
     class HomeScreen {
     public:
         // Desenha so o que mudou. Leitor -> menu do leitor (Screen::Read); Ajustes -> Screen::Settings;
-        // Tempo -> Hoje; apps "em breve" mostram um aviso de 2 s e nao navegam.
+        // Tempo -> Inicio; apps "em breve" mostram um aviso de 2 s e nao navegam.
         Action draw(ui::Context& ui, uint32_t nowMs, Screen& screen, TempoScreen& tempo, fs::FS* filesystem,
                     const HomeInfo& info);
 
