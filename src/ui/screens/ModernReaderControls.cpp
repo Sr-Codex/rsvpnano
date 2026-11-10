@@ -21,7 +21,7 @@ namespace screens {
                 ReadingLoop::wordCount(session)>0,!ui.focusBadge().empty()));
             modernCanvasTouch_=modernControl_==0 && ui::contains({0,36,640,100},touch->x,touch->y);
             modernTouchX_=touch->x;modernTouchY_=touch->y;modernTouchMoved_=false;modernHolding_=false;
-            modernScrub_=false;backward_=false;
+            modernScrub_=false;backward_=false;modernHoldStarted_=false;
             modernPressedAtMs_=nowMs;modernPressedPlaying_=session.playing;
             return true;
         }
@@ -33,8 +33,8 @@ namespace screens {
             //  * hold still (<= kScrubSlopPx): right half reads forward, LEFT half (x<320) rewinds (holdToRead only);
             //  * move horizontally beyond kScrubSlopPx: scrub word by word with the finger — ONLY when the touch
             //    started with playback paused (user request lume.5: hold/drag only while paused);
-            //  * vertical moves keep cancelling hold (no scrub); tap toggles play. Top/bottom bars are separate controls.
-            if(!modernScrub_ && !modernHolding_ && !backward_ && !modernPressedPlaying_ && !session.playing
+            //  * once a hold started, moving the finger does nothing until release (no scrub, no cancel); tap toggles play. Top/bottom bars are separate controls.
+            if(!modernScrub_ && !modernHoldStarted_ && !modernHolding_ && !backward_ && !modernPressedPlaying_ && !session.playing
                && ReadingLoop::wordCount(session)>0 && reading::isScrubMove(dx,dy)){
                 modernScrub_=true;scrubStartWord_=session.state.wordIndex;scrubAnchorX_=touch->x;
             }
@@ -50,17 +50,15 @@ namespace screens {
                 if(released){modernScrub_=false;scrubText_.clear();ReadingProgress::save(session,preferences,true,nowMs);cancelModernControls();}
                 return true;
             }
-            if(modernTouchMoved_ && (modernHolding_||backward_)){
-                if(backward_)stopBackward(preferences,nowMs);else finishPause(preferences,nowMs);
-                modernHolding_=false;
-            }
+            // Finger drift while holding (reading or rewinding) is ignored: it keeps going until release and never
+            // turns into a scrub (user request lume.5: drag only works after pausing).
             if(!released){
                 if(!modernTouchMoved_ && settings_.holdToRead && !modernPressedPlaying_ && !modernHolding_ && !backward_
                    && nowMs-modernPressedAtMs_>=350){
                     if(modernTouchX_<320){
-                        backward_=true;modernHolding_=true;backwardStartMs_=nowMs;session.lastAdvanceMs=nowMs;
+                        backward_=true;modernHolding_=true;modernHoldStarted_=true;backwardStartMs_=nowMs;session.lastAdvanceMs=nowMs;
                         ReadingLoop::pause(session);pauseAtSentenceEndRequested_=false;
-                    }else{modernHolding_=true;start(nowMs,false);}
+                    }else{modernHolding_=true;modernHoldStarted_=true;start(nowMs,false);}
                 }
                 return true;
             }

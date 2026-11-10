@@ -174,6 +174,7 @@ namespace screens {
         uint8_t modernControl_ = 0;
         bool modernCanvasTouch_ = false;
         bool modernHolding_ = false;
+        bool modernHoldStarted_ = false; // this touch became a hold (read/rewind): never scrub, ignore drift until release
         uint16_t modernTouchX_ = 0, modernTouchY_ = 0;
         bool modernTouchMoved_ = false;
         bool modernPressedPlaying_ = false;
