@@ -4,8 +4,10 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <vector>
 
 #include "library/BookMetadata.h"
+#include "reader/ReadingMarks.h"
 #include "reader/ReadingState.h"
 #include "library/IndexedBookStore.h"
 
@@ -21,6 +23,10 @@ struct ReadingSession {
     uint8_t displayWordCount = 1;
     size_t displayWordIndex = static_cast<size_t>(-1);
     reading::State state;
+    reading::ResumeTracker resumeTracker;
+    std::vector<reading::Bookmark> bookmarks; // persisted in the .rmarks sidecar
+    bool resumeDirty = false;                 // sidecar needs a mirror()
+    bool bookmarksDirty = false;              // .rmarks needs a write
 
     std::string_view localeAt(size_t index) const {
         return state.overrides.locale && !state.overrides.locale->empty()

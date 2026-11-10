@@ -102,6 +102,10 @@ namespace StoragePaths {
         return siblingPathWithExtension(path, kBookStateExtension);
     }
 
+    std::string bookmarksPathFor(std::string_view path) {
+        return siblingPathWithExtension(path, kBookmarksExtension);
+    }
+
     std::string indexedTempPathFor(std::string_view path) {
         return std::string{path} + kTempExtension;
     }
@@ -117,7 +121,7 @@ namespace StoragePaths {
         }
 
         if (hasExtension(name, kIndexExtension) || hasExtension(name, kDataExtension)
-            || hasExtension(name, kBookStateExtension) || hasExtension(name, kTempExtension)) {
+            || hasExtension(name, kBookStateExtension) || hasExtension(name, kBookmarksExtension) || hasExtension(name, kTempExtension)) {
             return true;
         }
 

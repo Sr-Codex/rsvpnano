@@ -25,6 +25,22 @@ namespace screens {
         }
         prefetchNextWord(nowMs);
         nowMs = millis();
+        {
+            // "Onde parei": count real reading (forward steps / play time); see reader/ReadingMarks.h.
+            const uint32_t dt = nowMs - lastTickMs_;
+            lastTickMs_ = nowMs;
+            if (backward_ || modernScrub_)
+                session.resumeTracker.lastWord = session.state.wordIndex; // rewind/scrub is not "reading"
+            else if (reading::tick(session.state.resume, session.resumeTracker, session.state.wordIndex, dt,
+                              session.playing))
+                session.resumeDirty = true;
+        }
+        if (backward_) {
+            // Hold-left rewind: word by word at the current WPM (x2 after 2 s, x3 after 4 s). No sentence-end stop.
+            ReadingLoop::updateBackward(session, settings_, nowMs,
+                                        reading::backwardSpeedPercent(nowMs - backwardStartMs_));
+            return;
+        }
         if (!session.playing)
             return;
 #if defined(RSVP_BENCHMARK_MODE)
@@ -41,9 +57,16 @@ namespace screens {
             finishPause(preferences, nowMs);
     }
 
+    void ReaderScreen::stopBackward(Preferences& preferences, uint32_t nowMs) {
+        if (!backward_) return;
+        backward_ = false;
+        ReadingProgress::save(session, preferences, true, nowMs);
+    }
+
     void ReaderScreen::start(uint32_t nowMs, bool locked) {
         pagePreview_ = false;
         pageBrowsing_ = false;
+        backward_ = false;
         playLocked_ = locked;
         pauseAtSentenceEndRequested_ = false;
         wpmFeedbackUntilMs_ = 0;

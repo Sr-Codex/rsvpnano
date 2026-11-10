@@ -27,6 +27,12 @@ namespace ReadingLoop {
     void setWords(ReadingSession& session, std::span<const std::string> words, uint32_t nowMs);
     void setBookStore(ReadingSession& session, const IndexedBookStore& store, uint32_t nowMs);
     void seekTo(ReadingSession& session, size_t wordIndex);
+    // Position jump that records "onde parei" first (see reader/ReadingMarks.h). Use for every jump.
+    void jumpTo(ReadingSession& session, size_t wordIndex);
+    // Hold-to-read rewind: steps backwards at the current WPM times speedPercent/100. No sentence-end stop.
+    // Returns true when the word changed. Stops at word 0.
+    bool updateBackward(ReadingSession& session, const settings::ReadingSettings& settings, uint32_t nowMs,
+                        uint32_t speedPercent);
     void seekRelative(ReadingSession& session, size_t baseIndex, int steps);
     bool seekParagraph(ReadingSession& session, int steps);
     void rewindSentence(ReadingSession& session);

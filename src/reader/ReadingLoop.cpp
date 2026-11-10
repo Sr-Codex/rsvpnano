@@ -1033,6 +1033,40 @@ namespace ReadingLoop {
         setCurrentWordFromIndex(session);
     }
 
+    void jumpTo(ReadingSession& session, size_t wordIndex) {
+        const size_t count = wordCount(session);
+        if (count == 0) {
+            seekTo(session, wordIndex);
+            return;
+        }
+        const uint32_t from = session.state.wordIndex;
+        const uint32_t to = static_cast<uint32_t>(std::min(wordIndex, count - 1));
+        const ChapterMarker* chapter = session.metadata.chapterAt(from);
+        const uint32_t chapterPlusOne =
+            chapter == nullptr ? 0 : static_cast<uint32_t>(chapter - session.metadata.chapters.data()) + 1;
+        if (reading::noteJump(session.state.resume, session.resumeTracker, from, to, chapterPlusOne,
+                              static_cast<uint32_t>(count)))
+            session.resumeDirty = true;
+        seekTo(session, to);
+    }
+
+    bool updateBackward(ReadingSession& session, const settings::ReadingSettings& settings, uint32_t nowMs,
+                        uint32_t speedPercent) {
+        bool changed = false;
+        for (uint8_t catchUp = 0; catchUp < kMaxCatchUpWords; ++catchUp) {
+            const uint32_t base = currentWordDurationMs(session, settings);
+            const uint32_t durationMs = std::max<uint32_t>(1, base * 100 / std::max<uint32_t>(100, speedPercent));
+            if (base == 0 || nowMs - session.lastAdvanceMs < durationMs) break;
+            session.lastAdvanceMs += durationMs;
+            if (session.state.wordIndex == 0) break;
+            const size_t chunk = settings.mode == settings::ReadingMode::chunks ? displayWordCount(session) : 1;
+            seekTo(session, reading::backwardTarget(session.state.wordIndex, chunk));
+            changed = true;
+        }
+        if (nowMs - session.lastAdvanceMs > 1000) session.lastAdvanceMs = nowMs; // never burst after a stall
+        return changed;
+    }
+
     void seekRelative(ReadingSession& session, size_t baseIndex, int steps) {
         const size_t count = wordCount(session);
         if (count == 0)

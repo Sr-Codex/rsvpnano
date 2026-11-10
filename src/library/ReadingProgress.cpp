@@ -194,7 +194,49 @@ namespace ReadingProgress {
         return static_cast<uint8_t>(std::min<uint32_t>((wordIndex * 100UL) / (wordCount - 1), 100));
     }
 
+    void loadBookmarks(ReadingSession& session, const IndexedBookStore& store) {
+        session.bookmarks.clear();
+        session.bookmarksDirty = false;
+        if (!session.stored()) return;
+        File file = Board::Storage::filesystem().open(StoragePaths::bookmarksPathFor(session.sourcePath()).c_str(), FILE_READ);
+        if (!file || file.isDirectory()) {
+            if (file) file.close();
+            return;
+        }
+        const size_t size = file.size();
+        if (size == 0 || size > 4096) {
+            file.close();
+            return;
+        }
+        std::string input(size, '\0');
+        const size_t read = file.read(reinterpret_cast<uint8_t*>(input.data()), input.size());
+        file.close();
+        if (read != input.size()) return;
+        if (auto marks = reading::parseBookmarks(input, store.identity())) session.bookmarks = std::move(*marks);
+    }
+
+    void saveBookmarks(ReadingSession& session) {
+        session.bookmarksDirty = false;
+        if (!session.stored() || session.bookStore == nullptr) return;
+        const std::string path = StoragePaths::bookmarksPathFor(session.sourcePath());
+        if (session.bookmarks.empty()) {
+            Board::Storage::filesystem().remove(path.c_str());
+            return;
+        }
+        const std::string output = reading::serializeBookmarks(session.bookStore->identity(), session.bookmarks);
+        const auto temporary = path + ".tmp", backup = path + ".bak";
+        auto written = StorageFiles::writeFileAtomic(Board::Storage::filesystem(), path.c_str(), temporary.c_str(),
+                                                     backup.c_str(), output);
+        if (!written) Logger::failure("storage-progress", "bookmarks", path.c_str(), written.error());
+    }
+
     void save(ReadingSession& session, Preferences& preferences, bool force, uint32_t nowMs) {
+        // Resume point / bookmarks changed by a jump or the marker UI: persist right away.
+        if (session.stored() && session.resumeDirty && session.bookStore != nullptr) {
+            session.resumeDirty = false;
+            mirror(session, *session.bookStore);
+        }
+        if (session.stored() && session.bookmarksDirty) saveBookmarks(session);
         if (!session.stored() || (!force && nowMs - session.lastSaveMs < kSaveIntervalMs))
             return;
         const size_t wordIndex = session.state.wordIndex;

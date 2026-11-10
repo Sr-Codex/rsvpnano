@@ -55,61 +55,8 @@ namespace screens {
             dragging_ = false;
         }
 
-        if (ui.modernPresentation()) {
-            using ui::modern::button;
-            using ui::modern::Style;
-            using ui::modern::Direction;
-            if (chapters.empty()) {
-                if (button(ui, {16, 72, 608, 72}, ui.text(UiText::StartReading), Style::Primary)) {
-                    ReadingLoop::seekTo(reader, 0);
-                    return Action::Resume;
-                }
-                return Action::None;
-            }
-            centeredIndex_ = std::min(centeredIndex_, chapters.size() - 1);
-            const ui::Rect viewport{16, 52, 358, 112};
-            const auto* touch = ui.touch();
-            if (touch && ui::hasTouch(*touch, ui::TouchStart) && ui::contains(viewport, touch->x, touch->y)) {
-                dragging_ = true;
-                moved_ = false;
-                dragStartIndex_ = centeredIndex_;
-                dragStartY_ = touch->y;
-            }
-            if (dragging_ && touch && (ui::hasTouch(*touch, ui::TouchMove) || ui::hasTouch(*touch, ui::TouchRelease))) {
-                const int delta = static_cast<int>(touch->y) - dragStartY_;
-                moved_ = moved_ || std::abs(delta) > kDragThreshold;
-                if (moved_) {
-                    const int direction = settings.chapterScrollReversed ? -1 : 1;
-                    const int64_t position = std::clamp<int64_t>(
-                        static_cast<int64_t>(dragStartIndex_) * 38 - direction * delta,
-                        0, static_cast<int64_t>(chapters.size() - 1) * 38);
-                    centeredIndex_ = static_cast<size_t>((position + 19) / 38);
-                }
-                if (ui::hasTouch(*touch, ui::TouchRelease)) dragging_ = false;
-            }
-            if (ui::modern::arrow(ui, {386, 52, 56, 52}, Direction::Up, centeredIndex_ > 0)) --centeredIndex_;
-            if (ui::modern::arrow(ui, {386, 112, 56, 52}, Direction::Down, centeredIndex_ + 1 < chapters.size()))
-                ++centeredIndex_;
-            const size_t first = centeredIndex_ == 0 ? 0 : centeredIndex_ - 1;
-            for (size_t row = 0; row < 3; ++row) {
-                const size_t index = first + row;
-                const ui::Rect rect{16, static_cast<int16_t>(52 + row * 38), 358, 36};
-                const auto label = index < chapters.size() ? std::to_string(index + 1) + "  " + chapters[index].title
-                                                          : std::string{};
-                if (button(ui, rect, label, index == centeredIndex_ ? Style::Secondary : Style::Plain,
-                           index < chapters.size(), {}, 14, ui::TextAlign::Start) && !moved_) centeredIndex_ = index;
-            }
-            ui.label({460, 48, 164, 23}, std::to_string(centeredIndex_ + 1) + " / " + std::to_string(chapters.size()),
-                     1, ui::themes::Muted);
-            ui.label({460, 73, 164, 44}, chapters[centeredIndex_].title, 2, ui::themes::Foreground,
-                     ui::TextAlign::Start, 2);
-            ui::modern::rule(ui, {448, 52, 1, 112});
-            if (button(ui, {460, 124, 164, 40}, modern::caption(ui, UiText::Read, "Open chapter ↗"), Style::Primary)) {
-                ReadingLoop::seekTo(reader, chapters[centeredIndex_].wordIndex);
-                return Action::Resume;
-            }
-            return Action::None;
-        }
+        if (ui.modernPresentation())
+            return drawModern(ui, chapters, reader, settings, readingIndex, screen);
 
         char position[24];
         std::snprintf(position, sizeof(position), "%u / %u",
@@ -128,7 +75,7 @@ namespace screens {
             return Action::None;
         if (chapters.empty()) {
             if (ui.button(viewport, ui.text(UiText::StartReading))) {
-                ReadingLoop::seekTo(reader, 0);
+                ReadingLoop::jumpTo(reader, 0);
                 return Action::Resume;
             }
             return Action::None;
@@ -177,7 +124,7 @@ namespace screens {
                 if (tappedIndex != chapters.size()) {
                     centeredIndex_ = tappedIndex;
                     offset_ = 0;
-                    ReadingLoop::seekTo(reader, chapters[centeredIndex_].wordIndex);
+                    ReadingLoop::jumpTo(reader, chapters[centeredIndex_].wordIndex);
                     return Action::Resume;
                 }
             }
@@ -248,6 +195,200 @@ namespace screens {
                 ui.drawText({static_cast<int16_t>(x + 10), top, static_cast<int16_t>(width - notch - 24), height},
                             title, centered ? 2 : 1, ui.blend(ui::themes::ColorRole::Foreground, alpha),
                             ui::TextAlign::Center, 1, reader.metadata.localeAt(chapters[index].wordIndex));
+            }
+        }
+        return Action::None;
+    }
+
+    // Lume.5 modern layout (640x172): "Voltar para onde parei" on top, chapter rows below, bookmarks panel on
+    // the right. Every jump goes through ReadingLoop::jumpTo so "onde parei" is recorded first.
+    Action ChaptersScreen::drawModern(ui::Context& ui, std::span<const ChapterMarker> chapters, ReadingSession& reader,
+                                      const settings::ReadingSettings& settings, size_t readingIndex, Screen& screen) {
+        (void) screen;
+        using namespace ui::themes;
+        const size_t wordCount = ReadingLoop::wordCount(reader);
+        const reading::ResumePoint& resume = reader.state.resume;
+        const bool hasResume = resume.valid;
+        const std::string_view chapterWord = ui.text(UiText::Chapter);
+
+        auto chapterTitle = [&](size_t index) {
+            return index < chapters.size() && !chapters[index].title.empty()
+                       ? std::string{chapters[index].title}
+                       : std::string{chapterWord} + " " + std::to_string(index + 1);
+        };
+
+        // --- "Voltar para onde parei" -------------------------------------------------------------------
+        if (hasResume) {
+            const ui::Rect rect{16, 48, 452, 40};
+            std::string caption = resume.chapter > 0 ? "Cap. " + std::to_string(resume.chapter) + " · "
+                                                          + chapterTitle(resume.chapter - 1)
+                                                     : std::string{"Início"};
+            caption += " · " + std::to_string(resume.percent) + "%";
+            if (ui.redraw(rect, ui::Context::signature(caption, resume.wordIndex))) {
+                Arduino_GFX& gfx = ui.gfx();
+                gfx.fillRoundRect(rect.x, rect.y, rect.w, rect.h, 5, ui.color(SurfaceActive));
+                gfx.drawRoundRect(rect.x, rect.y, rect.w, rect.h, 5, ui.color(Accent));
+                gfx.drawRoundRect(rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2, 4, ui.color(Accent));
+                const int16_t cy = rect.y + rect.h / 2;
+                gfx.fillTriangle(rect.x + 10, cy, rect.x + 22, cy - 9, rect.x + 22, cy + 9, ui.color(Accent));
+                ui.drawText({static_cast<int16_t>(rect.x + 32), static_cast<int16_t>(rect.y + 2),
+                             static_cast<int16_t>(rect.w - 40), 20},
+                            "Voltar para onde parei", 14, ui.color(Foreground), ui::TextAlign::Start);
+                ui.drawText({static_cast<int16_t>(rect.x + 32), static_cast<int16_t>(rect.y + 21),
+                             static_cast<int16_t>(rect.w - 40), 16},
+                            caption, 11, ui.color(Accent), ui::TextAlign::Start);
+            }
+            if (ui.tap(rect)) {
+                ReadingLoop::jumpTo(reader, resume.wordIndex); // exact word; clears the resume point
+                return Action::Resume;
+            }
+        }
+
+        // --- chapter rows ---------------------------------------------------------------------------------
+        const int16_t top = hasResume ? 92 : 48;
+        const size_t rows = hasResume ? 2 : 3;
+        const int16_t rowH = hasResume ? 34 : 36, step = hasResume ? 38 : 40;
+        const ui::Rect viewport{16, top, 452, static_cast<int16_t>(rows * step)};
+        if (chapters.empty()) {
+            if (ui::modern::button(ui, {16, 72, 452, 72}, ui.text(UiText::StartReading), ui::modern::Style::Primary)) {
+                ReadingLoop::jumpTo(reader, 0);
+                return Action::Resume;
+            }
+        } else {
+            using ui::modern::Direction;
+            centeredIndex_ = std::min(centeredIndex_, chapters.size() - 1);
+            const auto* touch = ui.touch();
+            if (touch && ui::hasTouch(*touch, ui::TouchStart) && ui::contains(viewport, touch->x, touch->y)) {
+                dragging_ = true;
+                moved_ = false;
+                dragStartIndex_ = centeredIndex_;
+                dragStartY_ = touch->y;
+            }
+            if (dragging_ && touch && (ui::hasTouch(*touch, ui::TouchMove) || ui::hasTouch(*touch, ui::TouchRelease))) {
+                const int delta = static_cast<int>(touch->y) - dragStartY_;
+                moved_ = moved_ || std::abs(delta) > kDragThreshold;
+                if (moved_) {
+                    const int direction = settings.chapterScrollReversed ? -1 : 1;
+                    const int64_t position = std::clamp<int64_t>(
+                        static_cast<int64_t>(dragStartIndex_) * 38 - direction * delta, 0,
+                        static_cast<int64_t>(chapters.size() - 1) * 38);
+                    centeredIndex_ = static_cast<size_t>((position + 19) / 38);
+                }
+                if (ui::hasTouch(*touch, ui::TouchRelease)) dragging_ = false;
+            }
+            const ui::Rect upRect{420, top, 48, static_cast<int16_t>(viewport.h / 2 - 1)};
+            const ui::Rect downRect{420, static_cast<int16_t>(top + viewport.h / 2 + 1), 48,
+                                    static_cast<int16_t>(viewport.h / 2 - 1)};
+            if (ui::modern::arrow(ui, upRect, Direction::Up, centeredIndex_ > 0)) --centeredIndex_;
+            if (ui::modern::arrow(ui, downRect, Direction::Down, centeredIndex_ + 1 < chapters.size())) ++centeredIndex_;
+
+            const size_t first = std::min(hasResume ? centeredIndex_ : (centeredIndex_ == 0 ? 0 : centeredIndex_ - 1),
+                                          chapters.size() > rows ? chapters.size() - rows : 0);
+            // "parei aqui" marks the chapter of the saved place, or the live reading chapter when none is saved.
+            const size_t stoppedIndex = hasResume ? (resume.chapter > 0 ? resume.chapter - 1 : SIZE_MAX) : readingIndex;
+            for (size_t row = 0; row < rows && first + row < chapters.size(); ++row) {
+                const size_t index = first + row;
+                const ui::Rect rect{16, static_cast<int16_t>(top + row * step), 400, rowH};
+                const bool selected = index == centeredIndex_;
+                const bool stopped = index == stoppedIndex;
+                std::string pct = std::to_string(reading::percentOf(chapters[index].wordIndex,
+                                                                    static_cast<uint32_t>(wordCount))) + "%";
+                if (stopped) pct += " · parei aqui";
+                const std::string title = std::to_string(index + 1) + "  " + chapterTitle(index);
+                uint32_t state = ui::Context::signature(title, ui::Context::signature(pct));
+                state = ui::Context::combine(state, selected);
+                if (ui.redraw(rect, state)) {
+                    Arduino_GFX& gfx = ui.gfx();
+                    gfx.fillRoundRect(rect.x, rect.y, rect.w, rect.h, 4,
+                                      ui.color(selected ? SurfaceActive : SurfaceMuted));
+                    ui.drawText({static_cast<int16_t>(rect.x + 10), rect.y, static_cast<int16_t>(rect.w - 150), rect.h},
+                                title, 14, ui.color(Foreground), ui::TextAlign::Start, 1,
+                                reader.metadata.localeAt(chapters[index].wordIndex));
+                    ui.drawText({static_cast<int16_t>(rect.x + rect.w - 140), rect.y, 132, rect.h}, pct, 11,
+                                ui.color(stopped ? Accent : Muted), ui::TextAlign::Right);
+                }
+                if (ui.tap(rect) && !moved_) {
+                    if (selected) {
+                        ReadingLoop::jumpTo(reader, chapters[index].wordIndex);
+                        return Action::Resume;
+                    }
+                    centeredIndex_ = index;
+                }
+            }
+        }
+
+        // --- bookmarks panel ------------------------------------------------------------------------------
+        constexpr ui::Rect panel{480, 48, 144, 116};
+        auto& marks = reader.bookmarks;
+        const int swipe = bmSwipe_.update(ui, {480, 66, 144, 78});
+        if (swipe > 0 && bmFirst_ + 3 < marks.size()) ++bmFirst_;
+        if (swipe < 0 && bmFirst_ > 0) --bmFirst_;
+        bmFirst_ = std::min(bmFirst_, marks.size() > 3 ? marks.size() - 3 : 0);
+        {
+            uint32_t state = ui::Context::combine(static_cast<uint32_t>(marks.size()), static_cast<uint32_t>(bmFirst_));
+            for (const auto& mark : marks) state = ui::Context::combine(state, mark.wordIndex);
+            if (ui.redraw(panel, state)) {
+                ui.gfx().fillRoundRect(panel.x, panel.y, panel.w, panel.h, 6, ui.color(SurfaceMuted));
+                std::string head = "MARCADORES";
+                if (marks.size() > 3)
+                    head += "  " + std::to_string(bmFirst_ + 1) + "-" + std::to_string(bmFirst_ + 3) + "/"
+                          + std::to_string(marks.size());
+                ui.drawText({488, 50, 130, 16}, head, 11, ui.color(Muted), ui::TextAlign::Start);
+                if (marks.empty())
+                    ui.drawText({488, 70, 130, 54}, "Nenhum marcador. Segure um item para apagar.", 11,
+                                ui.color(Subtle), ui::TextAlign::Start, 3);
+            }
+        }
+        for (size_t row = 0; row < 3 && bmFirst_ + row < marks.size(); ++row) {
+            const size_t index = bmFirst_ + row;
+            const reading::Bookmark& mark = marks[index];
+            const ui::Rect rect{484, static_cast<int16_t>(68 + row * 25), 136, 24};
+            if (ui.redraw(rect, ui::Context::combine(ui::Context::signature(mark.snippet), mark.wordIndex))) {
+                Arduino_GFX& gfx = ui.gfx();
+                const uint16_t surface = ui.color(SurfaceMuted);
+                gfx.fillRect(rect.x, rect.y, rect.w, rect.h, surface);
+                // ribbon: bar with a V notch at the bottom
+                gfx.fillRect(rect.x + 4, rect.y + 4, 8, 15, ui.color(Accent));
+                gfx.fillTriangle(rect.x + 4, rect.y + 19, rect.x + 12, rect.y + 19, rect.x + 8, rect.y + 14, surface);
+                ui.drawText({static_cast<int16_t>(rect.x + 18), rect.y, 82, rect.h}, mark.snippet, 11,
+                            ui.color(Foreground), ui::TextAlign::Start);
+                ui.drawText({static_cast<int16_t>(rect.x + rect.w - 36), rect.y, 34, rect.h},
+                            std::to_string(mark.percent) + "%", 11, ui.color(Muted), ui::TextAlign::Right);
+            }
+            const auto* touch = ui.touch();
+            if (touch && ui::hasTouch(*touch, ui::TouchHold) && ui::contains(rect, touch->x, touch->y)) {
+                reading::removeBookmark(marks, index); // hold = delete
+                reader.bookmarksDirty = true;
+                holdHandled_ = true;
+                break;
+            }
+            if (ui.tap(rect) && !holdHandled_) {
+                ReadingLoop::jumpTo(reader, mark.wordIndex);
+                return Action::Resume;
+            }
+        }
+        if (const auto* touch = ui.touch(); touch && ui::hasTouch(*touch, ui::TouchRelease)) holdHandled_ = false;
+
+        // "+ marcar esta página": marks (or unmarks) the current reading position.
+        {
+            const ui::Rect rect{484, 144, 136, 20};
+            const bool marked = reading::hasBookmark(marks, reader.state.wordIndex);
+            const bool full = !marked && marks.size() >= reading::kMaxBookmarks;
+            const std::string label = full ? "lista cheia (20)" : marked ? "- desmarcar esta página" : "+ marcar esta página";
+            if (ui.redraw(rect, ui::Context::signature(label)))
+                ui.drawText(rect, label, 11, ui.color(full ? Muted : Accent), ui::TextAlign::Center);
+            if (ui.tap(rect, !full) && ReadingLoop::wordCount(reader) > 0) {
+                if (marked) reading::removeBookmarkAt(marks, reader.state.wordIndex);
+                else {
+                    std::string excerpt;
+                    for (size_t i = reader.state.wordIndex; i < wordCount && i < reader.state.wordIndex + 6; ++i) {
+                        if (!excerpt.empty()) excerpt += ' ';
+                        excerpt += ReadingLoop::wordAt(reader, i);
+                    }
+                    reading::addBookmark(marks, reader.state.wordIndex, static_cast<uint32_t>(wordCount),
+                                         reading::makeSnippet(excerpt));
+                }
+                reader.bookmarksDirty = true;
             }
         }
         return Action::None;

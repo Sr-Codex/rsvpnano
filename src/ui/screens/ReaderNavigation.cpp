@@ -10,7 +10,8 @@ constexpr ui::Rect pageBody{0,44,580,128};
 struct PageButton { ui::Rect rect; std::string_view label; };
 constexpr PageButton pageButtons[]{
     {{8,0,94,44},"‹ Menu"}, {{296,0,164,44},"Find place"}, {{480,0,152,44},"Back to book ↗"},
-    {{588,46,44,48},"↑"}, {{588,98,44,48},"↓"}
+    {{588,46,44,48},"↑"}, {{588,98,44,48},"↓"},
+    {{110,0,180,44},"Marcar página"} // Lume.5: control 6 (toggles a bookmark on the first word of the page)
 };
 std::string folded(std::string text) {
     for(auto& c:text) if(c>='A' && c<='Z') c+=('a'-'A');
@@ -29,8 +30,8 @@ void ReaderScreen::openLocator(Screen& screen) {
     screen=Screen::FindPlace;
 }
 void ReaderScreen::commitPlace(size_t index,Preferences& preferences,uint32_t nowMs) {
-    if(index!=session.state.wordIndex) returnWord_=session.state.wordIndex;
-    ReadingLoop::seekTo(session,index);finishPause(preferences,nowMs);
+    ReadingLoop::jumpTo(session,index); // records "onde parei" before leaving
+    finishPause(preferences,nowMs);
     pageSelected_=session.state.wordIndex;
 }
 void ReaderScreen::drawPage(ui::Context& ui) {
@@ -38,6 +39,12 @@ void ReaderScreen::drawPage(ui::Context& ui) {
     if(pageSelected_==SIZE_MAX) pageSelected_=browse_.first;
     for(size_t i=0;i<std::size(pageButtons);++i) {
         const auto& item=pageButtons[i];
+        if(i==5) {
+            const bool marked=reading::hasBookmark(session.bookmarks,uint32_t(browse_.first));
+            ui.label(item.rect,bookmarkFull_?"Lista cheia (20)":marked?"Marcado - remover":"Marcar página",13,
+                     marked?ui::themes::Accent:ui::themes::Muted,ui::TextAlign::Center);
+            continue;
+        }
         ui.label(item.rect,item.label,13,i==1||i==2?ui::themes::Accent:ui::themes::Muted,ui::TextAlign::Center);
     }
     ui::modern::rule(ui,{0,43,640,1});
@@ -49,9 +56,9 @@ bool ReaderScreen::handlePage(ui::Context& ui,uint32_t nowMs,Preferences& prefer
         pageDragged_=false;pageTouchY_=touch->y;modernTouchY_=touch->y;pageTouchControl_=0;
         resetTouch();
         for(size_t i=0;i<std::size(pageButtons);++i) if(ui::contains(pageButtons[i].rect,touch->x,touch->y)) pageTouchControl_=int(i)+1;
-        if(ui::contains(pageBody,touch->x,touch->y)) pageTouchControl_=6;
+        if(ui::contains(pageBody,touch->x,touch->y)) pageTouchControl_=7;
     }
-    if(pageTouchControl_==6 && ui::hasTouch(*touch,ui::TouchMove)) {
+    if(pageTouchControl_==7 && ui::hasTouch(*touch,ui::TouchMove)) {
         if (!pageDragged_ && std::abs(int(modernTouchY_)-int(touch->y))<6) return true;
         const int delta=pageTouchY_-int(touch->y);
         if(delta) { browse_.offset+=delta;pageDragged_=true;pageTouchY_=touch->y; }
@@ -60,19 +67,29 @@ bool ReaderScreen::handlePage(ui::Context& ui,uint32_t nowMs,Preferences& prefer
     const int control=pageTouchControl_;pageTouchControl_=0;
     if(pageDragged_) { pageSelected_=browse_.first;return true; }
     if(!ui::hasTouch(*touch,ui::TouchTap)) return true;
-    if(control<=5 && control>0 && !ui::contains(pageButtons[control-1].rect,touch->x,touch->y)) return true;
+    if(control<=6 && control>0 && !ui::contains(pageButtons[control-1].rect,touch->x,touch->y)) return true;
     switch(control) {
     case 1: screen=Screen::Read;break;
     case 2: openLocator(screen);break;
     case 3: commitPlace(pageSelected_,preferences,nowMs);pageBrowsing_=false;break;
     case 4: browse_.offset-=88;pageSelected_=SIZE_MAX;break;
     case 5: browse_.offset+=88;pageSelected_=SIZE_MAX;break;
-    case 6: {
+    case 6: toggleBookmark(browse_.first);break;
+    case 7: {
         const size_t word=PageReader::wordAtPoint(browse_,touch->x,touch->y);
         if(word!=SIZE_MAX) pageSelected_=word;
         break;
     }
     }
+    return true;
+}
+bool ReaderScreen::toggleBookmark(size_t wordIndex) {
+    bookmarkFull_=false;
+    if(reading::removeBookmarkAt(session.bookmarks,uint32_t(wordIndex))) {session.bookmarksDirty=true;return true;}
+    const auto result=reading::addBookmark(session.bookmarks,uint32_t(wordIndex),uint32_t(ReadingLoop::wordCount(session)),
+                                           reading::makeSnippet(placeExcerpt(wordIndex,6)));
+    if(result==reading::AddResult::Full) {bookmarkFull_=true;return false;}
+    session.bookmarksDirty=true;
     return true;
 }
 std::string ReaderScreen::placeExcerpt(size_t index,size_t maxWords) const {
@@ -162,8 +179,10 @@ void ReaderScreen::drawLocator(ui::Context& ui,Screen& screen,Preferences& prefe
         return;
     }
     if(button(ui,{8,0,90,44},"‹ Cancel",Style::Plain)) screen=Screen::Reader;
-    if (returnWord_ == SIZE_MAX) ui.label({108,0,186,44},"Find your place",16);
-    else if (button(ui,{108,0,178,44},"↶ Previous place",Style::Plain,true,{},13)) candidate_=returnWord_;
+    // "Voltar para onde parei" replaces the old in-RAM "Previous place": persistent, per book (reader/ReadingMarks.h).
+    if (!session.state.resume.valid) ui.label({108,0,186,44},"Find your place",16);
+    else if (button(ui,{108,0,178,44},"Voltar p/ onde parei · "+std::to_string(session.state.resume.percent)+"%",
+                    Style::Plain,true,{},12)) candidate_=session.state.resume.wordIndex;
     if(button(ui,{296,0,92,44},"Search",Style::Accent)) {screen=searchQuery_.empty()?Screen::BookSearchKeyboard:Screen::BookSearch;searchDraft_=searchQuery_;}
     if(button(ui,{394,0,100,44},"Chapters",Style::Accent)) screen=Screen::FindChapters;
     if(button(ui,{504,0,128,44},"Read here ↗",Style::Primary,ReadingLoop::wordCount(session)>0)) {

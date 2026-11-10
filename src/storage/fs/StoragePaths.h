@@ -31,6 +31,7 @@ namespace StoragePaths {
     constexpr const char* kIndexExtension = ".ridx";
     constexpr const char* kDataExtension = ".rdat";
     constexpr const char* kBookStateExtension = ".rstate.toml";
+    constexpr const char* kBookmarksExtension = ".rmarks";
     constexpr const char* kTempExtension = ".tmp";
     constexpr const char* kFailedExtension = ".failed";
     constexpr const char* kConvertingExtension = ".converting";
@@ -49,6 +50,7 @@ namespace StoragePaths {
     std::string indexedIndexPathFor(std::string_view path);
     std::string indexedDataPathFor(std::string_view path);
     std::string bookStatePathFor(std::string_view path);
+    std::string bookmarksPathFor(std::string_view path);
     std::string indexedTempPathFor(std::string_view path);
     bool isHiddenOrSidecarPath(std::string_view path);
 

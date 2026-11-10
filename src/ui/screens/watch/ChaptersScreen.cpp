@@ -9,7 +9,7 @@ namespace screens {
         const auto area = detail::tabContent(ui);
         if (chapters.empty()) {
             if (ui.card(area, ui.text(UiText::StartReading), {}, watch::textSize(ui))) {
-                ReadingLoop::seekTo(reader, 0);
+                ReadingLoop::jumpTo(reader, 0);
                 return Action::Resume;
             }
             return Action::None;
@@ -42,7 +42,7 @@ namespace screens {
         if (ui.card(cards[1], title(centeredIndex_),
                     std::to_string(centeredIndex_ + 1) + "/" + std::to_string(chapters.size()), watch::textSize(ui),
                     ui::themes::Accent, ui::Icon::None, !delta)) {
-            ReadingLoop::seekTo(reader, chapters[centeredIndex_].wordIndex);
+            ReadingLoop::jumpTo(reader, chapters[centeredIndex_].wordIndex);
             return Action::Resume;
         }
         if (ui.card(cards[2], title(next), ">", 2, ui::themes::Accent, ui::Icon::None, chapters.size() > 1 && !delta,

@@ -226,12 +226,14 @@ void test_chapter_browsing_only_seeks_on_explicit_open() {
     settings::ReadingSettings settings;
     const auto draw = [&] { return chapters.draw(f.ui, markers, reader, settings, f.time, f.screen); };
     f.frame(draw);
-    f.tap(draw, 414, 138);
+    // Lume.5 layout: down arrows select; tapping the selected row opens it (no separate "Open" button).
+    f.tap(draw, 444, 138);
     TEST_ASSERT_EQUAL(0, reader.state.wordIndex);
-    f.tap(draw, 414, 138);
+    f.tap(draw, 444, 138);
     TEST_ASSERT_EQUAL(0, reader.state.wordIndex);
-    TEST_ASSERT_EQUAL(static_cast<int>(screens::Action::Resume), static_cast<int>(f.tap(draw, 550, 140)));
+    TEST_ASSERT_EQUAL(static_cast<int>(screens::Action::Resume), static_cast<int>(f.tap(draw, 200, 146)));
     TEST_ASSERT_EQUAL(20, reader.state.wordIndex);
+    TEST_ASSERT_TRUE(reader.state.resume.valid); // the jump saved "onde parei"
 }
 
 void test_settings_and_connections_keep_existing_actions() {
