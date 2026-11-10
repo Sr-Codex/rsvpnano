@@ -492,14 +492,16 @@ namespace screens {
 
         Painel p(ui, 51);
         p.b.marca(carga_);
-        p.b.texto({502, 10, 124, 16}, "FOCO", 9, cMudo);
-        p.b.texto({502, 23, 124, 20}, horaMin(foco), 15, cTexto);
-        p.b.texto({502, 40, 124, 16}, "CRÉDITOS GANHOS", 9, cMudo);
-        p.b.texto({502, 53, 124, 20}, "+" + numero(ganhos), 15, kVerde);
-        p.b.texto({502, 70, 124, 16}, "GASTOS", 9, cMudo);
-        p.b.texto({502, 83, 124, 20}, (gastos > 0 ? "-" : "") + numero(gastos), 15, gastos > 0 ? kCarmim : cMudo);
-        p.b.texto({502, 100, 124, 16}, "SALDO TOTAL", 9, cMudo);
-        p.b.texto({502, 113, 124, 20}, numero(estado_.saldo) + " cr", 15, kLaranja);
+        // Rótulo à esquerda e valor à direita na MESMA linha: empilhados (15 + 20 px) os 4 itens não cabiam
+        // acima do "‹ Início" e o valor encostava no rótulo de baixo.
+        const auto linha = [&](int y, std::string_view rotulo, const std::string& valor, uint16_t cor) {
+            p.b.texto({502, y + 3, 64, 15}, rotulo, 10, cMudo);
+            p.b.texto({560, y, 64, 20}, valor, 15, cor, TextAlign::Right);
+        };
+        linha(12, "FOCO", horaMin(foco), cTexto);
+        linha(42, "GANHOS", "+" + numero(ganhos), kVerde);
+        linha(72, "GASTOS", (gastos > 0 ? "-" : "") + numero(gastos), gastos > 0 ? kCarmim : cMudo);
+        linha(102, "SALDO", numero(estado_.saldo) + " cr", kLaranja);
         p.b.desenhar();
     }
 
