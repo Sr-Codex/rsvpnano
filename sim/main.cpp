@@ -23,6 +23,7 @@
 #include "app/App.h"
 #include "board/Board.h"
 #include "focus/FocusOrientation.h"
+#include "tempo/Relogio.h"
 #include "SimBoard.h"
 #include "SimRuntime.h"
 
@@ -284,6 +285,14 @@ namespace {
         Board::System::begin();
         Board::System::logStartupDiagnostics();
         ESP_LOGI("main", "app setup task=%s core=%d", pcTaskGetName(nullptr), xPortGetCoreID());
+        // Escala de tempo opcional do app Tempo (so no simulador): LUME_SIM_TIME_SCALE=60 => 1 min real = 1 h.
+        if (const char* scale = std::getenv("LUME_SIM_TIME_SCALE")) {
+            const long value = std::atol(scale);
+            if (value > 1) {
+                tempo::definirEscala(static_cast<uint32_t>(value));
+                std::fprintf(stderr, "[sim] LUME_SIM_TIME_SCALE=%ld (app Tempo)\n", value);
+            }
+        }
         gApp.begin();
         while (!gQuit) {
             gApp.update(millis());

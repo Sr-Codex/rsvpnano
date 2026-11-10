@@ -33,4 +33,10 @@ if [ ! -d "$SD" ]; then
   fi
 fi
 
+# 3) app Tempo: se existir a lista de projetos do Mac, copia para o cartão virtual (/tempo/projetos.json)
+if [ -f "$WS/data/tempo/projetos.json" ]; then
+  mkdir -p "$SD/tempo"
+  cp "$WS/data/tempo/projetos.json" "$SD/tempo/projetos.json"
+fi
+
 exec "$FW/.pio/build/native_sim/program" --state "$STATE" "$@"

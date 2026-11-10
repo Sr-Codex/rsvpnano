@@ -73,6 +73,9 @@ namespace screens {
         DictionarySearch,
         DictionaryHelp,
         DictionaryInstall,
+        TempoHoje,
+        TempoBatalha,
+        TempoVitoria,
     };
 
     enum class Action : uint8_t {

@@ -223,11 +223,13 @@ void App::update(uint32_t nowMs) {
         if (focusScreen_.update(nowMs))
             Board::Audio::beep();
     }
+    if (tempoScreen_.tick(nowMs, storage_.mounted() ? &Board::Storage::filesystem() : nullptr))
+        Board::Audio::beep();
     ReadingProgress::save(readerScreen_.session, prefs_, false, nowMs);
 
     renderScreen(nowMs);
     if (!preparingTypography && !readerScreen_.session.playing && !companionApi_.active() && !usbTransfer_.active()
-        && !focusScreen_.active() && screen_ != screens::Screen::FocusSession && screen_ != screens::Screen::Status
+        && !focusScreen_.active() && !tempoScreen_.battleActive() && screen_ != screens::Screen::FocusSession && screen_ != screens::Screen::Status
         && screen_ != screens::Screen::Onboarding
         && kStandbyMs[settingsStore_.settings().interface.standbyTimerIndex] > 0
         && nowMs - lastActivityMs_ >= kStandbyMs[settingsStore_.settings().interface.standbyTimerIndex]) {
@@ -525,6 +527,13 @@ void App::renderScreen(uint32_t nowMs) {
         action = screens::ota(immediateUi_, OtaUpdater::currentVersion().data(), screen_, &otaOffer_);
         break;
     }
+    case screens::Screen::TempoHoje:
+    case screens::Screen::TempoBatalha:
+    case screens::Screen::TempoVitoria:
+        immediateUi_.beginFrame(static_cast<uint8_t>(screen_), tempoScreen_.surface());
+        action = tempoScreen_.draw(immediateUi_, nowMs, screen_,
+                                   storage_.mounted() ? &Board::Storage::filesystem() : nullptr);
+        break;
     case screens::Screen::FocusPresets:
     case screens::Screen::FocusTimers:
     case screens::Screen::FocusEditor:
@@ -731,6 +740,19 @@ void App::handleInput(Input::ActionMask actions, uint32_t nowMs) {
             onboardingScreen_.hardwarePlay(nowMs);renderScreen(nowMs);
         }
         return;
+    }
+    if (screens::TempoScreen::owns(screen_)) {
+        fs::FS* tempoFs = storage_.mounted() ? &Board::Storage::filesystem() : nullptr;
+        if (Input::hasAction(actions, Input::ActionOpenMenu) || Input::hasAction(actions, Input::ActionBack)) {
+            tempoScreen_.back(nowMs, screen_, tempoFs);
+            renderScreen(nowMs);
+            return;
+        }
+        if (Input::hasAction(actions, Input::ActionSelect) || Input::hasAction(actions, Input::ActionPlayPause)) {
+            tempoScreen_.boot(nowMs, screen_, tempoFs);
+            renderScreen(nowMs);
+            return;
+        }
     }
     if (Input::hasAction(actions, Input::ActionOpenMenu)) {
         if (screen_ == screens::Screen::Reader) {

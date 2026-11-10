@@ -31,6 +31,7 @@
 #include "ui/screens/Screens.h"
 #include "ui/screens/ModernScreens.h"
 #include "ui/screens/StandbyScreen.h"
+#include "ui/screens/TempoScreen.h"
 #include "update/OtaUpdater.h"
 #include "usb/UsbMassStorageManager.h"
 
@@ -118,6 +119,7 @@ private:
     StorageManager storage_;
     Preferences prefs_;
     screens::FocusScreen focusScreen_;
+    screens::TempoScreen tempoScreen_;
     screens::OnboardingScreen onboardingScreen_;
     screens::TouchCheckScreen touchCheckScreen_;
     dictionary::Dictionary dictionary_;

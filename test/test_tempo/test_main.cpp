@@ -1,11 +1,16 @@
 #include <unity.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
+#include <string>
+
+#include "tempo/Codec.h"
 #include "tempo/Motor.h"
 #include "tempo/Parametros.h"
 #include "tempo/Progressao.h"
+#include "tempo/Relogio.h"
 
 using namespace tempo;
 
@@ -661,6 +666,151 @@ namespace {
 
 } // namespace
 
+// ------------------------------------------------------------ persistencia (passo 2)
+namespace {
+    std::string lerFixture(const char* caminho) {
+        std::string conteudo;
+        if (FILE* f = std::fopen(caminho, "rb")) {
+            char buf[512];
+            size_t n;
+            while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) conteudo.append(buf, n);
+            std::fclose(f);
+        }
+        return conteudo;
+    }
+} // namespace
+
+void test_projetos_le_fixture() {
+    const std::string json = lerFixture("test/fixtures/tempo/projetos.json");
+    TEST_ASSERT_TRUE(!json.empty());
+    ListaProjetos lista;
+    TEST_ASSERT_TRUE(lerProjetos(json, lista));
+    TEST_ASSERT_EQUAL_INT(3, static_cast<int>(lista.projetos.size()));
+    TEST_ASSERT_EQUAL_STRING("ticktick", lista.fonte.c_str());
+    TEST_ASSERT_EQUAL_STRING("aaaa0001", lista.projetos[0].id.c_str());
+    TEST_ASSERT_EQUAL_INT(3, lista.projetos[0].prioridade);
+    TEST_ASSERT_FALSE(lista.projetos[0].vence.has_value());
+    TEST_ASSERT_TRUE(lista.projetos[1].vence.has_value());
+    TEST_ASSERT_EQUAL_INT(2, static_cast<int>(lista.projetos[1].tags.size()));
+    TEST_ASSERT_EQUAL_INT(0, static_cast<int>(lista.projetos[2].tags.size()));
+}
+
+void test_projetos_json_invalido() {
+    ListaProjetos lista;
+    TEST_ASSERT_FALSE(lerProjetos("", lista));
+    TEST_ASSERT_FALSE(lerProjetos("{nao e json", lista));
+    TEST_ASSERT_FALSE(lerProjetos("[1,2,3]", lista));
+}
+
+void test_limpar_titulo_remove_emoji_e_mantem_acentos() {
+    TEST_ASSERT_EQUAL_STRING("Projeto Alfa (Andamento)", limparTitulo("📚💎 Projeto Alfa (Andamento)").c_str());
+    TEST_ASSERT_EQUAL_STRING("Escrever relatório de avaliação – versão 2",
+                             limparTitulo("🏹 Escrever relatório de avaliação – versão 2").c_str());
+    TEST_ASSERT_EQUAL_STRING("Estudar ação e coração", limparTitulo("  Estudar  ação   e coração ").c_str());
+    // emoji com variation selector / ZWJ e letras matematicas em negrito somem
+    TEST_ASSERT_EQUAL_STRING("Rotinas", limparTitulo("⚙️ Rotinas").c_str());
+    TEST_ASSERT_EQUAL_STRING("", limparTitulo("📚💎").c_str());
+    // byte invalido nao quebra
+    TEST_ASSERT_EQUAL_STRING("ab", limparTitulo(std::string("a\xFF") + "b").c_str());
+}
+
+void test_estado_ida_e_volta() {
+    Estado e = novoEstado();
+    aplicarBatalha(e, perfeita(Categoria::Projetos, 25));
+    aplicarBatalha(e, comDistracao(Categoria::Estudo, 15));
+    registrarHumor(e);
+    e.equip.crExtra[1] = 0.05;
+    e.equip.guardaBrasa = true;
+    e.streak = 4;
+    e.ferias = false;
+    e.desafiosPendentes.push_back(Desafio{2, 100, 1540, false, 1});
+    e.saldo = -12.5;
+
+    const std::string json = serializarEstado(e);
+    TEST_ASSERT_TRUE(!json.empty());
+    Estado lido;
+    TEST_ASSERT_TRUE(lerEstado(json, lido));
+    NEAR(e.saldo, lido.saldo);
+    NEAR(e.xpTotal, lido.xpTotal);
+    for (size_t i = 0; i < kNumAtributos; ++i) NEAR(e.pontosAtributo[i], lido.pontosAtributo[i]);
+    TEST_ASSERT_EQUAL_INT(e.coracoesMeios, lido.coracoesMeios);
+    TEST_ASSERT_EQUAL_INT(e.streak, lido.streak);
+    TEST_ASSERT_TRUE(lido.equip.guardaBrasa);
+    NEAR(0.05, lido.equip.crExtra[1]);
+    TEST_ASSERT_EQUAL_INT(1, static_cast<int>(lido.desafiosPendentes.size()));
+    TEST_ASSERT_EQUAL_INT(2, lido.desafiosPendentes[0].nivel);
+    TEST_ASSERT_EQUAL_INT(1540, static_cast<int>(lido.desafiosPendentes[0].prazoEmMin));
+    TEST_ASSERT_TRUE(lido.dia.data == e.dia.data);
+    TEST_ASSERT_TRUE(lido.dia.aberto);
+    TEST_ASSERT_EQUAL_INT(e.dia.fochoPagoMin, lido.dia.fochoPagoMin);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(e.dia.eventos.size()), static_cast<int>(lido.dia.eventos.size()));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(e.dia.eventos[0].tipo), static_cast<int>(lido.dia.eventos[0].tipo));
+    NEAR(e.dia.crGanho, lido.dia.crGanho);
+    // 2a ida e volta e identica (estavel)
+    TEST_ASSERT_EQUAL_STRING(json.c_str(), serializarEstado(lido).c_str());
+}
+
+void test_estado_json_invalido_nao_altera_saida() {
+    Estado e;
+    e.saldo = 42.0;
+    TEST_ASSERT_FALSE(lerEstado("", e));
+    TEST_ASSERT_FALSE(lerEstado("{\"saldo\": \"abc\"", e));
+    NEAR(42.0, e.saldo);
+}
+
+void test_estado_campos_ausentes_usam_padrao() {
+    Estado e;
+    TEST_ASSERT_TRUE(lerEstado("{\"saldo\": 7.5, \"futuro\": 1}", e));
+    NEAR(7.5, e.saldo);
+    TEST_ASSERT_EQUAL_INT(10, e.coracoesMeios);
+}
+
+void test_log_linha_e_caminho() {
+    EventoLog ev;
+    ev.data = "2026-01-15";
+    ev.hora = "09:30:05";
+    ev.tipo = "batalha";
+    ev.projeto = "Projeto \"Alfa\"";
+    ev.resultado = "vitoria";
+    ev.planejadoMin = 25;
+    ev.focadoMin = 25;
+    ev.cr = 10.0;
+    ev.xp = 25.0;
+    const std::string linha = linhaLog(ev);
+    TEST_ASSERT_TRUE(!linha.empty());
+    TEST_ASSERT_EQUAL_CHAR('\n', linha.back());
+    TEST_ASSERT_EQUAL_INT(1, static_cast<int>(std::count(linha.begin(), linha.end(), '\n')));
+    TEST_ASSERT_TRUE(linha.find("\\\"Alfa\\\"") != std::string::npos);
+    TEST_ASSERT_EQUAL_STRING("/tempo/log/2026-01-15.jsonl", caminhoLog(D(2026, 1, 15)).c_str());
+    TEST_ASSERT_EQUAL_STRING("2026-11-09", textoData(kSegunda).c_str());
+}
+
+void test_relogio_epoch_e_validade() {
+    // 2026-01-15 12:34:56 UTC
+    const Agora a = deEpoch(1768480496, true);
+    TEST_ASSERT_TRUE(a.valida);
+    TEST_ASSERT_TRUE(a.data == D(2026, 1, 15));
+    TEST_ASSERT_EQUAL_INT(12 * 3600 + 34 * 60 + 56, a.segundoDoDia);
+    TEST_ASSERT_EQUAL_INT(12 * 60 + 34, a.minutoDoDia);
+    // hora de sistema nao ajustada (1970) = data desconhecida
+    TEST_ASSERT_FALSE(deEpoch(1000, true).valida);
+    TEST_ASSERT_FALSE(deEpoch(1700000000, true).valida);  // 2023 < 2025
+}
+
+void test_relogio_escala_e_ancora() {
+    definirEscala(60);
+    TEST_ASSERT_EQUAL_UINT32(60, escala());
+    TEST_ASSERT_EQUAL_UINT64(60000ULL, ms(1000));
+    ancorar(1768480496, 0);  // ancora local; comparamos relativo
+    const Agora base = agora(0);
+    const Agora depois = agora(60000);  // 60 s reais * 60 = 1 h
+    TEST_ASSERT_TRUE(base.valida && depois.valida);
+    const int delta = (depois.segundoDoDia - base.segundoDoDia + 86400) % 86400;
+    TEST_ASSERT_EQUAL_INT(3600, delta);
+    definirEscala(1);
+    TEST_ASSERT_EQUAL_UINT32(1, escala());
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_datas);
@@ -694,5 +844,14 @@ int main(int, char**) {
     RUN_TEST(test_dia_de_recuperacao);
     RUN_TEST(test_ferias_congelam);
     RUN_TEST(test_attr_bonus_estavel_no_dia);
+    RUN_TEST(test_projetos_le_fixture);
+    RUN_TEST(test_projetos_json_invalido);
+    RUN_TEST(test_limpar_titulo_remove_emoji_e_mantem_acentos);
+    RUN_TEST(test_estado_ida_e_volta);
+    RUN_TEST(test_estado_json_invalido_nao_altera_saida);
+    RUN_TEST(test_estado_campos_ausentes_usam_padrao);
+    RUN_TEST(test_log_linha_e_caminho);
+    RUN_TEST(test_relogio_epoch_e_validade);
+    RUN_TEST(test_relogio_escala_e_ancora);
     return UNITY_END();
 }

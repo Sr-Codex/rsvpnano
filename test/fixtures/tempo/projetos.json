@@ -1,0 +1,35 @@
+{
+  "fonte": "ticktick",
+  "tag": "Projeto📚",
+  "gerado_em": "2026-01-15T08:00:00.000000+00:00",
+  "projetos": [
+    {
+      "id": "aaaa0001",
+      "titulo": "📚💎 Projeto Alfa (Andamento)",
+      "lista": "🎯 PROJETOS",
+      "projectId": "proj0001",
+      "prioridade": 3,
+      "vence": null,
+      "tags": ["projeto📚"]
+    },
+    {
+      "id": "aaaa0002",
+      "titulo": "🏹 Escrever relatório de avaliação – versão 2",
+      "lista": "⚙️ Rotinas",
+      "projectId": "proj0002",
+      "prioridade": 0,
+      "vence": "2026-02-01T23:00:00.000+0000",
+      "tags": ["🔹𝑭𝒂𝒃𝒓𝒊𝒄𝒂", "projeto📚"]
+    },
+    {
+      "id": "aaaa0003",
+      "titulo": "Estudar  ação   e coração",
+      "lista": "Estudo",
+      "projectId": "proj0003",
+      "prioridade": 1,
+      "vence": null,
+      "tags": [],
+      "campo_novo_desconhecido": true
+    }
+  ]
+}

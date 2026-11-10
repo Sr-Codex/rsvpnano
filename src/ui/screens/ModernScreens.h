@@ -17,6 +17,7 @@ namespace screens::modern {
         case Screen::StorageHub: case Screen::StorageEncryption: case Screen::PowerHub: case Screen::FocusPresets:
         case Screen::FindPlace: case Screen::FindChapters: case Screen::BookSearch: case Screen::BookSearchKeyboard:
         case Screen::Dictionary: case Screen::DictionarySearch: case Screen::DictionaryHelp: case Screen::DictionaryInstall:
+        case Screen::TempoHoje: case Screen::TempoBatalha: case Screen::TempoVitoria:
         case Screen::QuickControls: case Screen::Onboarding: case Screen::ButtonMap: case Screen::AddBooks: case Screen::TouchCheck:
             return true;
         default:

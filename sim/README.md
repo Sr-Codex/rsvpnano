@@ -65,6 +65,15 @@ Verbos (`@ms` = tempo desde o início): `tap X,Y` · `hold X,Y MS` · `drag X1,Y
 `imucheck` (autoteste: o `OrientationReader` real classifica cada pose) · `quit`.
 Coordenadas = as da janela (640×172 deitada). Log de depuração: `LUME_SIM_DEBUG=1`.
 
+**Escala de tempo (app Tempo):** `LUME_SIM_TIME_SCALE=60 sim/run.sh` faz o relógio do app Tempo (batalha,
+data/hora) andar 60× mais rápido: 1 min real = 1 h, então uma batalha de 25 min termina em 25 s. Só o
+simulador lê a variável (`sim/main.cpp`); o roteiro `@ms` continua em tempo real e o resto do firmware
+(toque, standby, leitor) não é acelerado. Sem a variável, escala 1.
+
+**Projetos do app Tempo:** `sim/run.sh` copia `$WS/data/tempo/projetos.json` (se existir) para
+`sim/state/sd/tempo/projetos.json` a cada execução (arquivo do Mac, nunca vai para o repositório). Estado e
+log gravados pelo app ficam em `sim/state/sd/tempo/estado.json` e `sim/state/sd/tempo/log/AAAA-MM-DD.jsonl`.
+
 ## O que é e o que não é simulado
 
 | Igual à placa (mesmo código) | Só na placa |
