@@ -82,6 +82,12 @@ namespace focus {
         float z = 0;
         if (!read(x, y, z))
             return stable_;
+        delta_ = havePrev_ ? std::fabs(x - prev_[0]) + std::fabs(y - prev_[1]) + std::fabs(z - prev_[2]) : 0.0f;
+        prev_[0] = x;
+        prev_[1] = y;
+        prev_[2] = z;
+        havePrev_ = true;
+        ++samples_;
         const Orientation measured = classify(x, y, z);
         if (measured != candidate_) {
             candidate_ = measured;

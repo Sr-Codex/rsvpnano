@@ -70,6 +70,9 @@ data/hora) andar 60× mais rápido: 1 min real = 1 h, então uma batalha de 25 m
 simulador lê a variável (`sim/main.cpp`); o roteiro `@ms` continua em tempo real e o resto do firmware
 (toque, standby, leitor) não é acelerado. Sem a variável, escala 1.
 
+**Relógio de parede do app Tempo:** `LUME_SIM_CLOCK=2026-11-10T14:20 sim/run.sh` ancora a hora do app (Tempo/Hábitos, hora local do Mac)
+nesse instante e ela segue andando (combine com `LUME_SIM_TIME_SCALE`). Serve para capturar os Hábitos em horários específicos; só o simulador lê a variável.
+
 **Projetos do app Tempo:** `sim/run.sh` copia `$WS/data/tempo/projetos.json` (se existir) para
 `sim/state/sd/tempo/projetos.json` a cada execução (arquivo do Mac, nunca vai para o repositório). Estado e
 log gravados pelo app ficam em `sim/state/sd/tempo/estado.json` e `sim/state/sd/tempo/log/AAAA-MM-DD.jsonl`.

@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -300,6 +301,19 @@ namespace {
             }
         }
         gApp.begin();
+        // Relogio de parede opcional do app Tempo (so no simulador): LUME_SIM_CLOCK=2026-11-10T14:20 (hora local do Mac).
+        // Serve para capturar o app Habitos em horarios especificos (a placa real usa o RTC).
+        if (const char* clock = std::getenv("LUME_SIM_CLOCK")) {
+            std::tm tm{};
+            if (strptime(clock, "%Y-%m-%dT%H:%M", &tm) != nullptr) {
+                tm.tm_isdst = -1;
+                const std::time_t epoch = std::mktime(&tm);
+                if (epoch > 0) {
+                    tempo::ancorar(static_cast<int64_t>(epoch), millis());
+                    std::fprintf(stderr, "[sim] LUME_SIM_CLOCK=%s (app Tempo)\n", clock);
+                }
+            }
+        }
         while (!gQuit) {
             gApp.update(millis());
             std::this_thread::sleep_for(std::chrono::milliseconds(1));

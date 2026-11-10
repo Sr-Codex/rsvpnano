@@ -103,6 +103,7 @@ namespace tempo {
         Feita,           // feita no horario
         FeitaAtrasada,   // feita atrasada (0 cr, 50 % XP)
         Esquecida,       // esquecida (nao feita, ou feita tarde demais)
+        Pulada,          // "Pular": sem cr/XP, fora das fracoes do dia
     };
 
     struct VistaOcorrencia {

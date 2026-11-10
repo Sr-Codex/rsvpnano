@@ -56,6 +56,9 @@ namespace tempo {
     // Registra a ocorrencia `indice` de e.dia.ocorrencias como feita em `minutoReal`: cr/XP pelo tipo (teto de 28 cr/dia
     // somando todos os habitos), medicao atrasada -1 meio, esquecida (ou feita tarde demais) -2 meios.
     ResultadoOcorrencia registrarOcorrencia(Estado& e, size_t indice, int minutoReal, bool remota = false);
+    // "Pular" (fase 2 dos Habitos): marca a ocorrencia pendente como Pulada. Sem cr/XP/coracoes, nao entra na fila do
+    // TickTick e nao conta como esquecida (sai do denominador das fracoes do dia). registrado=false se ja estava resolvida.
+    ResultadoOcorrencia pularOcorrencia(Estado& e, size_t indice);
     double registrarHumor(Estado& e);    // +2 XP, nunca credito; devolve XP
     double registrarTickTick(Estado& e); // +30 XP, max 3/dia; devolve XP
 

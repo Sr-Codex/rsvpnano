@@ -60,7 +60,9 @@ namespace tempo {
     };
     constexpr size_t kNumHabitos = static_cast<size_t>(Habito::Count);
 
-    enum class StatusHabito : uint8_t { Pendente, NoHorario, Atrasado, Esquecido };
+    // Pulado (fase 2): o usuario escolheu "Pular" (sem cr/XP, nao conta como esquecido nem entra no denominador das fracoes do dia).
+    // Fica DEPOIS de Esquecido: estado.json antigo continua valido (valores numericos gravados nao mudam).
+    enum class StatusHabito : uint8_t { Pendente, NoHorario, Atrasado, Esquecido, Pulado };
 
     // Tipo de habito DETECTADO pelo nome/emoji (habitos vindos do TickTick; ver tempo/Habitos.h).
     enum class TipoHabito : uint8_t {

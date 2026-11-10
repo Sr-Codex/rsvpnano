@@ -289,6 +289,7 @@ namespace ui {
         void beginFrame(uint8_t screen, uint8_t surface = 0);
         void endFrame();
         void invalidate();
+        bool drewThisFrame() const { return drew_; }   // o ultimo quadro pintou algo (o App repinta o aviso de lembrete por cima)
         void prepareTextFont(std::string_view text, std::string_view textLocale = {}) const;
 
         void label(Rect rect, std::string_view text, uint8_t textSize = 2,

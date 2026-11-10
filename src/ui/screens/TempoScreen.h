@@ -2,6 +2,7 @@
 
 #include <FS.h>
 
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -9,6 +10,7 @@
 #include "tempo/Codec.h"
 #include "tempo/FocoLeitor.h"
 #include "tempo/Habitos.h"
+#include "tempo/Lembretes.h"
 #include "tempo/Motor.h"
 #include "tempo/Sessao.h"
 #include "ui/screens/ModernScreens.h"
@@ -45,6 +47,14 @@ namespace screens {
         double xpFrac = 0.0;             // progresso dentro do nivel (0..1)
         int streak = 0;
         int focoHojeMin = 0;             // foco pago hoje
+        // Habitos (launcher): bloco "N/M . proximo HH:MM" e cartao AGORA quando ha habito na hora/atrasado
+        int habFeitas = 0;               // registradas + puladas (resolvidas)
+        int habTotal = 0;                // ocorrencias de hoje (0 = sem habitos)
+        int habProximoMin = -1;          // proximo horario pendente (minuto do dia), -1 = nenhum
+        bool habAtrasado = false;        // ha habito atrasado (na janela e passou do horario, ou depois da janela)
+        bool habAgora = false;           // ha habito na hora/atrasado para mostrar no cartao AGORA
+        std::string habNome;             // habito do cartao AGORA
+        std::string habLinha;            // "14:00 . atrasado 20 min"
         uint32_t assinatura = 0;         // muda quando o resumo muda
     };
 
@@ -79,7 +89,18 @@ namespace screens {
         // "Feito agora" na ocorrencia `indice` de estado().dia.ocorrencias: paga, grava o log e enfileira o check-in
         // (enviado ao TickTick na proxima sync com Wi-Fi). Devolve false se ja estava feita ou sem SD.
         bool marcarHabito(uint32_t nowMs, fs::FS* filesystem, size_t indice);
+        // "Pular": sem cr/XP, nao entra na fila, nao conta como esquecido (tempo::pularOcorrencia). Devolve false se ja resolvida/sem SD.
+        bool pularHabito(uint32_t nowMs, fs::FS* filesystem, size_t indice);
+        // "Ainda nao" (medicacao): o lembrete volta em 15 min (nao grava nada: so a agenda de lembretes em RAM).
+        void adiarHabito(uint32_t nowMs, size_t indice);
+        // Manutencao dos Habitos, FORA do desenho (App::update, ~1x/s): avanca o relogio do dia, na virada do dia e a cada
+        // minuto reconcilia com habitos.json + check-ins do celular (atualizarHabitos). Nao roda durante batalha/reflexao.
+        void manutencaoHabitos(uint32_t nowMs, fs::FS* filesystem);
+        // Lembretes (bipe + aviso no topo): devolve o aviso a mostrar agora (o App toca o bipe). `pegouAgora` = pulso do
+        // detector de pegada (IMU). Nao pausa leitura nem batalha. Chamar ~1x/s fora do desenho.
+        std::optional<tempo::Aviso> lembretesTick(uint32_t nowMs, bool pegouAgora);
         const tempo::Estado& estadoTempo() const { return estado_; }
+        bool estadoCarregado() const { return carregado_; }
         bool battleActive() const { return fase_ == Fase::Lutando || fase_ == Fase::Pausada || fase_ == Fase::Descanso; }
         uint8_t surface() const {
             return static_cast<uint8_t>(static_cast<uint8_t>(fase_) * 4 + (distraido_ ? 1 : 0) + (overtime_ ? 2 : 0)
@@ -121,6 +142,9 @@ namespace screens {
         tempo::Estado estado_;
         tempo::ListaProjetos lista_;
         tempo::ListaHabitos habitos_;        // definicoes dos habitos (habitos.json)
+        tempo::AgendaLembretes lembretes_;   // estado dos lembretes de habitos (so RAM)
+        uint32_t manutencaoHabitosMs_ = 0;   // ultimo atualizarHabitos periodico (millis)
+        uint32_t manutencaoRelogioMs_ = 0;
         std::vector<std::string> titulos_;   // titulos limpos (sem emoji), 1:1 com lista_.projetos
         size_t primeiro_ = 0;                // primeira linha visivel do seletor (rolagem)
         bool seletor_ = false;               // seletor de foco aberto (Screen::TempoHoje)

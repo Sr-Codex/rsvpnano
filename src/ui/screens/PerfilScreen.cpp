@@ -453,8 +453,8 @@ namespace screens {
     // --------------------------------------------------------------------- Hoje
     void PerfilScreen::paginaHoje(ui::Context& ui) {
         const uint16_t cMudo = ui.color(Muted), cTexto = ui.color(Foreground);
-        constexpr int kVisiveis = 6;
         const int total = int(hoje_.size());
+        const int kVisiveis = total > 6 ? 5 : 6;   // com rolagem, a 6a linha cederia lugar ao "N-M de T . arraste" (sobrepunha a coluna CR)
         rolagem_ = std::clamp(rolagem_, 0, std::max(0, total - kVisiveis));
         int focoLog = 0;
         double ganhoLog = 0.0;
@@ -477,11 +477,15 @@ namespace screens {
         for (int i = 0; i < kVisiveis && rolagem_ + i < total; ++i) {
             const auto& e = hoje_[size_t(rolagem_ + i)];
             const int y = 24 + i * 22;
-            std::string atividade = e.origem == tempo::kOrigemLeitor ? "Leitura · " + (e.projeto.empty() ? std::string{"livro"} : e.projeto)
+            const bool habito = e.tipo == "habito";   // fase 2 dos Habitos: "Hábito · Medicação" (a hora ja vai na coluna HORA)
+            std::string atividade = habito ? "Hábito · " + (e.projeto.empty() ? std::string{"hábito"} : e.projeto)
+                                  : e.origem == tempo::kOrigemLeitor ? "Leitura · " + (e.projeto.empty() ? std::string{"livro"} : e.projeto)
                                   : e.projetoId.empty() ? "Foco livre" + (e.categoria.empty() ? std::string{} : " · " + e.categoria) : e.projeto;
             b.texto({16, y + 2, 44, 14}, e.hora.size() >= 5 ? e.hora.substr(0, 5) : std::string{"--:--"}, 10, cMudo);
             b.texto({64, y, 270, 18}, atividade, 12, cTexto);
-            b.texto({340, y + 2, 62, 14}, e.focadoMin >= 60 ? horaMin(e.focadoMin) : std::to_string(e.focadoMin) + " min", 10, cMudo, TextAlign::Right);
+            const std::string tempoCol = habito ? (e.resultado == "pulado" ? "pulado" : e.resultado == "no_horario" ? "no horário" : e.resultado == "atrasado" ? "atrasado" : "esquecido")
+                                       : e.focadoMin >= 60 ? horaMin(e.focadoMin) : std::to_string(e.focadoMin) + " min";
+            b.texto({340, y + 2, 62, 14}, tempoCol, 10, cMudo, TextAlign::Right);
             const uint16_t corCr = e.cr > 0 ? kVerde : e.cr < 0 ? kCarmim : cMudo;
             b.texto({410, y + 2, 60, 14}, (e.cr > 0 ? "+" : "") + numero(e.cr), 10, corCr, TextAlign::Right);
         }

@@ -34,6 +34,9 @@
 #include "ui/screens/TempoScreen.h"
 #include "ui/screens/HomeScreen.h"
 #include "ui/screens/PerfilScreen.h"
+#include "ui/screens/HabitosScreen.h"
+#include "focus/FocusOrientation.h"
+#include "tempo/Lembretes.h"
 #include "update/OtaUpdater.h"
 #include "usb/UsbMassStorageManager.h"
 
@@ -134,6 +137,25 @@ private:
     bool dictionaryWifiReturn_ = false;
     screens::HomeScreen homeScreen_;
     screens::PerfilScreen perfilScreen_;
+    screens::HabitosScreen habitosScreen_;
+    // Habitos (fase 2): lembretes (bipe + aviso no topo), "pegou a placa" (IMU) e orientacao em pe dos Habitos
+    focus::OrientationReader motionReader_;
+    tempo::DetectorPegada pegada_;
+    bool pegouPendente_ = false;
+    uint32_t motionSamples_ = 0;
+    uint32_t habitosTickMs_ = 0;
+    std::string habitsError_;
+    tempo::Aviso avisoHabito_;
+    bool avisoAtivo_ = false;
+    bool avisoToque_ = false;
+    bool avisoPintar_ = false;
+    uint32_t avisoAteMs_ = 0;
+    uint32_t avisoPintadoMs_ = 0;
+    bool tickHabitos(uint32_t nowMs);                 // IMU + manutencao + lembretes (fora do desenho). true = tocou um aviso novo
+    bool handleAvisoTouch(uint32_t nowMs);            // toque no aviso abre os Habitos (consome o toque)
+    void desenharAvisoHabito(uint32_t nowMs);         // por cima da tela atual, enquanto ativo
+    bool avisoPermitido() const;
+    void sincronizarOrientacaoHabitos();              // em pe (IMU) so com os Habitos abertos
     screens::Screen lastRenderedScreen_ = screens::Screen::Home;
     bool settingsFromHome_ = false;
     OtaUpdater::Offer otaOffer_;

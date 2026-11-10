@@ -1,4 +1,5 @@
 #include "ui/screens/TempoScreen.h"
+#include "tempo/HabitosVista.h"
 
 #include <algorithm>
 #include <array>
@@ -307,11 +308,34 @@ namespace screens {
             r.centro = fmtRelogio(int64_t(ciclo_.ativo || pomodoro_ ? tempo::kCicloFocoMin : duracaoMin_) * 60);
             r.planejadoMin = pomodoro_ ? tempo::kCicloFocoMin : duracaoMin_;
         }
-        r.assinatura = ui::Context::signature(r.projeto + "|" + r.centro + "|" + r.saldo,
+        // Habitos (launcher): usa o minuto do relogio de parede (o estado so avanca na manutencao ~1x/s)
+        if (const auto agoraH = tempo::agora(nowMs); agoraH.valida && !estado_.dia.ocorrencias.empty()) {
+            const int minuto = agoraH.minutoDoDia;
+            const auto totais = tempo::totaisDoDia(estado_);
+            r.habTotal = totais.total;
+            r.habFeitas = totais.feitas + totais.puladas;
+            if (const auto prox = tempo::minutoProximoHabito(estado_, minuto)) r.habProximoMin = *prox;
+            for (const auto& oc : estado_.dia.ocorrencias)
+                if (!oc.feita && oc.status == tempo::StatusHabito::Pendente
+                    && tempo::faseDaOcorrencia(oc, minuto) == tempo::FaseOcorrencia::Atrasada) r.habAtrasado = true;
+            if (const auto ag = tempo::ocorrenciaAgora(estado_, minuto)) {
+                const auto& oc = estado_.dia.ocorrencias[ag->indice];
+                if (oc.minuto >= 0 && oc.minuto <= minuto) {   // na hora ou atrasada (as sem horario e as futuras ficam fora)
+                    r.habAgora = true;
+                    r.habNome = oc.nome;
+                    char t[48];
+                    if (minuto > oc.minuto) std::snprintf(t, sizeof t, "%02d:%02d · há %d min", oc.minuto / 60, oc.minuto % 60, minuto - oc.minuto);
+                    else std::snprintf(t, sizeof t, "%02d:%02d · agora", oc.minuto / 60, oc.minuto % 60);
+                    r.habLinha = t;
+                }
+            }
+        }
+        r.assinatura = ui::Context::signature(r.projeto + "|" + r.centro + "|" + r.saldo + "|" + r.habNome + "|" + r.habLinha,
                                               uint32_t(r.estado) * 1000003U + r.pausada * 7U + r.descanso * 11U + r.bonus * 13U
                                                   + uint32_t(r.vocePct) * 131U + uint32_t(r.inimigoPct) * 17U + r.temProjetos
                                                   + uint32_t(r.nivel) * 977U + uint32_t(r.xpFrac * 100) * 31U + uint32_t(r.streak) * 53U
-                                                  + uint32_t(r.focoHojeMin) * 7U);
+                                                  + uint32_t(r.focoHojeMin) * 7U + uint32_t(r.habFeitas) * 41U + uint32_t(r.habTotal) * 43U
+                                                  + uint32_t(r.habProximoMin + 1) * 47U + r.habAtrasado * 59U + r.habAgora * 61U);
         return r;
     }
 
@@ -413,9 +437,49 @@ namespace screens {
         const auto r = tempo::marcarFeita(estado_, indice, fila);
         if (!r.registrado) return false;
         for (const auto& item : fila) TempoStorage::enqueueCheckin(*filesystem, item);
+        lembretes_.resolvida(estado_, indice);
         gravarEventoHabito(filesystem, r, "");
         salvar(filesystem);
         return true;
+    }
+
+    bool TempoScreen::pularHabito(uint32_t nowMs, fs::FS* filesystem, size_t indice) {
+        if (filesystem == nullptr) return false;
+        if (!carregado_) carregar(filesystem, true, nowMs);
+        garantirDia(nowMs);
+        const auto r = tempo::pularOcorrencia(estado_, indice);
+        if (!r.registrado) return false;
+        lembretes_.resolvida(estado_, indice);
+        gravarEventoHabito(filesystem, r, "");
+        salvar(filesystem);
+        return true;
+    }
+
+    void TempoScreen::adiarHabito(uint32_t nowMs, size_t indice) {
+        lembretes_.adiar(estado_, indice, nowMs, uint32_t(tempo::kAdiarMedicacaoMin) * 60000U);
+    }
+
+    void TempoScreen::manutencaoHabitos(uint32_t nowMs, fs::FS* filesystem) {
+        if (!carregado_ || filesystem == nullptr || fase_ != Fase::Nenhuma) return;   // nada durante batalha/reflexao
+        const auto agora = tempo::agora(nowMs);
+        if (!agora.valida) return;
+        const bool viradaDoDia = !estado_.dia.aberto || !(estado_.dia.data == agora.data);
+        const bool periodico = nowMs - manutencaoHabitosMs_ >= 60000U;
+        if (viradaDoDia || periodico) {
+            manutencaoHabitosMs_ = nowMs;
+            const tempo::Data antes = estado_.dia.data;
+            atualizarHabitos(filesystem, nowMs);   // garantirDia (abre/fecha o dia) + reconcilia + check-ins do celular
+            if (viradaDoDia && !(estado_.dia.data == antes)) salvar(filesystem);
+        } else {
+            tempo::avancarRelogio(estado_, agora.minutoDoDia);
+        }
+    }
+
+    std::optional<tempo::Aviso> TempoScreen::lembretesTick(uint32_t nowMs, bool pegouAgora) {
+        if (!carregado_) return std::nullopt;
+        const auto agora = tempo::agora(nowMs);
+        if (!agora.valida || !(estado_.dia.data == agora.data)) return std::nullopt;
+        return lembretes_.avaliar(estado_, agora.minutoDoDia, nowMs, pegouAgora);
     }
 
     void TempoScreen::salvar(fs::FS* filesystem) {

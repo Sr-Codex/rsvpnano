@@ -20,6 +20,7 @@ namespace screens {
         constexpr uint16_t kAmbar = rgb565(255, 196, 80);
         constexpr uint16_t kTinta = rgb565(12, 13, 14);   // texto sobre o botao laranja
         constexpr uint16_t kVerdeBat = rgb565(60, 200, 110);
+        constexpr uint16_t kVerde = rgb565(25, 158, 112);   // habitos
 
         using Desenho = std::function<void(Arduino_GFX&, int, int)>;   // (gfx, dx, dy) somados as coords absolutas
 
@@ -91,6 +92,25 @@ namespace screens {
             g.drawCircle(cx, cy, 9, c);
             g.drawCircle(cx, cy, 8, c);
             g.fillCircle(cx, cy, 3, c);
+        }
+
+        // Habitos: anel de progresso do dia (verde) com visto no centro.
+        void iconeHabitos(Arduino_GFX& g, int cx, int cy, double frac, int raio = 17, int larg = 6, bool marca = true) {
+            constexpr double kRad = 3.14159265358979 / 180.0;
+            const uint16_t verde = rgb565(25, 158, 112), trilha = rgb565(50, 52, 50);
+            const auto ponto = [&](int a, uint16_t c) {
+                const double rad = (a - 90) * kRad;
+                g.fillCircle(cx + int(std::lround(raio * std::cos(rad))), cy + int(std::lround(raio * std::sin(rad))), larg / 2, c);
+            };
+            for (int a = 0; a < 360; a += 4) ponto(a, trilha);
+            const int ate = int(std::lround(360 * std::clamp(frac, 0.0, 1.0)));
+            for (int a = 0; a <= ate; a += 4) ponto(a, verde);
+            if (!marca) return;
+            const double k = raio / 17.0;
+            const auto P = [&](double dx, double dy) { return std::pair<int, int>{cx + int(std::lround(dx * k)), cy + int(std::lround(dy * k))}; };
+            const auto a = P(-5, 0), b = P(-1.5, 4), c = P(5.5, -4);
+            grossa(g, a.first, a.second, b.first, b.second, verde);
+            grossa(g, b.first, b.second, c.first, c.second, verde);
         }
 
         std::string hora(const tempo::Agora& agora) {
@@ -172,13 +192,14 @@ namespace screens {
             Bloco barra(ui, {0, 0, 640, 24}, Background, 0, 1);
             barra.texto({14, 1, 60, 22}, hora(agora), 14, cTexto);
             barra.texto({78, 5, 110, 16}, data(agora), 10, cMudo);
-            if (info.bateriaPresente) barra.texto({536, 5, 56, 16}, std::to_string(info.bateriaPct) + "%", 10, cMudo, TextAlign::Right);
+            if (info.bateriaPresente) barra.texto({496, 5, 56, 16}, std::to_string(info.bateriaPct) + "%", 10, cMudo, TextAlign::Right);
             barra.marca(uint32_t(info.wifi) * 2U + uint32_t(info.bateriaPresente) * 4U + uint32_t(info.carregando) * 8U
                         + uint32_t(info.bateriaPct) * 16U);
             const uint16_t fundo = ui.color(Background);
             barra.desenhar([&](Arduino_GFX& g, int dx, int dy) {
-                iconeWifi(g, 520 + dx, 19 + dy, info.wifi, cTexto, rgb565(70, 72, 70), rgb565(235, 50, 90));
-                if (info.bateriaPresente) iconeBateria(g, 598 + dx, 5 + dy, info.bateriaPct, info.carregando, cTexto, fundo);
+                iconeWifi(g, 480 + dx, 19 + dy, info.wifi, cTexto, rgb565(70, 72, 70), rgb565(235, 50, 90));
+                if (info.bateriaPresente) iconeBateria(g, 558 + dx, 5 + dy, info.bateriaPct, info.carregando, cTexto, fundo);
+                iconeAjustes(g, 618 + dx, 12 + dy, cMudo);   // Ajustes: engrenagem no topo direito (toque abaixo, depois dos blocos)
             });
         }
 
@@ -186,7 +207,8 @@ namespace screens {
         const Rect cartao{10, 26, 290, 138};
         {
             const bool batalha = r.estado == Estado::Batalha;
-            std::string titulo = "AGORA";
+            const bool habito = r.estado == Estado::Livre && r.habAgora;   // sem batalha: mostra o habito da hora/atrasado
+            std::string titulo = habito ? "AGORA · HÁBITO" : "AGORA";
             if (batalha) titulo += r.descanso ? " · PAUSA" : r.pausada ? " · PAUSADA" : r.bonus ? " · BÔNUS" : "";
             std::string nome, linha2, botao;
             if (r.estado == Estado::Reflexao) {
@@ -197,16 +219,21 @@ namespace screens {
                 nome = r.descanso ? "Pausa" : r.projeto.empty() ? "Batalha" : r.projeto;
                 linha2 = "você " + std::to_string(r.vocePct) + "% · inimigo " + std::to_string(r.inimigoPct) + "%";
                 botao = "Voltar à batalha";
+            } else if (habito) {
+                nome = cortar(r.habNome, 14);
+                linha2 = r.habLinha;
+                botao = "Abrir hábitos";
             } else {
                 nome = r.projeto.empty() ? "Foco livre" : r.projeto;   // foco escolhido no Inicio do Tempo
                 linha2 = "inimigo 100% · " + std::to_string(r.planejadoMin) + " min";
                 botao = "Começar";
             }
-            const std::string leitura = info.temLivro ? "Leitura: " + cortar(info.livro, 16) + " · " + std::to_string(info.livroPct) + "%"
+            const std::string leitura = habito ? std::to_string(r.habFeitas) + " de " + std::to_string(r.habTotal) + " hábitos hoje"
+                                      : info.temLivro ? "Leitura: " + cortar(info.livro, 16) + " · " + std::to_string(info.livroPct) + "%"
                                                       : std::string{"Nenhum livro aberto"};
             Bloco bloco(ui, cartao, SurfaceMuted, 12, uint32_t(r.estado) + 10);
             bloco.texto({24, 33, 200, 16}, titulo, 10, kLaranja);
-            if (r.estado != Estado::Reflexao) bloco.texto({34, 94, 60, 16}, r.centro, 11, cTexto, TextAlign::Center);
+            if (r.estado != Estado::Reflexao) bloco.texto({34, 94, 60, 16}, habito ? std::to_string(r.habFeitas) + "/" + std::to_string(r.habTotal) : r.centro, 11, cTexto, TextAlign::Center);
             bloco.texto({114, 50, 180, 24}, nome, 14, cTexto);
             bloco.texto({114, 74, 180, 16}, linha2, 11, cMudo);
             bloco.texto({114, 92, 180, 16}, leitura, 11, cMudo);
@@ -217,18 +244,23 @@ namespace screens {
             bloco.desenhar([&](Arduino_GFX& g, int dx, int dy) {
                 g.fillRoundRect(areaBotao.x + dx, areaBotao.y + dy, areaBotao.w, areaBotao.h, 10, kLaranja);
                 ui.drawText(g, layoutBotao, kTinta, dx, dy, kLaranja);
+                if (habito) {
+                    iconeHabitos(g, cartao.x + dx + 54, cartao.y + dy + 75, r.habTotal > 0 ? double(r.habFeitas) / r.habTotal : 0.0, 30, 9, false);
+                    return;
+                }
                 const double voce = batalha ? r.vocePct / 100.0 : 0.0;
                 const double inimigo = batalha ? r.inimigoPct / 100.0 : 1.0;
                 desenharAneisMini(ui, g, cartao.x + dx + 54, cartao.y + dy + 75, 31, voce, inimigo, r.bonus);
             });
             if (ui.tap(areaBotao)) {
-                if (r.estado == Estado::Reflexao || batalha) tempo.abrirBatalha(screen);
+                if (habito) screen = Screen::Habitos;
+                else if (r.estado == Estado::Reflexao || batalha) tempo.abrirBatalha(screen);
                 else tempo.comecar(screen);   // abre o Inicio com o proximo projeto pre-selecionado
             }
         }
 
-        // ---- 2 x 2 blocos grandes: Tempo, Leitor, Perfil, Ajustes
-        static constexpr const char* kNomes[4] = {"Tempo", "Leitor", "Perfil", "Ajustes"};
+        // ---- 2 x 2 blocos grandes: Tempo, Leitor, Hábitos, Perfil (Ajustes = engrenagem na barra de status)
+        static constexpr const char* kNomes[4] = {"Tempo", "Leitor", "Hábitos", "Perfil"};
         for (int i = 0; i < 4; ++i) {
             const Rect rect{int16_t(308 + (i % 2) * 164), int16_t(26 + (i / 2) * 70), 158, 64};
             std::string detalhe;
@@ -243,14 +275,24 @@ namespace screens {
                 corDetalhe = kRoxo;
                 break;
             case 2:
+                if (r.habTotal == 0) {
+                    detalhe = "Sem hábitos";
+                } else {
+                    detalhe = std::to_string(r.habFeitas) + "/" + std::to_string(r.habTotal);
+                    if (r.habAtrasado) { detalhe += " · atrasado"; corDetalhe = kLaranja; }
+                    else if (r.habProximoMin >= 0) { detalhe += " · próx " + hora({true, {}, r.habProximoMin, 0}); corDetalhe = kVerde; }
+                    else { detalhe += " · completo"; corDetalhe = kVerde; }
+                }
+                break;
+            default:
                 detalhe = "nível " + std::to_string(r.nivel) + " · " + std::to_string(r.streak) + (r.streak == 1 ? " dia" : " dias");
                 corDetalhe = kAmbar;
                 break;
-            default: detalhe = "Wi-Fi, TickTick"; break;
             }
             Bloco bloco(ui, rect, SurfaceMuted, 12, 100 + i * 7);
             bloco.texto({int16_t(rect.x + 58), int16_t(rect.y + 10), 96, 22}, kNomes[i], 15, cTexto);
             bloco.texto({int16_t(rect.x + 58), int16_t(rect.y + 36), 98, 16}, detalhe, 11, corDetalhe);
+            if (i == 2) bloco.marca(uint32_t(r.habFeitas) * 41U + uint32_t(r.habTotal) * 43U + uint32_t(r.habProximoMin + 1) * 47U + r.habAtrasado * 59U);
             if (i == 0) bloco.marca(uint32_t(r.vocePct) * 131U + uint32_t(r.inimigoPct) * 17U + uint32_t(r.bonus) * 3U + uint32_t(r.estado == Estado::Batalha));
             const int icx = rect.x + 30, icy = rect.y + 32;
             bloco.desenhar([&](Arduino_GFX& g, int dx, int dy) {
@@ -262,14 +304,11 @@ namespace screens {
                     break;
                 }
                 case 1: iconeLivro(g, X, Y, kRoxo); break;
-                case 2: {
-                    desenharAnelXp(ui, g, X, Y, 17, 7, r.xpFrac, SurfaceMuted);
-                    break;
-                }
-                default: iconeAjustes(g, X, Y, ui.color(Muted)); break;
+                case 2: iconeHabitos(g, X, Y, r.habTotal > 0 ? double(r.habFeitas) / r.habTotal : 0.0); break;
+                default: desenharAnelXp(ui, g, X, Y, 17, 7, r.xpFrac, SurfaceMuted); break;
                 }
             });
-            if (i == 2) {   // nivel dentro do anel (texto proprio, 2 passes: o Bloco ja foi pintado)
+            if (i == 3) {   // nivel dentro do anel (texto proprio, 2 passes: o Bloco ja foi pintado)
                 const Rect numero{int16_t(icx - 14), int16_t(icy - 9), 28, 18};
                 const std::string nivel = std::to_string(r.nivel);
                 Bloco centro(ui, numero, SurfaceMuted, 2, 200 + uint32_t(r.nivel));
@@ -279,10 +318,13 @@ namespace screens {
             if (ui.tap(rect)) {
                 if (i == 0) screen = Screen::TempoHoje;
                 else if (i == 1) screen = Screen::Read;
-                else if (i == 2) screen = Screen::Perfil;
-                else screen = Screen::Settings;
+                else if (i == 2) screen = Screen::Habitos;
+                else screen = Screen::Perfil;
             }
         }
+        // Ajustes: engrenagem na barra de status (alvo 48 x 40 px). Fica DEPOIS dos blocos: na faixa em que se sobrepoe ao
+        // bloco Leitor (y 26..40) o ultimo toque registrado ganha, entao a engrenagem vence.
+        if (ui.tap({592, 0, 48, 40})) screen = Screen::Settings;
         return Action::None;
     }
 

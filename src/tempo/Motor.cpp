@@ -449,6 +449,24 @@ namespace tempo {
         return r;
     }
 
+    ResultadoOcorrencia pularOcorrencia(Estado& e, size_t indice) {
+        ResultadoOcorrencia r;
+        r.indice = indice;
+        if (indice >= e.dia.ocorrencias.size()) {
+            return r;
+        }
+        OcorrenciaDia& oc = e.dia.ocorrencias[indice];
+        if (oc.feita || oc.status != StatusHabito::Pendente) {
+            r.status = oc.status;
+            return r;
+        }
+        oc.status = StatusHabito::Pulado;   // feita continua false: nao entra na fila, nao paga, nao vira esquecida
+        oc.minutoReal = e.dia.minutoAtual;
+        r.registrado = true;
+        r.status = StatusHabito::Pulado;
+        return r;
+    }
+
     double registrarHumor(Estado& e) {
         if (e.dia.humorRegistros >= param::kHumorMaxDia) {
             return 0.0;
@@ -582,6 +600,7 @@ namespace tempo {
         bool criterioHabitos = true;      // dia valido
         bool habitosBons = false;         // >= 80 % -> +1/2 coracao
         if (!d.ocorrencias.empty()) {
+            size_t pulados = 0;
             for (OcorrenciaDia& oc : d.ocorrencias) {
                 if (!oc.feita && oc.status == StatusHabito::Pendente) {
                     oc.status = StatusHabito::Esquecido;
@@ -592,10 +611,17 @@ namespace tempo {
                 if (oc.status == StatusHabito::NoHorario) {
                     ++noHorario;
                 }
+                if (oc.status == StatusHabito::Pulado) {
+                    ++pulados;
+                }
             }
-            const double fracao = static_cast<double>(noHorario) / static_cast<double>(d.ocorrencias.size());
-            criterioHabitos = fracao >= static_cast<double>(param::kDiaValidoHabitos) / kNumHabitos - kEps;
-            habitosBons = fracao >= param::kHabitosBomFracao - kEps;
+            // "Pular" tira a ocorrencia do denominador (nao conta como esquecida). So puladas = criterio ignorado.
+            const size_t base = d.ocorrencias.size() - pulados;
+            if (base > 0) {
+                const double fracao = static_cast<double>(noHorario) / static_cast<double>(base);
+                criterioHabitos = fracao >= static_cast<double>(param::kDiaValidoHabitos) / kNumHabitos - kEps;
+                habitosBons = fracao >= param::kHabitosBomFracao - kEps;
+            }
         } else {
             bool legadoUsado = false;
             for (size_t i = 0; i < kNumHabitos; ++i) {

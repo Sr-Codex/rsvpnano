@@ -78,6 +78,7 @@ namespace screens {
         TempoVitoria,
         Home,   // launcher "Agora + apps" (menu inicial)
         Perfil,   // app Perfil (5 paginas: Ficha, Semana, Projetos, Conquistas, Hoje)
+        Habitos,   // app Habitos (deitada: cartao + lista; em pe via IMU: linha do tempo)
     };
 
     enum class Action : uint8_t {

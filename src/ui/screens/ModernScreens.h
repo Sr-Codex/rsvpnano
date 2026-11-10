@@ -5,6 +5,7 @@
 
 namespace screens::modern {
     constexpr bool enabled(int16_t width, int16_t height, Screen screen) {
+        if (screen == Screen::Habitos && width == 172 && height == 640) return true;   // Habitos em pe (IMU)
         if (width != 640 || height != 172) return false;
         switch (screen) {
         case Screen::Read: case Screen::Library: case Screen::Chapters: case Screen::Settings:
@@ -17,7 +18,7 @@ namespace screens::modern {
         case Screen::StorageHub: case Screen::StorageEncryption: case Screen::PowerHub: case Screen::FocusPresets:
         case Screen::FindPlace: case Screen::FindChapters: case Screen::BookSearch: case Screen::BookSearchKeyboard:
         case Screen::Dictionary: case Screen::DictionarySearch: case Screen::DictionaryHelp: case Screen::DictionaryInstall:
-        case Screen::TempoHoje: case Screen::TempoBatalha: case Screen::TempoVitoria: case Screen::Home: case Screen::Perfil:
+        case Screen::TempoHoje: case Screen::TempoBatalha: case Screen::TempoVitoria: case Screen::Home: case Screen::Perfil: case Screen::Habitos:
         case Screen::QuickControls: case Screen::Onboarding: case Screen::ButtonMap: case Screen::AddBooks: case Screen::TouchCheck:
             return true;
         default:

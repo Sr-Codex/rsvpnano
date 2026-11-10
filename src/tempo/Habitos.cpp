@@ -366,7 +366,7 @@ namespace tempo {
                 usada[i] = true;
                 achou = true;
                 OcorrenciaDia oc = antes[i];
-                if (!oc.feita) {   // pendente: acompanha a definicao atual; feita: congelada
+                if (!oc.feita && oc.status != StatusHabito::Pulado) {   // pendente: acompanha a definicao atual; feita/pulada: congelada
                     oc.nome = g.nome;
                     oc.tipo = g.tipo;
                     oc.total = g.total;
@@ -377,8 +377,8 @@ namespace tempo {
             }
             if (!achou) novas.push_back(std::move(g));
         }
-        for (size_t i = 0; i < antes.size(); ++i) {   // feitas de habitos que sumiram ficam
-            if (!usada[i] && antes[i].feita) novas.push_back(antes[i]);
+        for (size_t i = 0; i < antes.size(); ++i) {   // feitas (e puladas) de habitos que sumiram ficam
+            if (!usada[i] && (antes[i].feita || antes[i].status == StatusHabito::Pulado)) novas.push_back(antes[i]);
         }
         std::stable_sort(novas.begin(), novas.end(), ordenarOcorrencia);
         if (novas.size() > param::kMaxOcorrenciasDia) novas.resize(param::kMaxOcorrenciasDia);
@@ -397,6 +397,7 @@ namespace tempo {
                 default: return FaseOcorrencia::Esquecida;
             }
         }
+        if (oc.status == StatusHabito::Pulado) return FaseOcorrencia::Pulada;
         if (oc.status == StatusHabito::Esquecido) return FaseOcorrencia::Esquecida;
         if (oc.minuto < 0) return FaseOcorrencia::Agora;
         const int janela = param::kValoresTipoHabito[static_cast<size_t>(oc.tipo)].janelaMin;
@@ -700,7 +701,8 @@ namespace tempo {
         ev.projetoId = oc.habitoId;
         ev.categoria = nomeTipo(oc.tipo);
         ev.resultado = r.status == StatusHabito::NoHorario ? "no_horario"
-                     : r.status == StatusHabito::Atrasado  ? "atrasado" : "esquecido";
+                     : r.status == StatusHabito::Atrasado  ? "atrasado"
+                     : r.status == StatusHabito::Pulado    ? "pulado" : "esquecido";
         ev.planejadoMin = oc.minuto;
         ev.cr = r.cr;
         ev.xp = r.xp;

@@ -18,6 +18,7 @@
 #include "logging/Logger.h"
 #include "network/TickTickSync.h"
 #include "tempo/Relogio.h"
+#include "tempo/Lembretes.h"
 #include "feeds/RssFeeds.h"
 #include "settings/NvsSecurity.h"
 #include "library/ReadingProgress.h"
@@ -119,6 +120,7 @@ void App::begin() {
         focusScreen_.begin(Board::Storage::filesystem());
     else
         focusScreen_.begin();
+    motionReader_.begin();   // IMU tambem para os lembretes de habitos (pegou a placa) e a orientacao em pe dos Habitos
     startupStage(UiText::Library);
     readerScreen_.loadInitialBook(immediateUi_, storage_, prefs_, bootMs_);
     Logger::startupCheckpoint("book");
@@ -183,7 +185,7 @@ void App::update(uint32_t nowMs) {
     }
     while (immediateUi_.pollTouch(nowMs)) {
         lastActivityMs_ = nowMs;
-        handleTouch(nowMs);
+        if (!handleAvisoTouch(nowMs)) handleTouch(nowMs);
         nowMs = millis();
     }
 
@@ -226,6 +228,14 @@ void App::update(uint32_t nowMs) {
         }
     }
 
+    {
+        const bool avisou = tickHabitos(nowMs);
+        if (avisou && screen_ == screens::Screen::Standby) {   // lembrete acorda a tela (descanso com protetor ligado)
+            exitStandby(nowMs);
+            return;
+        }
+    }
+
     if (screen_ == screens::Screen::Standby) {
         if (nowMs - standbyEnteredMs_ >= kStandbyPowerOffMs) {
             powerOff(nowMs);
@@ -259,6 +269,7 @@ void App::update(uint32_t nowMs) {
     ReadingProgress::save(readerScreen_.session, prefs_, false, nowMs);
 
     renderScreen(nowMs);
+    desenharAvisoHabito(nowMs);
     if (!preparingTypography && !readerScreen_.session.playing && !companionApi_.active() && !usbTransfer_.active()
         && !focusScreen_.active() && !tempoScreen_.battleActive() && screen_ != screens::Screen::FocusSession && screen_ != screens::Screen::Status
         && screen_ != screens::Screen::Onboarding
@@ -269,6 +280,7 @@ void App::update(uint32_t nowMs) {
 }
 
 void App::renderScreen(uint32_t nowMs) {
+    sincronizarOrientacaoHabitos();   // antes de decidir a apresentacao: em pe so nos Habitos
     // Ajustes aberto pelo launcher: o "voltar" dele (menu do leitor) retorna ao Home.
     if (screen_ == screens::Screen::Reader || screen_ == screens::Screen::Home) settingsFromHome_ = false;
     else if (screen_ == screens::Screen::Read && settingsFromHome_) { settingsFromHome_ = false; screen_ = screens::Screen::Home; }
@@ -584,6 +596,14 @@ void App::renderScreen(uint32_t nowMs) {
         immediateUi_.beginFrame(static_cast<uint8_t>(screen_), perfilScreen_.surface());
         action = perfilScreen_.draw(immediateUi_, nowMs, screen_, storage_.mounted() ? &Board::Storage::filesystem() : nullptr);
         break;
+    case screens::Screen::Habitos: {
+        immediateUi_.beginFrame(static_cast<uint8_t>(screen_), 0);
+        screens::HabitosInfo habitosInfo;
+        habitosInfo.erroSync = habitsError_;
+        action = habitosScreen_.draw(immediateUi_, nowMs, screen_, tempoScreen_,
+                                     storage_.mounted() ? &Board::Storage::filesystem() : nullptr, habitosInfo);
+        break;
+    }
     case screens::Screen::TempoHoje:
     case screens::Screen::TempoBatalha:
     case screens::Screen::TempoVitoria:
@@ -801,6 +821,12 @@ void App::handleInput(Input::ActionMask actions, uint32_t nowMs) {
     if (screen_ == screens::Screen::Perfil
         && (Input::hasAction(actions, Input::ActionOpenMenu) || Input::hasAction(actions, Input::ActionBack))) {
         perfilScreen_.back(screen_);   // PWR no Perfil volta ao launcher
+        renderScreen(nowMs);
+        return;
+    }
+    if (screen_ == screens::Screen::Habitos
+        && (Input::hasAction(actions, Input::ActionOpenMenu) || Input::hasAction(actions, Input::ActionBack))) {
+        habitosScreen_.back(screen_);   // PWR nos Habitos volta ao launcher
         renderScreen(nowMs);
         return;
     }
@@ -1329,7 +1355,7 @@ void App::runRss() {
 // enquanto o app esta no launcher/Tempo. So com token configurado, cartao montado, sem outro job, sem
 // Companion/USB abertos e fora da batalha (nao liga o radio durante o foco).
 void App::updateTickTickSync(uint32_t nowMs) {
-    const bool launcher = screen_ == screens::Screen::Home || screens::TempoScreen::owns(screen_);
+    const bool launcher = screen_ == screens::Screen::Home || screen_ == screens::Screen::Habitos || screens::TempoScreen::owns(screen_);
     const bool entered = launcher && !tickTickWasLauncher_;
     tickTickWasLauncher_ = launcher;
     if (!launcher || backgroundJobActive() || !storage_.mounted() || companionApi_.active() || usbTransfer_.active()
@@ -1343,6 +1369,105 @@ void App::updateTickTickSync(uint32_t nowMs) {
     tickTickLastMs_ = nowMs;
     if (!startBackgroundJob(JobKind::TickTick))
         ESP_LOGW("ticktick", "sync job could not start");
+}
+
+// ---------------------------------------------------------------- Habitos (fase 2): lembretes, aviso e orientacao em pe
+bool App::avisoPermitido() const {
+    switch (screen_) {
+    case screens::Screen::Status: case screens::Screen::Standby: case screens::Screen::Onboarding:
+    case screens::Screen::Usb: case screens::Screen::Sync: case screens::Screen::TouchCheck:
+    case screens::Screen::ButtonMap: case screens::Screen::Habitos:
+        return false;
+    default:
+        return !companionApi_.active() && !usbTransfer_.active() && !serialCompanion_.active();
+    }
+}
+
+bool App::tickHabitos(uint32_t nowMs) {
+    // IMU (~20 Hz): variacao de aceleracao -> "pegou a placa" (histerese em tempo::DetectorPegada)
+    motionReader_.update(nowMs);
+    if (motionReader_.sampleCount() != motionSamples_) {
+        motionSamples_ = motionReader_.sampleCount();
+        if (pegada_.alimentar(nowMs, motionReader_.lastDelta())) pegouPendente_ = true;
+    }
+    if (nowMs - habitosTickMs_ < 1000) return false;
+    habitosTickMs_ = nowMs;
+    fs::FS* tempoFs = storage_.mounted() ? &Board::Storage::filesystem() : nullptr;
+    tempoScreen_.manutencaoHabitos(nowMs, tempoFs);
+    habitsError_ = net::ticktick::status().habitsError;
+    const bool pegou = pegouPendente_;
+    pegouPendente_ = false;
+    const auto aviso = tempoScreen_.lembretesTick(nowMs, pegou);
+    if (avisoAtivo_ && deadlineReached(nowMs, avisoAteMs_)) {
+        avisoAtivo_ = false;
+        immediateUi_.invalidate();   // repinta a tela por baixo
+    }
+    if (!aviso) return false;
+    ESP_LOGI("habitos", "lembrete: %s %02d:%02d%s tela=%u", aviso->nome.c_str(), aviso->minuto / 60, aviso->minuto % 60,
+             aviso->repeticao ? " (re-aviso)" : "", static_cast<unsigned>(screen_));
+    if (screen_ == screens::Screen::Habitos) {   // ja esta olhando: bipe so no aviso inicial, sem aviso no topo
+        if (!aviso->repeticao) Board::Audio::beep();
+        return false;
+    }
+    Board::Audio::beep();
+    if (avisoPermitido()) {
+        avisoHabito_ = *aviso;
+        avisoAtivo_ = true;
+        avisoPintar_ = true;
+        avisoAteMs_ = nowMs + tempo::kAvisoVisivelMs;
+    }
+    return true;
+}
+
+bool App::handleAvisoTouch(uint32_t nowMs) {
+    if (!avisoAtivo_) return false;
+    const ui::Touch* touch = immediateUi_.touch();
+    if (touch == nullptr) return false;
+    const ui::Rect area = screens::avisoHabitoRect(immediateUi_);
+    if (ui::hasTouch(*touch, ui::TouchStart) && ui::contains(area, touch->x, touch->y)) avisoToque_ = true;
+    if (!avisoToque_) return false;
+    if (ui::hasTouch(*touch, ui::TouchCancel)) avisoToque_ = false;
+    if (ui::hasTouch(*touch, ui::TouchRelease)) {
+        avisoToque_ = false;
+        if (ui::hasTouch(*touch, ui::TouchTap) && !ui::hasTouch(*touch, ui::TouchCancel)) {
+            avisoAtivo_ = false;
+            if (screen_ == screens::Screen::Reader) readerScreen_.pauseImmediately(prefs_, nowMs);   // sair da leitura = pausar
+            screen_ = screens::Screen::Habitos;
+            immediateUi_.invalidate();
+            renderScreen(nowMs);
+        }
+    }
+    return true;   // o toque que comecou no aviso nunca chega a tela de baixo
+}
+
+void App::desenharAvisoHabito(uint32_t nowMs) {
+    if (!avisoAtivo_) return;
+    if (!avisoPermitido() || deadlineReached(nowMs, avisoAteMs_)) {
+        avisoAtivo_ = false;
+        immediateUi_.invalidate();
+        return;
+    }
+    // Pinta ao aparecer, quando a tela de baixo repintou e, no maximo, a cada 250 ms (corrige sobras do leitor).
+    if (!avisoPintar_ && !immediateUi_.drewThisFrame() && nowMs - avisoPintadoMs_ < 250) return;
+    avisoPintar_ = false;
+    avisoPintadoMs_ = nowMs;
+    screens::desenharAvisoHabito(immediateUi_, avisoHabito_);
+}
+
+void App::sincronizarOrientacaoHabitos() {
+    const auto base = settingsStore_.settings().reading.leftHanded ? Board::Display::rotatedUiOrientation()
+                                                                  : Board::Display::defaultUiOrientation();
+    ui::Orientation alvo = base;
+    if (screen_ == screens::Screen::Habitos) {
+        alvo = immediateUi_.orientation();
+        switch (motionReader_.orientation()) {
+        case focus::Orientation::ShortA: alvo = ui::Orientation::Portrait; break;
+        case focus::Orientation::ShortB: alvo = ui::Orientation::PortraitFlipped; break;
+        case focus::Orientation::Flat: alvo = base; break;
+        default: break;   // Unknown (em movimento): mantem
+        }
+    }
+    if (alvo != immediateUi_.orientation()) immediateUi_.setOrientation(alvo);
 }
 
 void App::runBookOpen(size_t index, uint32_t nowMs) {
