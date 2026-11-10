@@ -1,0 +1,85 @@
+# Simulador do Lume Nano (macOS/Linux, SDL2)
+
+Roda o **firmware real** (`src/app/App.cpp` e todas as telas, leitor, biblioteca, foco, ajustes) no
+computador, numa placa virtual **Waveshare ESP32-S3-Touch-LCD-3.49 Rev2**. Você clica e testa sem
+compilar para a placa nem gravar por OTA. Decisão: `docs/adr/008-simulador-sdl-firmware-inteiro.md`
+(repo `lume-nano`).
+
+## Usar
+
+```bash
+sim/run.sh                 # compila (incremental), prepara o microSD virtual e abre a janela no tamanho real (1×)
+sim/run.sh --scale 2       # janela 2× (padrão = 1×, tamanho real 640×172)
+sim/run.sh --reset         # apaga o cartão + NVS virtuais e começa do zero (onboarding de novo)
+LUME_SIM_STATE=~/outro sim/run.sh     # outro "cartão" + NVS
+```
+
+Pré-requisitos: `brew install sdl2` (Linux: `libsdl2-dev`) e o `.venv` do workspace
+(`../scripts/setup.sh` em `lume-nano`). O ambiente PlatformIO é `native_sim`
+(`pio run -e native_sim`; binário em `.pio/build/native_sim/program`).
+
+**Estado persistente** em `sim/state/` (ignorado pelo git):
+- `sim/state/sd/` = **microSD** (mesma estrutura do cartão: `/library/books`, `/config/settings.toml`,
+  `/locales`, `/fonts`, `/themes`…). Copie livros `.rsvp` + `Livro.cover.jpg` para `sd/library/books/`.
+  Como na placa, o cartão só é lido no boot: reinicie o simulador depois de mexer.
+- `sim/state/nvs/` = NVS (Preferences). `esp_restart()` reinicia o simulador mantendo os dois.
+
+Na 1ª execução o `run.sh` monta o cartão com o pacote **pt-BR** (`locale-packs/pt-BR.zip`) e os livros de
+`../books/rsvp/` (se existir) ou, senão, gera **Dracula** + **Letter** com `tools/epub2rsvp.py`.
+
+## Controles
+
+| Entrada | Placa |
+| --- | --- |
+| Clique / arrastar com o mouse | Toque (tocar, segurar ≥ 600 ms, deslizar) |
+| **`Z`** (ou `B`/`Espaço`) | Botão **BOOT** (clique = selecionar/play-pause; segurar = descanso) |
+| **`X`** (ou `P`/`Esc`) | Botão **PWR** (clique = menu/voltar; segurar = desligar → fecha o simulador) |
+| **`C`** | Botão **RESET** (atrás da placa): reinicia o firmware mantendo cartão e NVS — como o reset real, relê o SD |
+| `1` | IMU: deitada, tela para cima (padrão) → `Flat` |
+| `2` | IMU: deitada, tela para baixo → `Flat` |
+| `3` | IMU: em pé, **ponta A** para cima → `ShortA` |
+| `4` | IMU: em pé, **ponta B** para cima → `ShortB` |
+| `H` | IMU: chacoalhar / pegou na mão (pulso de ~0,7 s, até 1,6 g) |
+| `R` | Girar a placa 90° (rotação manual da janela; o toque acompanha) |
+| `[` / `]` | Bateria −/+ 10 % |
+| `U` | Liga/desliga alimentação USB (ícone de carregando) |
+| `S` | Captura PNG da tela em `sim/state/screenshots/` |
+| `Q` | Sair |
+
+**Orientação:** a janela segue a orientação que o firmware usa (`ui::Context` → `gfx.setRotation`).
+Se a interface for para retrato (172×640) ou girar 180° (modo canhoto), a janela gira junto e o
+mapeamento mouse→toque também. `R` soma giros manuais por cima disso.
+
+**IMU:** o QMI8658 é emulado por registrador (WHO_AM_I `0x05`, reset `0x60`/`0x4D`, `CTRL7` liga o
+acelerômetro, dados em `0x35…0x3A`, ±4 g). É o que `focus::OrientationReader` lê de verdade.
+
+## Testes sem janela (roteiro)
+
+```bash
+.pio/build/native_sim/program --headless --state sim/state \
+  --script "tap 597,74 @2000; tap 417,20 @3000; shot /tmp/menu.png @4500; quit @5000"
+```
+
+Verbos (`@ms` = tempo desde o início): `tap X,Y` · `hold X,Y MS` · `drag X1,Y1 X2,Y2 MS` ·
+`press boot|power` · `long boot|power MS` · `pose up|down|a|b` · `shake` · `turn` · `shot ARQ.png` ·
+`imucheck` (autoteste: o `OrientationReader` real classifica cada pose) · `quit`.
+Coordenadas = as da janela (640×172 deitada). Log de depuração: `LUME_SIM_DEBUG=1`.
+
+## O que é e o que não é simulado
+
+| Igual à placa (mesmo código) | Só na placa |
+| --- | --- |
+| Telas, layout, fontes, cores, temas, textos pt-BR | Velocidade real (o Mac é muito mais rápido) |
+| Navegação, toque, gestos, botões BOOT/PWR | Memória: RAM/PSRAM, falta de memória, stack das tasks |
+| Leitor RSVP, capítulos, progresso, biblioteca, capas (JPEGDEC real) | Painel físico (brilho/cor real, QSPI) e precisão do toque |
+| Foco/pomodoro, ajustes (TOML ⇄ NVS), idiomas (SHA-256 real) | Wi-Fi, OTA, companion HTTP/USB, pen drive (MSC), RSS, dicionário online → **"Indisponível no simulador"** |
+| Tarefas FreeRTOS (threads reais), filas, tempo real | Áudio (beep), sono leve real, consumo de bateria |
+| IMU (pose por tecla), bateria/USB (valores por tecla) | Escalonamento exato do FreeRTOS em 2 núcleos |
+
+Implementação: `sim/support/` (Arduino, FS, Preferences, FreeRTOS, ESP-IDF mínimos), `sim/platform/`
+(placa virtual: tela, toque, botões, energia, SD, IMU), `sim/stubs/` (rede/USB/OTA indisponíveis),
+`sim/main.cpp` (janela SDL, roteiro, PNG), `sim/pio_sim.py` (integração PlatformIO). O firmware da placa
+não muda: nenhum arquivo de `src/` foi alterado para o simulador.
+
+**Funcionalidade nova que usar hardware** (sensor, rádio, áudio…) precisa de um equivalente em
+`sim/platform/` ou `sim/stubs/` — senão o `native_sim` não linka.
