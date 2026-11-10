@@ -44,6 +44,24 @@ namespace tempo::param {
         {2.0, 10.0, Atributo::Energia, 5},    // Descanso (volta ate +5 min)
         {3.0, 10.0, Atributo::Energia, 30},   // Medicacao
     }};
+    // Habitos do TickTick (docs/app-tempo/habitos.md): valores por TIPO detectado pelo nome. Ordem = enum TipoHabito.
+    // Geral = qualquer outro habito (2 cr, 5 XP, +-60 min). Meditacao nao esta na tabela da economia: usa o valor geral
+    // (Mente). Descanso: janela unilateral (volta ate +5 min do horario).
+    constexpr std::array<ValorHabito, static_cast<size_t>(TipoHabito::Count)> kValoresTipoHabito = {{
+        {2.0, 5.0, Atributo::Energia, 60},    // Geral
+        {15.0, 40.0, Atributo::Corpo, 60},    // Academia
+        {3.0, 10.0, Atributo::Energia, 30},   // Medicacao
+        {2.0, 5.0, Atributo::Mente, 60},      // Meditacao
+        {2.0, 5.0, Atributo::Corpo, 30},      // Suplemento
+        {2.0, 5.0, Atributo::Corpo, 45},      // Almoco
+        {2.0, 5.0, Atributo::Corpo, 60},      // Banho
+        {2.0, 5.0, Atributo::Corpo, 30},      // Dentes
+        {2.0, 10.0, Atributo::Energia, 5},    // Descanso
+    }};
+    constexpr double kTetoHabitosCrDia = 28.0;   // soma de todos os habitos
+    constexpr size_t kMaxOcorrenciasDia = 48;
+    constexpr size_t kMaxOcorrenciasPorHabito = 12;
+    constexpr int kFusoMinutos = -180;           // America/Sao_Paulo (UTC-3, sem horario de verao)
     constexpr int kJanelaAtrasoMin = 120;
     constexpr double kXpAtrasadoFator = 0.5;
     constexpr double kXpHumor = 2.0;

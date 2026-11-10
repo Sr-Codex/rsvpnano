@@ -8,6 +8,7 @@
 
 #include "tempo/Codec.h"
 #include "tempo/FocoLeitor.h"
+#include "tempo/Habitos.h"
 #include "tempo/Motor.h"
 #include "tempo/Sessao.h"
 #include "ui/screens/ModernScreens.h"
@@ -71,6 +72,14 @@ namespace screens {
         // Devolve true se liquidou e gravou.
         bool registrarFocoLeitor(uint32_t nowMs, fs::FS* filesystem, const tempo::RodadaLeitor& rodada,
                                  std::string_view tituloLivro);
+        // App Habitos (fase 1, sem tela): reconcilia as ocorrencias de hoje com /tempo/habitos.json e aplica os
+        // check-ins feitos no celular (/tempo/habitos-checkins.json, baixados pelo sync). Chamar fora do desenho,
+        // ex.: ao fim da sync do TickTick. Idempotente.
+        void atualizarHabitos(fs::FS* filesystem, uint32_t nowMs);
+        // "Feito agora" na ocorrencia `indice` de estado().dia.ocorrencias: paga, grava o log e enfileira o check-in
+        // (enviado ao TickTick na proxima sync com Wi-Fi). Devolve false se ja estava feita ou sem SD.
+        bool marcarHabito(uint32_t nowMs, fs::FS* filesystem, size_t indice);
+        const tempo::Estado& estadoTempo() const { return estado_; }
         bool battleActive() const { return fase_ == Fase::Lutando || fase_ == Fase::Pausada || fase_ == Fase::Descanso; }
         uint8_t surface() const {
             return static_cast<uint8_t>(static_cast<uint8_t>(fase_) * 4 + (distraido_ ? 1 : 0) + (overtime_ ? 2 : 0)
@@ -94,6 +103,8 @@ namespace screens {
         void encerrarDescanso(uint32_t nowMs);
         void salvarReflexao(fs::FS* filesystem);
         void garantirDia(uint32_t nowMs);
+        void registrarHabitoMeditacao(fs::FS* filesystem);     // batalha de Meditacao vencida: marca o habito
+        void gravarEventoHabito(fs::FS* filesystem, const tempo::ResultadoOcorrencia& r, std::string_view origem);
         void salvar(fs::FS* filesystem);
         int64_t restanteMs() const;      // vida restante do inimigo (ms)
         int64_t overtimeMs() const;      // foco alem do necessario para zerar o inimigo (ms)
@@ -109,6 +120,7 @@ namespace screens {
         fs::FS* fs_ = nullptr;
         tempo::Estado estado_;
         tempo::ListaProjetos lista_;
+        tempo::ListaHabitos habitos_;        // definicoes dos habitos (habitos.json)
         std::vector<std::string> titulos_;   // titulos limpos (sem emoji), 1:1 com lista_.projetos
         size_t primeiro_ = 0;                // primeira linha visivel do seletor (rolagem)
         bool seletor_ = false;               // seletor de foco aberto (Screen::TempoHoje)

@@ -378,10 +378,74 @@ namespace tempo {
                 }
                 break;
         }
+        e.dia.habitosCr += r.cr;
         creditar(e, r.cr);
         addXp(e, r.xp, v.atributo);
         const int aplicado = aplicarCoracoes(e, r.coracoesMeios);
         logEvento(e, TipoEvento::Habito, r.cr, r.xp, aplicado, static_cast<int>(habito));
+        return r;
+    }
+
+    StatusHabito classificarOcorrencia(TipoHabito tipo, int minutoPlanejado, int minutoReal) {
+        if (minutoPlanejado < 0) {
+            return StatusHabito::NoHorario;
+        }
+        const int janela = param::kValoresTipoHabito[static_cast<size_t>(tipo)].janelaMin;
+        const int delta = minutoReal - minutoPlanejado;
+        const int distancia = tipo == TipoHabito::Descanso ? delta : std::abs(delta);
+        if (distancia <= janela) {
+            return StatusHabito::NoHorario;
+        }
+        if (distancia <= janela + param::kJanelaAtrasoMin) {
+            return StatusHabito::Atrasado;
+        }
+        return StatusHabito::Esquecido;
+    }
+
+    ResultadoOcorrencia registrarOcorrencia(Estado& e, size_t indice, int minutoReal, bool remota) {
+        ResultadoOcorrencia r;
+        r.indice = indice;
+        if (indice >= e.dia.ocorrencias.size()) {
+            return r;
+        }
+        OcorrenciaDia& oc = e.dia.ocorrencias[indice];
+        if (oc.feita) {
+            r.status = oc.status;
+            return r;
+        }
+        const ValorHabito& v = param::kValoresTipoHabito[static_cast<size_t>(oc.tipo)];
+        r.registrado = true;
+        r.status = classificarOcorrencia(oc.tipo, oc.minuto, minutoReal);
+        oc.status = r.status;
+        oc.feita = true;
+        oc.minutoReal = minutoReal;
+        oc.remota = remota;
+        const bool medicacao = oc.tipo == TipoHabito::Medicacao;
+        switch (r.status) {
+            case StatusHabito::NoHorario: {
+                const double restante = std::max(0.0, param::kTetoHabitosCrDia - e.dia.habitosCr);
+                r.cr = std::min(v.cr, restante);
+                r.tetoAplicado = r.cr + kEps < v.cr;
+                r.xp = v.xp;
+                break;
+            }
+            case StatusHabito::Atrasado:
+                r.xp = v.xp * param::kXpAtrasadoFator;
+                if (medicacao) {
+                    r.coracoesMeios = -1;
+                }
+                break;
+            default:
+                if (medicacao) {
+                    r.coracoesMeios = -2;
+                }
+                break;
+        }
+        e.dia.habitosCr += r.cr;
+        creditar(e, r.cr);
+        addXp(e, r.xp, v.atributo);
+        const int aplicado = aplicarCoracoes(e, r.coracoesMeios);
+        logEvento(e, TipoEvento::Habito, r.cr, r.xp, aplicado, 1000 + static_cast<int>(indice));
         return r;
     }
 
@@ -509,24 +573,55 @@ namespace tempo {
             registrarPerdido(e, pend);
         }
 
-        // 2. habitos pendentes viram esquecidos (medicacao esquecida = -1 coracao)
+        // 2. habitos pendentes viram esquecidos (medicacao esquecida = -1 coracao).
+        //    Modo "ocorrencias" (habitos do TickTick): criterio por FRACAO das ocorrencias do dia.
+        //    Modo legado (enum de 7 fixos): so vale se algum habito legado foi registrado hoje.
+        //    Sem habitos configurados nem registrados: o criterio de habitos e ignorado (nao bloqueia o dia valido
+        //    nem rende coracao).
         int noHorario = 0;
-        for (size_t i = 0; i < kNumHabitos; ++i) {
-            if (d.habitos[i] == StatusHabito::Pendente) {
-                d.habitos[i] = StatusHabito::Esquecido;
-                if (static_cast<Habito>(i) == Habito::Medicacao) {
-                    aplicarCoracoes(e, -2);
+        bool criterioHabitos = true;      // dia valido
+        bool habitosBons = false;         // >= 80 % -> +1/2 coracao
+        if (!d.ocorrencias.empty()) {
+            for (OcorrenciaDia& oc : d.ocorrencias) {
+                if (!oc.feita && oc.status == StatusHabito::Pendente) {
+                    oc.status = StatusHabito::Esquecido;
+                    if (oc.tipo == TipoHabito::Medicacao) {
+                        aplicarCoracoes(e, -2);
+                    }
+                }
+                if (oc.status == StatusHabito::NoHorario) {
+                    ++noHorario;
                 }
             }
-            if (d.habitos[i] == StatusHabito::NoHorario) {
-                ++noHorario;
+            const double fracao = static_cast<double>(noHorario) / static_cast<double>(d.ocorrencias.size());
+            criterioHabitos = fracao >= static_cast<double>(param::kDiaValidoHabitos) / kNumHabitos - kEps;
+            habitosBons = fracao >= param::kHabitosBomFracao - kEps;
+        } else {
+            bool legadoUsado = false;
+            for (size_t i = 0; i < kNumHabitos; ++i) {
+                legadoUsado = legadoUsado || d.habitos[i] != StatusHabito::Pendente;
+            }
+            if (legadoUsado) {
+                for (size_t i = 0; i < kNumHabitos; ++i) {
+                    if (d.habitos[i] == StatusHabito::Pendente) {
+                        d.habitos[i] = StatusHabito::Esquecido;
+                        if (static_cast<Habito>(i) == Habito::Medicacao) {
+                            aplicarCoracoes(e, -2);
+                        }
+                    }
+                    if (d.habitos[i] == StatusHabito::NoHorario) {
+                        ++noHorario;
+                    }
+                }
+                criterioHabitos = noHorario >= param::kDiaValidoHabitos;
+                habitosBons = static_cast<double>(noHorario) / kNumHabitos >= param::kHabitosBomFracao - kEps;
             }
         }
         resumo.habitosNoHorario = noHorario;
 
         const bool recuperacao = d.recuperacao;
         resumo.recuperacao = recuperacao;
-        resumo.valido = d.fochoValidoMin >= param::kDiaValidoFocoMin && noHorario >= param::kDiaValidoHabitos;
+        resumo.valido = d.fochoValidoMin >= param::kDiaValidoFocoMin && criterioHabitos;
         resumo.limpo = e.saldo >= 0.0 && d.perdidoMin <= param::kDiaLimpoPerdidoMax;
         resumo.fechamentoNegativo = e.saldo < 0.0 && !recuperacao;
 
@@ -534,7 +629,7 @@ namespace tempo {
         if (d.perdidoMin > param::kPerdidoCoracaoMin) {
             aplicarCoracoes(e, -1);
         }
-        if (static_cast<double>(noHorario) / kNumHabitos >= param::kHabitosBomFracao - kEps) {
+        if (habitosBons) {
             aplicarCoracoes(e, 1);
         }
         if (resumo.limpo) {

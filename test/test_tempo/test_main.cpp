@@ -360,7 +360,13 @@ namespace {
         Estado e = novoEstado();
         registrarHabito(e, Habito::Medicacao, 480, 480 + 31);  // atrasada: -1/2 coracao
         TEST_ASSERT_EQUAL_INT(9, e.coracoesMeios);
+        // Ajuste (app Habitos fase 1, decisao 3): "sem habitos configurados o criterio e ignorado". Um dia fechado sem
+        // nenhum habito (legado ou do TickTick) NAO esquece mais a medicacao; a penalidade vale quando ha habitos em uso.
+        Estado f0 = novoEstado();
+        fecharDia(f0, false);
+        TEST_ASSERT_EQUAL_INT(10, f0.coracoesMeios);  // sem habitos: nem penalidade, nem bonus
         Estado f = novoEstado();
+        registrarHabito(f, Habito::Banho, 600, 600);
         fecharDia(f, false);  // medicacao esquecida: -1 coracao (e dia limpo devolve 1/2)
         TEST_ASSERT_EQUAL_INT(9, f.coracoesMeios);
         Estado g = novoEstado();

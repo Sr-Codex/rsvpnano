@@ -132,6 +132,7 @@ CompanionApi::OperationResult CompanionApi::startServer() {
         makeRoute("/api/v2/tempo/ticktick", HTTP_GET, &CompanionApi::handle<&CompanionApi::getTickTick>),
         makeRoute("/api/v2/tempo/ticktick", HTTP_PUT, &CompanionApi::handle<&CompanionApi::putTickTick>),
         makeRoute("/api/v2/tempo/projetos", HTTP_PUT, &CompanionApi::handle<&CompanionApi::putTempoProjects>),
+        makeRoute("/api/v2/tempo/habitos", HTTP_PUT, &CompanionApi::handle<&CompanionApi::putTempoHabits>),
         makeRoute("/api/v2/*", HTTP_OPTIONS, &CompanionApi::handleOptions),
     };
 

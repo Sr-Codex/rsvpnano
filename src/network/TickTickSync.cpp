@@ -8,10 +8,14 @@
 
 #include <ctime>
 #include <mutex>
+#include <utility>
+#include <vector>
 
 #include "network/VerifiedDownload.h"
 #include "network/WifiConnection.h"
 #include "storage/tempo/TempoStorage.h"
+#include "tempo/Habitos.h"
+#include "tempo/Relogio.h"
 #include "tempo/TickTick.h"
 
 namespace net::ticktick {
@@ -30,6 +34,11 @@ namespace net::ticktick {
             const std::lock_guard lock{gStatusMutex};
             if (!lastSync.empty()) gStatus.lastSync = std::move(lastSync);
             gStatus.error = std::move(error);
+        }
+
+        void recordHabits(std::string error) {
+            const std::lock_guard lock{gStatusMutex};
+            gStatus.habitsError = std::move(error);
         }
 
         struct WifiScope {
@@ -69,9 +78,15 @@ namespace net::ticktick {
             return "TickTick respondeu HTTP " + std::to_string(status);
         }
 
-        // GET (corpo vazio) ou POST JSON. So devolve o corpo quando o status e 200.
-        std::expected<std::string, std::string> call(esp_http_client_method_t method, const std::string& path,
-                                                     const std::string& token, const std::string& json) {
+        struct Reply {
+            int status = 0;        // 0 = sem rede / falha HTTPS
+            std::string body;
+            std::string error;     // so quando status == 0 (falha local)
+        };
+
+        // GET (corpo vazio) ou POST JSON. Devolve o status HTTP e o corpo, qualquer que seja o status.
+        Reply request(esp_http_client_method_t method, const std::string& path, const std::string& token,
+                      const std::string& json) {
             const std::string url = std::string{kApi} + path;
             const std::string bearer = "Bearer " + token;
             Body body;
@@ -87,7 +102,11 @@ namespace net::ticktick {
             config.user_data = &body;
             config.user_agent = "RSVP-Nano/0.2";
             Client client{esp_http_client_init(&config)};
-            if (!client.value) return std::unexpected("Sem memória para a conexão");
+            Reply reply;
+            if (!client.value) {
+                reply.error = "Sem memória para a conexão";
+                return reply;
+            }
             esp_http_client_set_header(client.value, "Authorization", bearer.c_str());
             esp_http_client_set_header(client.value, "Accept-Encoding", "identity");
             if (method == HTTP_METHOD_POST) {
@@ -95,11 +114,72 @@ namespace net::ticktick {
                 esp_http_client_set_post_field(client.value, json.c_str(), static_cast<int>(json.size()));
             }
             const esp_err_t result = esp_http_client_perform(client.value);
-            if (body.overflow) return std::unexpected("Resposta do TickTick grande demais");
-            if (result != ESP_OK) return std::unexpected("Sem rede ou falha HTTPS com o TickTick");
-            const int status = esp_http_client_get_status_code(client.value);
-            if (status != 200) return std::unexpected(statusError(status));
-            return std::move(body.data);
+            if (body.overflow) {
+                reply.error = "Resposta do TickTick grande demais";
+                return reply;
+            }
+            if (result != ESP_OK) {
+                reply.error = "Sem rede ou falha HTTPS com o TickTick";
+                return reply;
+            }
+            reply.status = esp_http_client_get_status_code(client.value);
+            reply.body = std::move(body.data);
+            return reply;
+        }
+
+        // GET (corpo vazio) ou POST JSON. So devolve o corpo quando o status e 200.
+        std::expected<std::string, std::string> call(esp_http_client_method_t method, const std::string& path,
+                                                     const std::string& token, const std::string& json) {
+            Reply reply = request(method, path, token, json);
+            if (reply.status == 0) return std::unexpected(std::move(reply.error));
+            if (reply.status != 200) return std::unexpected(statusError(reply.status));
+            return std::move(reply.body);
+        }
+
+        // Hábitos (app Hábitos): envia a fila de check-ins, baixa os hábitos ativos e os check-ins de hoje.
+        // Melhor esforço: devolve "" se tudo deu certo, senão o erro; nunca derruba a sync dos projetos.
+        std::string syncHabits(const settings::DeviceSecrets& secrets, fs::FS& filesystem, const std::string& agora) {
+            std::string error;
+            // 1. fila persistente -> POST /habit/{id}/checkin (escopo tasks:write)
+            const auto queue = TempoStorage::loadQueue(filesystem);
+            std::vector<std::pair<tempo::ItemFila, int>> results;
+            for (const auto& item : queue) {
+                if (!tempo::devePreEnviar(item)) continue;
+                const Reply reply = request(HTTP_METHOD_POST, tempo::ticktick::caminhoPostCheckin(item),
+                                            secrets.ticktickToken, tempo::ticktick::corpoCheckin(item));
+                results.emplace_back(item, reply.status);
+                if (reply.status == 0) {   // sem rede: guarda e para
+                    error = reply.error;
+                    break;
+                }
+                if (reply.status != 200 && reply.status != 201) {
+                    error = "Check-in recusado: " + statusError(reply.status);
+                    if (reply.status == 401 || reply.status == 403) break;   // token sem permissão de escrita
+                }
+            }
+            if (!results.empty()) TempoStorage::applyQueueResults(filesystem, results);
+
+            // 2. hábitos ativos
+            auto habits = call(HTTP_METHOD_GET, "/habit", secrets.ticktickToken, {});
+            if (!habits) return error.empty() ? habits.error() : error;
+            const auto json = tempo::ticktick::montarHabitos(*habits, agora);
+            if (!json || !TempoStorage::saveHabits(filesystem, *json))
+                return error.empty() ? std::string{"Não foi possível gravar habitos.json"} : error;
+            tempo::ListaHabitos list;
+            tempo::lerHabitos(*json, list);
+
+            // 3. check-ins de hoje (feitos no celular)
+            const auto today = tempo::deEpoch(static_cast<int64_t>(time(nullptr)));
+            const std::string path =
+                today.valida ? tempo::ticktick::caminhoCheckins(list, tempo::stampDe(today.data)) : std::string{};
+            if (!path.empty()) {
+                auto checkins = call(HTTP_METHOD_GET, path, secrets.ticktickToken, {});
+                if (!checkins) return error.empty() ? checkins.error() : error;
+                const auto file = tempo::ticktick::montarCheckins(*checkins, tempo::stampDe(today.data), agora);
+                if (!file || !TempoStorage::saveHabitCheckins(filesystem, *file))
+                    return error.empty() ? std::string{"Não foi possível gravar habitos-checkins.json"} : error;
+            }
+            return error;
         }
 
         std::expected<size_t, std::string> run(const settings::NetworkSettings& network,
@@ -138,6 +218,7 @@ namespace net::ticktick {
             if (!TempoStorage::saveProjects(filesystem, *json)) return std::unexpected("Falha ao gravar no cartão SD");
             tempo::ListaProjetos gravada;
             tempo::lerProjetos(*json, gravada);
+            recordHabits(syncHabits(secrets, filesystem, agora));   // não derruba a sync dos projetos
             return gravada.projetos.size();
         }
 

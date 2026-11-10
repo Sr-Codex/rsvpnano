@@ -28,6 +28,36 @@ namespace tempo::ticktick {
             std::string name;
         };
 
+        struct HabitoApi {
+            std::string id;
+            std::string name;
+            std::optional<std::string> repeatRule;
+            std::optional<std::vector<std::string>> reminders;
+            std::optional<double> goal;
+            std::optional<int> status;
+            std::optional<std::string> archivedTime;
+            std::optional<int> targetStartDate;
+        };
+
+        struct CheckinItemApi {
+            std::optional<int> stamp;
+            std::optional<std::string> time;
+            std::optional<double> value;
+            std::optional<double> goal;
+        };
+
+        struct CheckinAggApi {
+            std::string habitId;
+            std::optional<std::vector<CheckinItemApi>> checkins;
+        };
+
+        struct CorpoCheckin {
+            int stamp = 0;
+            std::string time;
+            double value = 1.0;
+            double goal = 1.0;
+        };
+
         struct CorpoFiltro {
             std::vector<std::string> tag;
             std::vector<int> status;
@@ -107,6 +137,81 @@ namespace tempo::ticktick {
         }
         if (json.size() > kMaxBytesProjetos) return std::nullopt;
         return json;
+    }
+
+    std::optional<std::string> montarHabitos(std::string_view habitosJson, std::string_view geradoEm) {
+        std::vector<api::HabitoApi> habitos;
+        if (glz::read<kLeitura>(habitos, habitosJson)) return std::nullopt;
+        ListaHabitos saida;
+        saida.fonte = "ticktick";
+        saida.gerado_em = std::string{geradoEm};
+        for (auto& h : habitos) {
+            if (h.id.empty() || h.status.value_or(0) != 0) continue;
+            if (h.archivedTime && habitoArquivado(*h.archivedTime)) continue;
+            DefHabito d;
+            d.id = std::move(h.id);
+            d.name = std::move(h.name);
+            d.repeatRule = h.repeatRule.value_or("");
+            d.reminders = h.reminders.value_or(std::vector<std::string>{});
+            d.goal = h.goal.value_or(1.0);
+            d.targetStartDate = h.targetStartDate.value_or(0);
+            saida.habitos.push_back(std::move(d));
+        }
+        if (saida.habitos.size() > kMaxHabitos) saida.habitos.resize(kMaxHabitos);
+        std::string json;
+        if (glz::write_json(saida, json) || json.size() > kMaxBytesHabitos) return std::nullopt;
+        return json;
+    }
+
+    std::string caminhoCheckins(const ListaHabitos& habitos, int stamp) {
+        if (habitos.habitos.empty()) return {};
+        std::string caminho = "/habit/checkins?habitIds=";
+        bool primeiro = true;
+        for (const DefHabito& h : habitos.habitos) {
+            if (!primeiro) caminho += ',';
+            primeiro = false;
+            caminho += h.id;
+        }
+        caminho += "&from=" + std::to_string(stamp) + "&to=" + std::to_string(stamp);
+        return caminho;
+    }
+
+    std::optional<std::string> montarCheckins(std::string_view respostaJson, int stamp, std::string_view geradoEm) {
+        std::vector<api::CheckinAggApi> agregados;
+        if (glz::read<kLeitura>(agregados, respostaJson)) return std::nullopt;
+        ArquivoCheckins saida;
+        saida.gerado_em = std::string{geradoEm};
+        for (auto& agg : agregados) {
+            if (!agg.checkins) continue;
+            for (auto& c : *agg.checkins) {
+                if (c.stamp.value_or(0) != stamp) continue;
+                CheckinRemoto r;
+                r.habitId = agg.habitId;
+                r.stamp = stamp;
+                r.value = c.value.value_or(1.0);
+                r.goal = c.goal.value_or(1.0);
+                r.time = c.time.value_or("");
+                saida.checkins.push_back(std::move(r));
+            }
+        }
+        std::string json;
+        if (glz::write_json(saida, json) || json.size() > kMaxBytesCheckins) return std::nullopt;
+        return json;
+    }
+
+    std::string corpoCheckin(const ItemFila& item) {
+        api::CorpoCheckin corpo;
+        corpo.stamp = item.stamp;
+        corpo.time = item.time;
+        corpo.value = item.valor;
+        corpo.goal = item.meta;
+        std::string saida;
+        if (glz::write_json(corpo, saida)) return {};
+        return saida;
+    }
+
+    std::string caminhoPostCheckin(const ItemFila& item) {
+        return "/habit/" + item.id + "/checkin";
     }
 
     std::string iso8601Utc(int64_t epoch) {

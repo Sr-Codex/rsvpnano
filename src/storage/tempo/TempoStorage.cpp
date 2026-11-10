@@ -1,10 +1,27 @@
 #include "storage/tempo/TempoStorage.h"
 
 #include <algorithm>
+#include <mutex>
 
 #include "storage/fs/StorageFiles.h"
 
 namespace TempoStorage {
+    namespace {
+        std::mutex gQueueMutex;
+
+        std::vector<tempo::ItemFila> readQueue(fs::FS& filesystem) {
+            auto text = StorageFiles::readTextFile(filesystem, tempo::kCaminhoFilaHabitos, tempo::kMaxBytesFila);
+            if (!text) text = StorageFiles::readTextFile(filesystem, tempo::kCaminhoFilaHabitosBak, tempo::kMaxBytesFila);
+            return text ? tempo::lerFila(*text) : std::vector<tempo::ItemFila>{};
+        }
+
+        bool writeQueue(fs::FS& filesystem, const std::vector<tempo::ItemFila>& queue) {
+            if (!TempoStorage::ensureFolders()) return false;
+            return StorageFiles::writeFileAtomic(filesystem, tempo::kCaminhoFilaHabitos, tempo::kCaminhoFilaHabitosTmp,
+                                                 tempo::kCaminhoFilaHabitosBak, tempo::serializarFila(queue))
+                .has_value();
+        }
+    } // namespace
 
     bool ensureFolders() {
         return StorageFiles::ensureDirectory(tempo::kPastaTempo) && StorageFiles::ensureDirectory(tempo::kPastaLog);
@@ -100,6 +117,55 @@ namespace TempoStorage {
         summary = rebuildSummary(filesystem, today);
         if (summary.batalhas > 0) saveSummary(filesystem, summary);
         return summary;
+    }
+
+    bool loadHabits(fs::FS& filesystem, tempo::ListaHabitos& out) {
+        auto text = StorageFiles::readTextFile(filesystem, tempo::kCaminhoHabitos, tempo::kMaxBytesHabitos);
+        if (text && tempo::lerHabitos(*text, out)) return true;
+        auto backup = StorageFiles::readTextFile(filesystem, tempo::kCaminhoHabitosBak, tempo::kMaxBytesHabitos);
+        return backup && tempo::lerHabitos(*backup, out);
+    }
+
+    bool saveHabits(fs::FS& filesystem, std::string_view json) {
+        tempo::ListaHabitos check;
+        if (!tempo::lerHabitos(json, check) || !ensureFolders()) return false;
+        return StorageFiles::writeFileAtomic(filesystem, tempo::kCaminhoHabitos, tempo::kCaminhoHabitosTmp,
+                                             tempo::kCaminhoHabitosBak, json)
+            .has_value();
+    }
+
+    bool loadHabitCheckins(fs::FS& filesystem, tempo::ArquivoCheckins& out) {
+        auto text = StorageFiles::readTextFile(filesystem, tempo::kCaminhoCheckinsHoje, tempo::kMaxBytesCheckins);
+        if (text && tempo::lerCheckins(*text, out)) return true;
+        auto backup = StorageFiles::readTextFile(filesystem, tempo::kCaminhoCheckinsHojeBak, tempo::kMaxBytesCheckins);
+        return backup && tempo::lerCheckins(*backup, out);
+    }
+
+    bool saveHabitCheckins(fs::FS& filesystem, std::string_view json) {
+        tempo::ArquivoCheckins check;
+        if (!tempo::lerCheckins(json, check) || !ensureFolders()) return false;
+        return StorageFiles::writeFileAtomic(filesystem, tempo::kCaminhoCheckinsHoje, tempo::kCaminhoCheckinsHojeTmp,
+                                             tempo::kCaminhoCheckinsHojeBak, json)
+            .has_value();
+    }
+
+    std::vector<tempo::ItemFila> loadQueue(fs::FS& filesystem) {
+        const std::lock_guard lock{gQueueMutex};
+        return readQueue(filesystem);
+    }
+
+    bool enqueueCheckin(fs::FS& filesystem, const tempo::ItemFila& item) {
+        const std::lock_guard lock{gQueueMutex};
+        auto queue = readQueue(filesystem);
+        tempo::enfileirar(queue, item);
+        return writeQueue(filesystem, queue);
+    }
+
+    bool applyQueueResults(fs::FS& filesystem, const std::vector<std::pair<tempo::ItemFila, int>>& results) {
+        const std::lock_guard lock{gQueueMutex};
+        auto queue = readQueue(filesystem);
+        for (const auto& [item, http] : results) tempo::aplicarEnvio(queue, item, http);
+        return writeQueue(filesystem, queue);
     }
 
     bool appendLog(fs::FS& filesystem, const tempo::Data& date, const tempo::EventoLog& event) {

@@ -76,3 +76,19 @@ companion::api::Result<> CompanionApi::putTempoProjects(httpd_req_t& request) {
             return {};
         });
 }
+
+companion::api::Result<> CompanionApi::putTempoHabits(httpd_req_t& request) {
+    return readBody(request, tempo::kMaxBytesHabitos, "habitos.json exceeds 48 KB")
+        .and_then([this](std::string body) -> companion::api::Result<> {
+            tempo::ListaHabitos check;
+            if (!tempo::lerHabitos(body, check)) {
+                return std::unexpected(api::httpError(HTTP_CODE_UNPROCESSABLE_ENTITY, "invalid_habits",
+                                                      "Body is not a valid habitos.json"));
+            }
+            if (!storage_.mounted() || !TempoStorage::saveHabits(Board::Storage::filesystem(), body)) {
+                return std::unexpected(api::httpError(HTTP_CODE_INTERNAL_SERVER_ERROR, "habits_save_failed",
+                                                      "Could not write /tempo/habitos.json"));
+            }
+            return {};
+        });
+}

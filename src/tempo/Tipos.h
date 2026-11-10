@@ -62,6 +62,34 @@ namespace tempo {
 
     enum class StatusHabito : uint8_t { Pendente, NoHorario, Atrasado, Esquecido };
 
+    // Tipo de habito DETECTADO pelo nome/emoji (habitos vindos do TickTick; ver tempo/Habitos.h).
+    enum class TipoHabito : uint8_t {
+        Geral,
+        Academia,
+        Medicacao,
+        Meditacao,
+        Suplemento,
+        Almoco,
+        Banho,
+        Dentes,
+        Descanso,
+        Count,
+    };
+
+    // Uma ocorrencia de habito no dia (cada horario de lembrete = 1 ocorrencia). Persistida em estado.json.
+    struct OcorrenciaDia {
+        std::string habitoId;
+        std::string nome;                        // ja limpo para a tela (sem emoji)
+        TipoHabito tipo = TipoHabito::Geral;
+        int indice = 0;                          // 0..total-1 dentro do habito no dia
+        int total = 1;                           // ocorrencias do habito hoje (goal do check-in)
+        int minuto = -1;                         // minuto planejado (0..1439); -1 = qualquer hora
+        StatusHabito status = StatusHabito::Pendente;
+        bool feita = false;                      // registrada (mesmo que tarde demais: status Esquecido)
+        int minutoReal = -1;
+        bool remota = false;                     // marcada a partir do TickTick (nao gera fila de volta)
+    };
+
     struct ValorHabito {
         double cr;
         double xp;
@@ -162,6 +190,8 @@ namespace tempo {
         int descansoUsadoMin = 0;
         int descansoOrcamentoMin = 0;  // configurado pelo chamador no abrirDia
         int transicaoPendenteMin = 0;  // nao classificada: vira Perdido no fechamento
+        std::vector<OcorrenciaDia> ocorrencias;  // habitos do TickTick hoje (vazio = sem habitos configurados)
+        double habitosCr = 0.0;        // cr de habitos ja pagos hoje (teto 28)
         int humorRegistros = 0;
         int tickTick = 0;
         int ganhoCoracoesMeios = 0;    // recuperacao ja usada hoje (max 2 meios)

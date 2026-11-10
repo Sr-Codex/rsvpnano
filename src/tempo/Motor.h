@@ -15,6 +15,17 @@ namespace tempo {
         int coracoesMeios = 0;    // variacao pedida (medicacao)
     };
 
+    // Habitos do TickTick (ocorrencias do dia; ver tempo/Habitos.h).
+    struct ResultadoOcorrencia {
+        bool registrado = false;  // false = indice invalido ou ocorrencia ja feita
+        size_t indice = 0;
+        StatusHabito status = StatusHabito::Pendente;
+        double cr = 0.0;          // ja depois do teto de 28 cr/dia
+        double xp = 0.0;
+        int coracoesMeios = 0;    // variacao pedida (medicacao)
+        bool tetoAplicado = false;
+    };
+
     struct ResultadoTransicao {
         int excessoMin = 0;       // acima da tolerancia
         int descansoMin = 0;
@@ -40,6 +51,11 @@ namespace tempo {
     // ---- habitos, humor, TickTick
     StatusHabito classificarHabito(Habito habito, int minutoPlanejado, int minutoReal);  // pura
     ResultadoHabito registrarHabito(Estado& e, Habito habito, int minutoPlanejado, int minutoReal);
+    // Classifica uma ocorrencia por tipo: minutoPlanejado < 0 ("qualquer hora") nunca atrasa. Descanso so atrasa para depois.
+    StatusHabito classificarOcorrencia(TipoHabito tipo, int minutoPlanejado, int minutoReal);  // pura
+    // Registra a ocorrencia `indice` de e.dia.ocorrencias como feita em `minutoReal`: cr/XP pelo tipo (teto de 28 cr/dia
+    // somando todos os habitos), medicao atrasada -1 meio, esquecida (ou feita tarde demais) -2 meios.
+    ResultadoOcorrencia registrarOcorrencia(Estado& e, size_t indice, int minutoReal, bool remota = false);
     double registrarHumor(Estado& e);    // +2 XP, nunca credito; devolve XP
     double registrarTickTick(Estado& e); // +30 XP, max 3/dia; devolve XP
 

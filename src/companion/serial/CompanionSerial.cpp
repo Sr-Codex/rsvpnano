@@ -571,6 +571,8 @@ void CompanionSerial::dispatchRequest(companion::BufferedRequest& buffered) {
         sendEmpty(api_.putTickTick(request));
     else if (method == "PUT" && path == "/api/v2/tempo/projetos")
         sendEmpty(api_.putTempoProjects(request));
+    else if (method == "PUT" && path == "/api/v2/tempo/habitos")
+        sendEmpty(api_.putTempoHabits(request));
     else
         failed(api::httpError(HTTP_CODE_NOT_FOUND, "not_found", "API endpoint not found"));
 }

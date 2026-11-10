@@ -1098,6 +1098,8 @@ void App::updateBackgroundJob() {
             if (const auto now = static_cast<int64_t>(time(nullptr)); tempo::deEpoch(now).valida)
                 tempo::ancorar(now, millis());
             tempoScreen_.recarregarProjetos(storage_.mounted() ? &Board::Storage::filesystem() : nullptr);
+            // Habitos do TickTick: ocorrencias de hoje + check-ins feitos no celular (a fila de envio ja foi tratada na sync).
+            tempoScreen_.atualizarHabitos(storage_.mounted() ? &Board::Storage::filesystem() : nullptr, millis());
             immediateUi_.invalidate();
             return;
         }

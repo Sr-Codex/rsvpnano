@@ -17,6 +17,7 @@ namespace net::ticktick {
     struct Status {
         std::string lastSync;  // AAAA-MM-DDTHH:MM:SSZ da ultima sincronizacao bem-sucedida ("" = nunca)
         std::string error;     // ultimo erro ("" = ultima tentativa deu certo)
+        std::string habitsError;  // ultimo erro da parte de habitos (fila de check-ins/GETs); "" = ok
     };
 
     // Copia segura entre tarefas (o job roda em segundo plano; a API le para o GET).

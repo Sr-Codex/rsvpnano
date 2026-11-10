@@ -369,6 +369,53 @@ namespace screens {
         if (!agora.valida) return;
         if (!estado_.dia.aberto || !(estado_.dia.data == agora.data)) tempo::abrirDia(estado_, agora.data);
         tempo::avancarRelogio(estado_, agora.minutoDoDia);
+        if (!habitos_.habitos.empty() || !estado_.dia.ocorrencias.empty()) tempo::reconciliarDia(estado_, habitos_);
+    }
+
+    void TempoScreen::gravarEventoHabito(fs::FS* filesystem, const tempo::ResultadoOcorrencia& r, std::string_view origem) {
+        if (filesystem == nullptr || !r.registrado || estado_.dia.data.ano < tempo::kAnoMinimoValido) return;
+        TempoStorage::appendLog(*filesystem, estado_.dia.data, tempo::eventoHabito(estado_, r, origem));
+    }
+
+    void TempoScreen::registrarHabitoMeditacao(fs::FS* filesystem) {
+        if (filesystem == nullptr) filesystem = fs_;
+        if (filesystem == nullptr) return;
+        std::vector<tempo::ItemFila> fila;
+        const auto r = tempo::marcarMeditacaoPorTimer(estado_, fila);
+        if (!r.registrado) return;
+        for (const auto& item : fila) TempoStorage::enqueueCheckin(*filesystem, item);
+        gravarEventoHabito(filesystem, r, "timer");
+    }
+
+    void TempoScreen::atualizarHabitos(fs::FS* filesystem, uint32_t nowMs) {
+        if (filesystem == nullptr || fase_ == Fase::Lutando || fase_ == Fase::Pausada || fase_ == Fase::Descanso) return;
+        if (!carregado_) carregar(filesystem, true, nowMs);   // ja le habitos.json
+        else {
+            habitos_ = tempo::ListaHabitos{};
+            TempoStorage::loadHabits(*filesystem, habitos_);
+        }
+        garantirDia(nowMs);
+        bool mudou = false;
+        tempo::ArquivoCheckins remotos;
+        if (TempoStorage::loadHabitCheckins(*filesystem, remotos)) {
+            const auto resultados = tempo::aplicarCheckinsRemotos(estado_, remotos.checkins);
+            for (const auto& r : resultados) gravarEventoHabito(filesystem, r, "ticktick");
+            mudou = !resultados.empty();
+        }
+        if (mudou) salvar(filesystem);
+    }
+
+    bool TempoScreen::marcarHabito(uint32_t nowMs, fs::FS* filesystem, size_t indice) {
+        if (filesystem == nullptr) return false;
+        if (!carregado_) carregar(filesystem, true, nowMs);
+        garantirDia(nowMs);
+        std::vector<tempo::ItemFila> fila;
+        const auto r = tempo::marcarFeita(estado_, indice, fila);
+        if (!r.registrado) return false;
+        for (const auto& item : fila) TempoStorage::enqueueCheckin(*filesystem, item);
+        gravarEventoHabito(filesystem, r, "");
+        salvar(filesystem);
+        return true;
     }
 
     void TempoScreen::salvar(fs::FS* filesystem) {
@@ -380,6 +427,8 @@ namespace screens {
         if (recarregarEstado) {
             estado_ = tempo::Estado{};
             if (filesystem != nullptr) TempoStorage::loadState(*filesystem, estado_);
+            habitos_ = tempo::ListaHabitos{};
+            if (filesystem != nullptr) TempoStorage::loadHabits(*filesystem, habitos_);
             garantirDia(nowMs);
             carregado_ = true;
             categoria_ = estado_.ultimaCategoria >= 0 && estado_.ultimaCategoria < int(tempo::kNumCategorias)
@@ -539,6 +588,8 @@ namespace screens {
         entrada.maiorDistracaoMin = maiorDistracaoMin_;
         entrada.abandonou = abandonou;
         const auto liquidacao = tempo::aplicarBatalha(estado_, entrada);
+        // Meditacao vencida marca a proxima ocorrencia pendente do habito de Meditacao (no horario) e enfileira o check-in.
+        if (liquidacao.vitoria && categoriaBatalha_ == tempo::Categoria::Meditacao) registrarHabitoMeditacao(filesystem);
 
         const std::string titulo = nomeBatalha_;
         resultado_ = {liquidacao, titulo, planejadoMin_, entrada.minutosFocados,
