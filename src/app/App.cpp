@@ -21,7 +21,9 @@
 #include "storage/migration/Migration.h"
 #include "update/OtaUpdater.h"
 #include "update/SwitchSettings.h"
+#include <WiFi.h>
 #include "ui/screens/ModernScreens.h"
+#include "ui/screens/HomeScreen.h"
 #include "ui/screens/OnboardingCopy.h"
 #include "dictionary/DictionaryInstaller.h"
 
@@ -117,7 +119,7 @@ void App::begin() {
     // Leave the last real status (including failures) visible until the usual
     // transition. Do not introduce a second splash delay or fake a Ready state.
     if(modernStartup){
-        statusDestination_=settingsStore_.settings().interface.onboardingComplete?screens::Screen::Read:screens::Screen::Onboarding;
+        statusDestination_=settingsStore_.settings().interface.onboardingComplete?screens::Screen::Home:screens::Screen::Onboarding;
         if(!settingsStore_.settings().interface.onboardingComplete)onboardingScreen_.begin(immediateUi_,settingsStore_.settings(),millis());
         if(settingsStore_.settings().reading.mode==settings::ReadingMode::page){
             settingsStore_.settings().reading.mode=settings::ReadingMode::rsvp;settingsStore_.acceptChanges();
@@ -238,6 +240,11 @@ void App::update(uint32_t nowMs) {
 }
 
 void App::renderScreen(uint32_t nowMs) {
+    // Ajustes aberto pelo launcher: o "voltar" dele (menu do leitor) retorna ao Home.
+    if (screen_ == screens::Screen::Reader || screen_ == screens::Screen::Home) settingsFromHome_ = false;
+    else if (screen_ == screens::Screen::Read && settingsFromHome_) { settingsFromHome_ = false; screen_ = screens::Screen::Home; }
+    if (screen_ == screens::Screen::Settings && lastRenderedScreen_ == screens::Screen::Home) settingsFromHome_ = true;
+    lastRenderedScreen_ = screen_;
     if (dictionaryWifiReturn_ && (screen_ == screens::Screen::Connections
         || screen_ == screens::Screen::Read || screen_ == screens::Screen::Reader)) {
         dictionaryWifiReturn_ = false; screen_ = screens::Screen::DictionaryInstall;
@@ -527,6 +534,23 @@ void App::renderScreen(uint32_t nowMs) {
         action = screens::ota(immediateUi_, OtaUpdater::currentVersion().data(), screen_, &otaOffer_);
         break;
     }
+    case screens::Screen::Home: {
+        immediateUi_.beginFrame(static_cast<uint8_t>(screen_), tempoScreen_.surface());
+        screens::HomeInfo info;
+        info.wifi = WiFi.status() == WL_CONNECTED;
+        info.bateriaPresente = battery_.status.present;
+        info.bateriaPct = battery_.status.percent;
+        info.carregando = battery_.charging;
+        info.temLivro = ReadingLoop::wordCount(readerScreen_.session) > 0;
+        if (info.temLivro) {
+            info.livro = std::string{ReadingProgress::title(readerScreen_.session, storage_)};
+            info.livroPct = ReadingProgress::percent(readerScreen_.session.state.wordIndex,
+                                                     ReadingLoop::wordCount(readerScreen_.session));
+        }
+        action = homeScreen_.draw(immediateUi_, nowMs, screen_, tempoScreen_,
+                                  storage_.mounted() ? &Board::Storage::filesystem() : nullptr, info);
+        break;
+    }
     case screens::Screen::TempoHoje:
     case screens::Screen::TempoBatalha:
     case screens::Screen::TempoVitoria:
@@ -632,7 +656,7 @@ void App::handleScreenAction(screens::Action action, uint32_t nowMs) {
             if(auto result=settingsStore_.flush();!result){saved=false;ESP_LOGW("settings","introduction save pending: %s",result.error().message.c_str());}
         }
         onboardingScreen_.close();
-        screen_=complete&&action==screens::Action::FinishIntroduction&&ReadingLoop::wordCount(readerScreen_.session)>0?screens::Screen::Reader:screens::Screen::Read;
+        screen_=complete&&action==screens::Action::FinishIntroduction&&ReadingLoop::wordCount(readerScreen_.session)>0?screens::Screen::Reader:screens::Screen::Home;
         if(!saved){showTransientStatus(screens::modern::copy(immediateUi_,screens::modern::Copy::SdSavePending),
             screens::modern::copy(immediateUi_,screens::modern::Copy::SdSaveRetry),{},1800,screen_);return;}
         renderScreen(nowMs);return;
@@ -755,7 +779,9 @@ void App::handleInput(Input::ActionMask actions, uint32_t nowMs) {
         }
     }
     if (Input::hasAction(actions, Input::ActionOpenMenu)) {
-        if (screen_ == screens::Screen::Reader) {
+        if (screen_ == screens::Screen::Read) {
+            screen_ = screens::Screen::Home;   // do menu do leitor, PWR volta ao launcher
+        } else if (screen_ == screens::Screen::Reader) {
             ReadingProgress::save(readerScreen_.session, prefs_, true, nowMs);
             ReadingLoop::pause(readerScreen_.session);
             screen_ = immediateUi_.modernReadingPalette() ? screens::Screen::QuickControls : screens::Screen::Read;
@@ -793,6 +819,8 @@ void App::handleInput(Input::ActionMask actions, uint32_t nowMs) {
             companionApi_.end();
             screen_ = screens::Screen::Device;
             renderScreen(nowMs);
+        } else if (screen_ == screens::Screen::Home) {
+            // Launcher e a raiz: voltar nao faz nada.
         } else if (screen_ != screens::Screen::Reader) {
             if (screen_ == screens::Screen::Read) {
                 ReadingLoop::pause(readerScreen_.session);

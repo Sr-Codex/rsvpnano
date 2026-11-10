@@ -14,8 +14,32 @@ namespace screens {
     // App "Tempo" v1: Hoje, Batalha (preparo, foco, overtime, pausa) e Reflexao (tela "C3": dois aneis
     // estilo Apple). Textos em pt-BR direto no codigo (fora do pacote de idiomas).
     // Reflexao reaproveita Screen::TempoVitoria (a enumeracao nao muda).
+    // Aneis estilo Apple em miniatura (launcher): externo = voce (laranja, azul no bonus), interno = inimigo (carmim).
+    // (cx, cy) = centro; raio = raio da linha central do anel externo. Pinta direto no `g` (regiao opaca do chamador).
+    void desenharAneisMini(ui::Context& ui, Arduino_GFX& g, int cx, int cy, int raio, double voce, double inimigo,
+                           bool bonus = false);
+
+    // Resumo para o launcher (Home). So leitura.
+    struct ResumoTempo {
+        enum class Estado : uint8_t { Livre, Batalha, Reflexao } estado = Estado::Livre;
+        bool pausada = false;
+        bool descanso = false;
+        bool bonus = false;
+        int vocePct = 0;                 // 0..100
+        int inimigoPct = 100;            // 0..100
+        std::string projeto;             // batalha: projeto em curso; livre: primeiro da lista
+        std::string centro;              // mm:ss (ou +mm:ss) / planejado
+        std::string saldo;               // "214" (creditos)
+        bool temProjetos = false;
+        int planejadoMin = 25;
+        uint32_t assinatura = 0;         // muda quando o resumo muda
+    };
+
     class TempoScreen {
     public:
+        ResumoTempo resumo(fs::FS* filesystem, uint32_t nowMs);   // carrega o SD na 1a chamada
+        void abrirBatalha(Screen& screen);                         // "Voltar a batalha" / "Responder"
+        bool comecar(Screen& screen);                              // abre o preparo do 1o projeto
         static bool owns(Screen screen) {
             return screen == Screen::TempoHoje || screen == Screen::TempoBatalha || screen == Screen::TempoVitoria;
         }

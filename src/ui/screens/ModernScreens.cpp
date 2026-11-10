@@ -71,15 +71,10 @@ namespace screens::modern {
         constexpr UiText titles[]{UiText::Chapters, UiText::Library, UiText::Settings};
         constexpr Screen destinations[]{Screen::Chapters, Screen::Library, Screen::Settings};
         constexpr ui::modern::Symbol symbols[]{ui::modern::Symbol::Chapters, ui::modern::Symbol::Book, ui::modern::Symbol::Settings};
-        // Quatro linhas de 39 px: Capitulos, Biblioteca, Tempo (app novo, texto fixo em pt-BR), Ajustes.
-        for (int row = 0; row < 4; ++row) {
-            const ui::Rect rect{364, static_cast<int16_t>(8 + 39 * row), 260, 39};
-            if (row == 2) {
-                if (ui::modern::row(ui, rect, "Tempo", {}, ui::modern::Symbol::Pace)) screen = Screen::TempoHoje;
-                continue;
-            }
-            const int slot = row < 2 ? row : 2;
-            if (ui::modern::row(ui, rect, ui.text(titles[slot]), {}, symbols[slot])) screen = destinations[slot];
+        // O Tempo agora fica no launcher (Home); o menu do leitor volta a ter tres linhas de 52 px.
+        for (int row = 0; row < 3; ++row) {
+            const ui::Rect rect{364, static_cast<int16_t>(8 + 52 * row), 260, 52};
+            if (ui::modern::row(ui, rect, ui.text(titles[row]), {}, symbols[row])) screen = destinations[row];
         }
         return Action::None;
     }

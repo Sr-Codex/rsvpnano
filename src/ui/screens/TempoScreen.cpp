@@ -257,6 +257,58 @@ namespace screens {
         }
     } // namespace
 
+    void desenharAneisMini(ui::Context& ui, Arduino_GFX& g, int cx, int cy, int raio, double voce, double inimigo,
+                           bool bonus) {
+        const Cor fundo = deRole(ui, SurfaceMuted);
+        const int larg = std::max(5, int(raio * 0.27));
+        anel(g, 0, 0, cx, cy, raio, larg, voce, bonus ? kAzul : kLaranja, bonus ? kAzul2 : kAmbar, fundo,
+             bonus ? kAzul : kLaranja);
+        anel(g, 0, 0, cx, cy, int(raio * 0.62), larg, inimigo, kCarmim, kVinho, fundo, kCarmim);
+    }
+
+    // ====================================================================== launcher
+    ResumoTempo TempoScreen::resumo(fs::FS* filesystem, uint32_t nowMs) {
+        if (!carregado_) carregar(filesystem, true, nowMs);
+        else if (nowMs - ultimoDesenhoMs_ > 1500 && !battleActive()) carregar(filesystem, false, nowMs);
+        ultimoDesenhoMs_ = nowMs;
+        ResumoTempo r;
+        r.saldo = std::to_string(static_cast<long>(std::lround(estado_.saldo)));   // inteiro: cabe no cartao do launcher
+        r.temProjetos = !titulos_.empty();
+        r.planejadoMin = planejadoMin_;
+        if (fase_ == Fase::Reflexao) {
+            r.estado = ResumoTempo::Estado::Reflexao;
+        } else if (battleActive()) {
+            r.estado = ResumoTempo::Estado::Batalha;
+            r.pausada = fase_ == Fase::Pausada;
+            r.descanso = fase_ == Fase::Descanso;
+            r.bonus = overtime_ && !r.descanso;
+            r.projeto = projeto_ < titulos_.size() ? titulos_[projeto_] : std::string{};
+            const int64_t plano = std::max<int64_t>(1, int64_t(planejadoMin_) * 60000);
+            r.inimigoPct = r.descanso ? 0 : pontosDeVida();
+            r.vocePct = r.descanso ? 100 : int(std::min<int64_t>(100, int64_t(focadoMs_) * 100 / plano));
+            if (r.descanso) r.centro = "pausa";
+            else r.centro = r.bonus ? "+" + fmtRelogio(overtimeMs() / 1000) : fmtRelogio((restanteMs() + 999) / 1000);
+        } else {
+            r.projeto = titulos_.empty() ? std::string{} : titulos_.front();
+            r.centro = fmtRelogio(int64_t(planejadoMin_) * 60);
+        }
+        r.assinatura = ui::Context::signature(r.projeto + "|" + r.centro + "|" + r.saldo,
+                                              uint32_t(r.estado) * 1000003U + r.pausada * 7U + r.descanso * 11U + r.bonus * 13U
+                                                  + uint32_t(r.vocePct) * 131U + uint32_t(r.inimigoPct) * 17U + r.temProjetos);
+        return r;
+    }
+
+    void TempoScreen::abrirBatalha(Screen& screen) {
+        screen = fase_ == Fase::Reflexao ? Screen::TempoVitoria : Screen::TempoBatalha;
+    }
+
+    bool TempoScreen::comecar(Screen& screen) {
+        if (battleActive() || fase_ == Fase::Reflexao || lista_.projetos.empty()) return false;
+        abrirPreparo(0);
+        screen = Screen::TempoBatalha;
+        return true;
+    }
+
     // ====================================================================== estado
     void TempoScreen::garantirDia(uint32_t nowMs) {
         const auto agora = tempo::agora(nowMs);
@@ -507,7 +559,7 @@ namespace screens {
     void TempoScreen::back(uint32_t nowMs, Screen& screen, fs::FS* filesystem) {
         (void)nowMs;
         if (screen == Screen::TempoHoje) {
-            screen = Screen::Read;
+            screen = Screen::Home;
         } else {
             if (screen == Screen::TempoVitoria || fase_ == Fase::Reflexao) salvarReflexao(filesystem);   // sem resposta
             else if (screen == Screen::TempoBatalha && fase_ == Fase::Preparo) fase_ = Fase::Nenhuma;
@@ -533,7 +585,7 @@ namespace screens {
         const auto agora = tempo::agora(nowMs);
 
         // cabecalho
-        if (button(ui, {8, 0, 94, 43}, "‹ Menu", Style::Plain, true, {}, 13)) { screen = Screen::Read; return Action::None; }
+        if (button(ui, {8, 0, 94, 43}, "‹ Início", Style::Plain, true, {}, 13)) { screen = Screen::Home; return Action::None; }
         ui.label({112, 0, 250, 43}, "HOJE · " + dataCabecalho(agora), 13, Muted);
         ui.label({372, 0, 130, 43}, "Foco " + fmtHoraMin(estado_.dia.fochoPagoMin), 13, Foreground, TextAlign::Right);
         ui.label({508, 0, 124, 43}, fmtNum(estado_.saldo) + " cr", 17, Accent, TextAlign::Right);

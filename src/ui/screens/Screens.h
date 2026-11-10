@@ -76,6 +76,7 @@ namespace screens {
         TempoHoje,
         TempoBatalha,
         TempoVitoria,
+        Home,   // launcher "Agora + apps" (menu inicial)
     };
 
     enum class Action : uint8_t {

@@ -32,6 +32,7 @@
 #include "ui/screens/ModernScreens.h"
 #include "ui/screens/StandbyScreen.h"
 #include "ui/screens/TempoScreen.h"
+#include "ui/screens/HomeScreen.h"
 #include "update/OtaUpdater.h"
 #include "usb/UsbMassStorageManager.h"
 
@@ -126,6 +127,9 @@ private:
     screens::modern::DictionarySetup dictionarySetup_;
     std::atomic<bool> dictionaryCancel_{false};
     bool dictionaryWifiReturn_ = false;
+    screens::HomeScreen homeScreen_;
+    screens::Screen lastRenderedScreen_ = screens::Screen::Home;
+    bool settingsFromHome_ = false;
     OtaUpdater::Offer otaOffer_;
     bool otaAutomatic_ = false;
     OtaUpdater::Target otaTarget_ = OtaUpdater::Target::Current;
