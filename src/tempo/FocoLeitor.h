@@ -24,6 +24,7 @@ namespace tempo {
         int planejadoMin = 0;      // duracao da fase de foco
         uint32_t agoraMs = 0;
         uint32_t palavra = 0;      // posicao de leitura (indice da palavra) agora
+        bool lendo = true;         // leitor rodando (palavras passando) — so assim as palavras contam
     };
 
     struct RodadaLeitor {
@@ -31,7 +32,7 @@ namespace tempo {
         int focadoMin = 0;         // minutos efetivamente focados (pausas fora)
         int pausas = 0;            // quantas vezes o foco foi pausado nesta rodada
         bool concluida = false;    // true = a fase de foco terminou pelo tempo
-        uint32_t palavras = 0;     // palavras avancadas no periodo
+        uint32_t palavras = 0;     // palavras lidas de verdade (avanco com o leitor rodando; arrastar/pulos nao contam)
     };
 
     // Observa a sessao a cada atualizacao do App; devolve a rodada quando ela termina (conclusao ou parada/saida).
@@ -49,11 +50,15 @@ namespace tempo {
         int pausas_ = 0;
         int planejadoMin_ = 0;
         uint32_t concluidasInicio_ = 0;
-        uint32_t palavraInicio_ = 0;
         uint32_t palavraFim_ = 0;
+        uint32_t palavras_ = 0;
+        bool lendoAnterior_ = false;
     };
 
-    // So vale liquidar com pelo menos 1 minuto focado (rodada concluida sempre vale).
+    // "So quando estou lendo de verdade" (usuario, 2026-11-10): sem leitura real (modo so timer) a rodada nao conta.
+    inline constexpr uint32_t kMinPalavrasLeitor = 30;
+
+    // So vale liquidar com leitura real (>= kMinPalavrasLeitor) e pelo menos 1 minuto focado (concluida sempre vale).
     bool rodadaValida(const RodadaLeitor& rodada);
 
     // Anti-dupla-contagem: se uma batalha do Tempo esta em curso (ou em reflexao), o foco do leitor nao liquida.

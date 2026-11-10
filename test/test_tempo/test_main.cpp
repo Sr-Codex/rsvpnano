@@ -1141,6 +1141,7 @@ namespace {
         rod.planejadoMin = min;
         rod.focadoMin = min;
         rod.concluida = true;
+        rod.palavras = 5000;   // leu de verdade
         return rod;
     }
 }
@@ -1180,11 +1181,11 @@ void test_leitor_rodada_concluida_sem_pausa_e_perfeita() {
 void test_leitor_pausa_tira_perfeita_mas_nao_vira_fuga() {
     RastreadorLeitor r;
     r.observar(EL(FaseLeitor::Foco, 0));
-    r.observar(EL(FaseLeitor::Foco, 10 * kMin));
-    r.observar(EL(FaseLeitor::Pausado, 10 * kMin + 50));
-    r.observar(EL(FaseLeitor::Pausado, 40 * kMin));          // 30 min parado: nao conta
-    r.observar(EL(FaseLeitor::Foco, 40 * kMin + 50));
-    const auto rod = r.observar(EL(FaseLeitor::Fora, 55 * kMin, 1));
+    r.observar(EL(FaseLeitor::Foco, 10 * kMin, 0, 2000));
+    r.observar(EL(FaseLeitor::Pausado, 10 * kMin + 50, 0, 2000));
+    r.observar(EL(FaseLeitor::Pausado, 40 * kMin, 0, 2000));          // 30 min parado: nao conta
+    r.observar(EL(FaseLeitor::Foco, 40 * kMin + 50, 0, 2000));
+    const auto rod = r.observar(EL(FaseLeitor::Fora, 55 * kMin, 1, 5000));
     TEST_ASSERT_TRUE(rod.has_value());
     TEST_ASSERT_EQUAL_INT(1, rod->pausas);
     TEST_ASSERT_TRUE(rod->concluida);
@@ -1316,6 +1317,35 @@ void test_leitor_evento_ida_e_volta_no_log_e_logs_antigos_continuam_legiveis() {
     TEST_ASSERT_EQUAL_INT(25, velho.focadoMin);
 }
 
+void test_leitor_so_conta_lendo_de_verdade() {
+    // "So timer" (leitor parado): 25 min concluidos, 0 palavras -> nao liquida
+    RastreadorLeitor r;
+    auto parado = [](FaseLeitor f, uint32_t ms, uint32_t c, uint32_t p) { auto e = EL(f, ms, c, p); e.lendo = false; return e; };
+    r.observar(parado(FaseLeitor::Foco, 0, 0, 100));
+    const auto rod = r.observar(parado(FaseLeitor::Fora, 25 * kMin, 1, 100));
+    TEST_ASSERT_TRUE(rod.has_value());
+    TEST_ASSERT_EQUAL_UINT32(0, rod->palavras);
+    Estado e;
+    abrirDia(e, D(2026, 11, 10));
+    TEST_ASSERT_FALSE(liquidarFocoLeitor(e, *rod, false, "Livro", "2026-11-10", "09:00:00").has_value());
+    NEAR(0.0, e.saldo);
+
+    // arrastar/pular com o leitor parado nao soma palavras; so o avanco com o leitor rodando conta
+    RastreadorLeitor r2;
+    r2.observar(EL(FaseLeitor::Foco, 0, 0, 100));
+    r2.observar(EL(FaseLeitor::Foco, 1 * kMin, 0, 400));             // leu 300
+    r2.observar(parado(FaseLeitor::Foco, 2 * kMin, 0, 400));
+    r2.observar(parado(FaseLeitor::Foco, 3 * kMin, 0, 9000));         // pulou/arrastou: nao conta
+    r2.observar(EL(FaseLeitor::Foco, 4 * kMin, 0, 9000));
+    const auto rod2 = r2.observar(EL(FaseLeitor::Fora, 5 * kMin, 1, 9020));   // leu +20
+    TEST_ASSERT_EQUAL_UINT32(320, rod2->palavras);
+
+    // abaixo do minimo de palavras nao conta
+    RodadaLeitor pouca = rodadaCheia();
+    pouca.palavras = kMinPalavrasLeitor - 1;
+    TEST_ASSERT_FALSE(rodadaValida(pouca));
+}
+
 void test_leitor_resumo_conta_leitura_como_foco_livre() {
     Estado e;
     abrirDia(e, D(2026, 11, 10));
@@ -1391,6 +1421,7 @@ int main(int, char**) {
     RUN_TEST(test_perfil_dia_perfeito_exige_todas_perfeitas_e_2h);
     RUN_TEST(test_perfil_proxima_conquista_e_contagem);
     RUN_TEST(test_leitor_rodada_concluida_sem_pausa_e_perfeita);
+    RUN_TEST(test_leitor_so_conta_lendo_de_verdade);
     RUN_TEST(test_leitor_pausa_tira_perfeita_mas_nao_vira_fuga);
     RUN_TEST(test_leitor_tempo_pausado_nao_conta_em_parada_parcial);
     RUN_TEST(test_leitor_parar_no_meio_liquida_minutos_parciais_como_fuga);

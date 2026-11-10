@@ -17,14 +17,18 @@ namespace tempo {
             pausas_ = 0;
             planejadoMin_ = e.planejadoMin;
             concluidasInicio_ = e.concluidas;
-            palavraInicio_ = palavraFim_ = e.palavra;
+            palavraFim_ = e.palavra;
+            palavras_ = 0;
+            lendoAnterior_ = e.lendo;
             return std::nullopt;
         }
 
         const uint32_t delta = e.agoraMs - ultimoMs_;   // aritmetica modular: segura contra overflow de millis()
         if (anterior_ == FaseLeitor::Foco) focoMs_ += delta;
         if (anterior_ == FaseLeitor::Foco && e.fase == FaseLeitor::Pausado) ++pausas_;
+        if (lendoAnterior_ && e.lendo && e.palavra > palavraFim_) palavras_ += e.palavra - palavraFim_;
         palavraFim_ = e.palavra;
+        lendoAnterior_ = e.lendo;
         ultimoMs_ = e.agoraMs;
         anterior_ = e.fase;
 
@@ -37,13 +41,14 @@ namespace tempo {
         r.pausas = pausas_;
         const int64_t minutos = static_cast<int64_t>(focoMs_ / 60000U);
         r.focadoMin = concluida ? planejadoMin_ : static_cast<int>(std::min<int64_t>(minutos, planejadoMin_));
-        r.palavras = palavraFim_ > palavraInicio_ ? palavraFim_ - palavraInicio_ : 0;
+        r.palavras = palavras_;
         aberta_ = false;
         return r;
     }
 
     bool rodadaValida(const RodadaLeitor& rodada) {
-        return rodada.planejadoMin > 0 && (rodada.concluida || rodada.focadoMin >= 1);
+        return rodada.planejadoMin > 0 && rodada.palavras >= kMinPalavrasLeitor
+               && (rodada.concluida || rodada.focadoMin >= 1);
     }
 
     bool podeLiquidarLeitor(bool batalhaTempoAtiva) {

@@ -149,6 +149,7 @@ void App::contarFocoLeitor(uint32_t nowMs) {
     entrada.planejadoMin = sessao.focusMinutes();
     entrada.agoraMs = nowMs;
     entrada.palavra = readerScreen_.session.state.wordIndex;
+    entrada.lendo = readerScreen_.session.playing;
     if (const auto rodada = focoLeitor_.observar(entrada)) {
         tempoScreen_.registrarFocoLeitor(nowMs, storage_.mounted() ? &Board::Storage::filesystem() : nullptr, *rodada,
                                          ReadingProgress::title(readerScreen_.session, storage_));
