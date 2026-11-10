@@ -31,11 +31,11 @@ namespace screens {
         if(modernCanvasTouch_){
             // Gestures on the word canvas (y 36..136):
             //  * hold still (<= kScrubSlopPx): right half reads forward, LEFT half (x<320) rewinds (holdToRead only);
-            //  * move horizontally beyond kScrubSlopPx: scrub word by word with the finger (pauses playback);
+            //  * move horizontally beyond kScrubSlopPx: scrub word by word with the finger — ONLY when the touch
+            //    started with playback paused (user request lume.5: hold/drag only while paused);
             //  * vertical moves keep cancelling hold (no scrub); tap toggles play. Top/bottom bars are separate controls.
-            if(!modernScrub_ && !modernHolding_ && !backward_ && ReadingLoop::wordCount(session)>0
-               && reading::isScrubMove(dx,dy)){
-                if(session.playing)finishPause(preferences,nowMs);
+            if(!modernScrub_ && !modernHolding_ && !backward_ && !modernPressedPlaying_ && !session.playing
+               && ReadingLoop::wordCount(session)>0 && reading::isScrubMove(dx,dy)){
                 modernScrub_=true;scrubStartWord_=session.state.wordIndex;scrubAnchorX_=touch->x;
             }
             if(modernScrub_){
