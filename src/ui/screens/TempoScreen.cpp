@@ -45,6 +45,8 @@ namespace screens {
             const double arred = std::round(valor);
             if (std::fabs(valor - arred) < 0.05) std::snprintf(texto, sizeof texto, "%.0f", arred);
             else std::snprintf(texto, sizeof texto, "%.1f", valor);
+            for (char* c = texto; *c; ++c)
+                if (*c == '.') *c = ',';  // pt-BR: vírgula decimal
             return texto;
         }
 
@@ -135,50 +137,6 @@ namespace screens {
             g.fillCircle(x + 4, y + 4, 4, cor);
             g.fillCircle(x + 10, y + 4, 4, cor);
             g.fillTriangle(x, y + 6, x + 14, y + 6, x + 7, y + 14, cor);
-        }
-
-        void heroi(Arduino_GFX& g, int x, int y, bool vitoria) {  // caixa de ~90x80
-            const auto aco = rgb565(128, 136, 152), escuro = rgb565(74, 80, 94), capa = rgb565(240, 130, 50);
-            const auto espada = rgb565(236, 206, 120);
-            g.fillEllipse(x + 46, y + 76, 38, 4, rgb565(24, 30, 28));
-            g.fillRoundRect(x + 50, y + 32, 24, 40, 4, capa);                 // capa/escudo
-            g.fillRoundRect(x + 24, y + 36, 36, 36, 5, aco);                  // corpo
-            g.fillRect(x + 24, y + 56, 36, 5, escuro);                        // cinto
-            g.fillRect(x + 26, y + 70, 12, 6, escuro);                        // botas
-            g.fillRect(x + 44, y + 70, 12, 6, escuro);
-            g.fillCircle(x + 42, y + 22, 17, aco);                            // elmo
-            g.fillRect(x + 30, y + 19, 26, 7, escuro);                        // viseira
-            g.fillCircle(x + 42, y + 6, 3, rgb565(220, 70, 60));              // pluma
-            if (vitoria) {                                                    // espada erguida
-                g.fillRect(x + 14, y + 4, 4, 42, espada);
-                g.fillRect(x + 8, y + 46, 16, 4, escuro);
-            } else {                                                          // espada em guarda
-                g.fillRect(x + 4, y + 52, 28, 4, espada);
-                g.fillRect(x + 2, y + 48, 4, 12, escuro);
-            }
-        }
-
-        void inimigo(Arduino_GFX& g, int x, int y, bool caido, bool curando) {  // caixa de ~96x72
-            const auto osso = curando ? rgb565(250, 190, 120) : rgb565(224, 218, 198), olho = rgb565(30, 24, 24);
-            const auto roupa = rgb565(150, 50, 62), chifre = rgb565(236, 190, 160);
-            if (!caido) {
-                g.fillEllipse(x + 48, y + 68, 34, 4, rgb565(24, 30, 28));
-                g.fillRoundRect(x + 30, y + 36, 36, 30, 5, roupa);
-                g.fillCircle(x + 48, y + 22, 19, osso);
-                g.fillRect(x + 38, y + 18, 8, 8, olho);
-                g.fillRect(x + 52, y + 18, 8, 8, olho);
-                g.fillRect(x + 42, y + 31, 14, 3, olho);
-                g.fillTriangle(x + 34, y + 10, x + 28, y - 2, x + 42, y + 6, chifre);
-                g.fillTriangle(x + 62, y + 10, x + 68, y - 2, x + 54, y + 6, chifre);
-            } else {
-                g.fillEllipse(x + 48, y + 66, 40, 4, rgb565(24, 30, 28));
-                g.fillRoundRect(x + 34, y + 46, 44, 18, 5, roupa);
-                g.fillCircle(x + 24, y + 54, 15, osso);
-                g.drawLine(x + 17, y + 49, x + 22, y + 54, olho);   // olhos em X
-                g.drawLine(x + 22, y + 49, x + 17, y + 54, olho);
-                g.drawLine(x + 26, y + 49, x + 31, y + 54, olho);
-                g.drawLine(x + 31, y + 49, x + 26, y + 54, olho);
-            }
         }
 
         // Cabecalho da batalha: titulo + corações. Retorna true se tocou em "voltar".
@@ -481,21 +439,19 @@ namespace screens {
         ui.label({112, 0, 120, 28}, preparo ? "BATALHA · PREPARO" : "BATALHA · FOCO", 11, Muted);
         coracoes(ui, {16, 30, 120, 18}, estado_.coracoesMeios, tempo::coracoesMaxMeios(estado_));
 
-        // personagens (retangulos simples; quadros 3D no passo 4)
-        regiao(ui, {12, 46, 124, 80}, 1, [&](Arduino_GFX& g, int dx, int dy) { heroi(g, 28 + dx, 44 + dy, false); });
+        // sem personagens por enquanto (decisão do usuário): o projeto é o "inimigo" em texto + barra de vida larga
         const bool curando = distraido_;
-        regiao(ui, {250, 48, 130, 76}, 10 + curando, [&](Arduino_GFX& g, int dx, int dy) {
-            inimigo(g, 268 + dx, 52 + dy, false, curando);
-        });
-
-        // nome + vida do inimigo
-        ui.label({236, 4, 206, 24}, nome, 15, Foreground);
+        ui.label({16, 52, 424, 28}, nome, 18, Foreground);
         const int vida = preparo ? 100 : pontosDeVida();
-        regiao(ui, {236, 30, 206, 16}, 100 + vida, [&](Arduino_GFX& g, int dx, int dy) {
-            g.fillRoundRect(236 + dx, 33 + dy, 160, 10, 5, ui.color(ProgressTrack));
-            if (vida > 0) g.fillRoundRect(236 + dx, 33 + dy, std::max(10, 160 * vida / 100), 10, 5, rgb565(232, 84, 84));
+        regiao(ui, {16, 86, 424, 18}, 100 + vida + (curando ? 1000 : 0), [&](Arduino_GFX& g, int dx, int dy) {
+            g.fillRoundRect(16 + dx, 88 + dy, 370, 14, 7, ui.color(ProgressTrack));
+            if (vida > 0)
+                g.fillRoundRect(16 + dx, 88 + dy, std::max(14, 370 * vida / 100), 14, 7,
+                                curando ? rgb565(250, 170, 90) : rgb565(232, 84, 84));
         });
-        ui.label({402, 28, 40, 18}, std::to_string(vida) + "%", 11, Muted);
+        ui.label({392, 84, 48, 20}, std::to_string(vida) + "%", 13, Muted);
+        ui.label({16, 106, 424, 18}, preparo ? "vida do inimigo = tempo que falta" : curando ? "inimigo se curando…" : "", 11,
+                 curando ? Accent : Muted);
 
         // cartao FALTAM
         Bloco cartao(ui, {452, 8, 176, 156}, SurfaceMuted, 8, preparo ? 7 : 8);
@@ -551,13 +507,11 @@ namespace screens {
         const auto& r = resultado_;
         const bool vitoria = r.liq.vitoria;
         ui.label({16, 4, 220, 24}, vitoria ? "BATALHA · CONCLUÍDA" : "BATALHA · ENCERRADA", 11, Muted);
-        regiao(ui, {12, 30, 110, 100}, vitoria, [&](Arduino_GFX& g, int dx, int dy) { heroi(g, 20 + dx, 34 + dy, vitoria); });
-        regiao(ui, {236, 96, 160, 70}, 3, [&](Arduino_GFX& g, int dx, int dy) { inimigo(g, 268 + dx, 92 + dy, true, false); });
-        ui.label({186, 30, 260, 40}, vitoria ? "VITÓRIA!" : "FUGA", 30, vitoria ? Accent : Muted, TextAlign::Center);
-        ui.label({186, 70, 260, 20}, r.projeto, 13, Foreground, TextAlign::Center);
-        ui.label({186, 90, 260, 20}, fmtRelogio(int64_t(r.focadoMin) * 60) + " de foco · plano " + std::to_string(r.planejadoMin) + " min",
+        ui.label({16, 34, 424, 40}, vitoria ? "VITÓRIA!" : "FUGA", 30, vitoria ? Accent : Muted, TextAlign::Center);
+        ui.label({16, 76, 424, 20}, r.projeto, 13, Foreground, TextAlign::Center);
+        ui.label({16, 98, 424, 20}, fmtRelogio(int64_t(r.focadoMin) * 60) + " de foco · plano " + std::to_string(r.planejadoMin) + " min",
                  11, Muted, TextAlign::Center);
-        ui.label({186, 110, 260, 20},
+        ui.label({16, 120, 424, 20},
                  vitoria ? (r.liq.perfeita ? "Foco perfeito! +25%" : "")
                          : (r.abandonou ? "Você encerrou antes do fim" : "Distrações demais"),
                  11, Accent, TextAlign::Center);
