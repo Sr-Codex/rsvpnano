@@ -49,7 +49,8 @@ namespace screens {
                          settings::SettingsStore& settingsStore);
         bool handleModernControls(ui::Context& ui, uint32_t nowMs, Preferences& preferences,
                                   settings::SettingsStore& settingsStore, Screen& screen);
-        void cancelModernControls() { modernControl_ = 0; modernCanvasTouch_ = false; modernHolding_ = false; }
+        void cancelModernControls() { modernControl_ = 0; modernCanvasTouch_ = false; modernHolding_ = false; modernScrub_ = false; backward_ = false; }
+        void stopBackward(Preferences& preferences, uint32_t nowMs);
         void toggle(Preferences& preferences, uint32_t nowMs);
         void update(Preferences& preferences, uint32_t nowMs);
         void pauseImmediately(Preferences& preferences, uint32_t nowMs) { finishPause(preferences, nowMs); }
@@ -59,6 +60,10 @@ namespace screens {
         void openLocator(Screen& screen);
         void drawLocator(ui::Context& ui, Screen& screen, Preferences& preferences, uint32_t nowMs);
         bool pageBrowsing() const { return pageBrowsing_; }
+        // Lume.5: marks the page being browsed ("Marcar esta página"). Toggles; false when the list is full.
+        bool toggleBookmark(size_t wordIndex);
+        bool backwardActive() const { return backward_; }
+        bool scrubActive() const { return modernScrub_; }
 
 
 
@@ -69,7 +74,15 @@ namespace screens {
         bool pageBrowsing_ = false;
         PageReader::BrowseState browse_;
         size_t pageSelected_ = 0;
-        size_t returnWord_ = SIZE_MAX;
+        bool backward_ = false; // hold-left rewind in progress
+        bool modernScrub_ = false; // horizontal drag scrub in progress
+        size_t scrubStartWord_ = 0;
+        uint16_t scrubAnchorX_ = 0;
+        std::string scrubText_;
+        uint32_t backwardStartMs_ = 0;
+        uint32_t lastTickMs_ = 0;
+        uint32_t markNoticeUntilMs_ = 0;
+        bool bookmarkFull_ = false;
         size_t candidate_ = 0;
         size_t locatorOrigin_ = 0;
         size_t findChapterPage_ = 0;

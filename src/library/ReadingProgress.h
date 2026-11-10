@@ -31,6 +31,9 @@ namespace ReadingProgress {
     std::expected<void, std::error_code> writeBookOverrides(std::string_view bookPath,
                                                              const reading::BookIdentity& identity,
                                                              const settings::ReadingOverrides& overrides);
+    // Bookmarks live in the hidden ".rmarks" sidecar next to the book (see reader/ReadingMarks.h).
+    void loadBookmarks(ReadingSession& session, const IndexedBookStore& store);
+    void saveBookmarks(ReadingSession& session);
     void save(ReadingSession& session, Preferences& preferences, bool force, uint32_t nowMs);
     void cache(ReadingSession& session, Preferences& preferences, uint32_t wordIndex);
     void mirror(const ReadingSession& session, const IndexedBookStore& store);

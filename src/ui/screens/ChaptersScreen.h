@@ -6,6 +6,7 @@
 #include "library/BookMetadata.h"
 #include "reader/ReadingLoop.h"
 #include "settings/SettingsModel.h"
+#include "ui/Modern.h"
 #include "ui/Ui.h"
 #include "ui/Layouts.h"
 #include "ui/screens/Screens.h"
@@ -18,6 +19,11 @@ namespace screens {
                     const settings::ReadingSettings& settings, uint32_t nowMs, Screen& screen);
 
     private:
+        Action drawModern(ui::Context& ui, std::span<const ChapterMarker> chapters, ReadingSession& reader,
+                          const settings::ReadingSettings& settings, size_t readingIndex, Screen& screen);
+        size_t bmFirst_ = 0;
+        bool holdHandled_ = false;
+        ui::modern::ListSwipe bmSwipe_;
         std::span<const ChapterMarker> source_;
         size_t centeredIndex_ = 0;
         size_t dragStartIndex_ = 0;

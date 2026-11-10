@@ -109,6 +109,7 @@ std::expected<void, std::error_code> StorageManager::removeBook(std::string_view
     Board::Storage::filesystem().remove(StoragePaths::indexedIndexPathFor(path).c_str());
     Board::Storage::filesystem().remove(StoragePaths::indexedDataPathFor(path).c_str());
     Board::Storage::filesystem().remove(StoragePaths::bookStatePathFor(path).c_str());
+    Board::Storage::filesystem().remove(StoragePaths::bookmarksPathFor(path).c_str());
     for (const auto& cover : covers::sourceCandidates(path))
         Board::Storage::filesystem().remove(cover.c_str());
     Board::Storage::filesystem().remove(covers::cachePath(path).c_str());

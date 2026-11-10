@@ -89,3 +89,7 @@ supported ranges.
 Theme files are versionless TOML under `/themes`; see [`../themes/README.md`](../themes/README.md).
 Each book can also have a hidden `.rstate.toml` sidecar containing durable progress and an optional
 typography override. Book state is separate from global device settings.
+Lume.5 adds to the same sidecar a `[reading.resume]` table ("onde parei": word, chapter, percent; absent in
+old files = no resume point) and a hidden `.rmarks` sidecar with up to 20 manual bookmarks (one per line:
+`word<TAB>percent<TAB>snippet`, header carries the book identity). Rules are documented in
+`src/reader/ReadingMarks.h`.

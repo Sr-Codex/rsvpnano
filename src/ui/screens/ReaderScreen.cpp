@@ -370,7 +370,7 @@ namespace screens {
     }
 
     void ReaderScreen::finishBookOpen(Preferences& preferences, uint32_t nowMs) {
-        returnWord_ = SIZE_MAX; browse_ = {}; searchResults_.clear(); searchQuery_.clear(); searchDraft_.clear(); searchRunning_ = false;
+        backward_ = false; browse_ = {}; searchResults_.clear(); searchQuery_.clear(); searchDraft_.clear(); searchRunning_ = false;
         session.state = {};
         pagePreview_ = false;
         pageBrowsing_ = false;
@@ -384,6 +384,10 @@ namespace screens {
         } else {
             preferences.putString("book", session.sourcePath().data());
         }
+        ReadingProgress::loadBookmarks(session, store);
+        reading::resetTracker(session.resumeTracker, session.state.wordIndex);
+        session.resumeDirty = false;
+        lastTickMs_ = nowMs;
     }
 
     void ReaderScreen::loadInitialBook(ui::Context& ui, StorageManager& storage, Preferences& preferences,
@@ -706,6 +710,8 @@ namespace screens {
                                  .canRead = ReadingLoop::wordCount(session) > 0,
                                  .pressedControl = modernTouchMoved_ ? uint8_t{0} : modernControl_,
                                  .pausePending = pauseAtSentenceEndRequested_,
+                                 .scrubText = modernScrub_ ? std::string_view{scrubText_} : std::string_view{},
+                                 .backward = backward_,
                              },
                              settings, battery);
     }

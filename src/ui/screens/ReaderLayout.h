@@ -42,6 +42,8 @@ namespace screens::readerLayout {
         bool canRead = true;
         uint8_t pressedControl = 0;
         bool pausePending = false;
+        std::string_view scrubText; // scrub position ("Cap. N · NN%"), empty when not scrubbing
+        bool backward = false; // hold-left rewind indicator
     };
     void drawArrows(ui::Context& ui, const settings::ReadingSettings& settings, bool reading, int16_t wordHeight,
                     bool ghostHidden = false);

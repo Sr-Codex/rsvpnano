@@ -14,8 +14,21 @@ namespace reading {
         bool operator==(const BookIdentity&) const = default;
     };
 
+    // "Onde parei": last real reading position before a jump (see reader/ReadingMarks.h).
+    // Absent in old sidecars: defaults to invalid, so old files keep working.
+    struct ResumePoint {
+        uint32_t wordIndex = 0;
+        uint32_t chapter = 0; // chapter index + 1, 0 = none
+        uint32_t percent = 0;
+        bool valid = false;
+        bool pending = false; // jumped away and not yet settled at the new place
+
+        bool operator==(const ResumePoint&) const = default;
+    };
+
     struct State {
         uint32_t wordIndex = 0;
+        ResumePoint resume;
         settings::ReadingOverrides overrides;
 
         bool operator==(const State&) const = default;
