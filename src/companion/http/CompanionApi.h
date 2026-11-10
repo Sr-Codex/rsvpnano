@@ -118,6 +118,10 @@ private:
     companion::api::Result<> putFeeds(httpd_req_t& request);
     companion::api::Result<std::span<const focus::Timer>> getFocusTimers(httpd_req_t& request);
     companion::api::Result<> putFocusTimers(httpd_req_t& request);
+    // App Tempo: integracao TickTick e projetos.json
+    companion::api::Result<companion::api::TickTickInfo> getTickTick(httpd_req_t& request);
+    companion::api::Result<> putTickTick(httpd_req_t& request);
+    companion::api::Result<> putTempoProjects(httpd_req_t& request);
 
     // HTTP transport
     static esp_err_t handleLibrary(httpd_req_t* request);

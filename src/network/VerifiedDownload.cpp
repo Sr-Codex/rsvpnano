@@ -2,6 +2,8 @@
 #include <Arduino.h>
 #include <esp_http_client.h>
 #include <esp_crt_bundle.h>
+#include <esp_sntp.h>
+#include "board/BoardClock.h"
 #include <time.h>
 #include <algorithm>
 #include <array>
@@ -14,14 +16,20 @@ bool httpsUrl(std::string_view url) {
     return !authority.empty() && authority.find('@') == std::string_view::npos
         && url.find_first_of("\r\n\t ") == std::string_view::npos;
 }
+std::expected<void, std::string> syncNetworkClock() {
+    sntp_set_sync_status(SNTP_SYNC_STATUS_RESET);
+    configTime(0, 0, "pool.ntp.org", "time.cloudflare.com");
+    Board::Clock::applyTimeZone();  // configTime() sobrescreve TZ
+    const uint32_t start = millis();
+    while (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED && millis() - start < 10000) delay(50);
+    if (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED || time(nullptr) < 1700000000)
+        return std::unexpected("Clock not synced; retry with Wi-Fi");
+    Board::Clock::saveSystemTime();  // hora de rede -> RTC (so na placa com RTC)
+    return {};
+}
 std::expected<void, std::string> syncDownloadClock() {
     if (time(nullptr) >= 1700000000) return {};
-    configTime(0, 0, "pool.ntp.org", "time.cloudflare.com");
-    const uint32_t start = millis();
-    while (time(nullptr) < 1700000000 && millis() - start < 10000) delay(50);
-    if (time(nullptr) < 1700000000)
-        return std::unexpected("Clock not synced; retry with Wi-Fi");
-    return {};
+    return syncNetworkClock();
 }
 namespace {
 struct Headers { std::string location; };

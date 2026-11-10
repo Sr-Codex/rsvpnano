@@ -171,6 +171,9 @@ namespace settings {
         // live only in the secrets store, never in SD settings or the public API.
         std::string wifiPassword;
         std::vector<WifiProfile> wifiNetworks;
+        // TickTick (app Tempo): token da API e tag. Gravados por PUT /api/v2/tempo/ticktick, nunca devolvidos.
+        std::string ticktickToken;
+        std::string ticktickTag;
 
         bool operator==(const DeviceSecrets&) const = default;
     };

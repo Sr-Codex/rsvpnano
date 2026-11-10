@@ -52,6 +52,20 @@ namespace companion::api {
         std::optional<std::string> password;
     };
 
+    // PUT /api/v2/tempo/ticktick. Token vazio apaga a integracao; ausente mantem o atual.
+    struct TickTickUpdate {
+        std::optional<std::string> token;
+        std::optional<std::string> tag;
+    };
+
+    // GET /api/v2/tempo/ticktick. O token nunca e devolvido.
+    struct TickTickInfo {
+        bool configurado = false;
+        std::string tag;
+        std::string ultimaSync;  // "" = nunca sincronizou
+        std::string erro;        // "" = ultima tentativa ok
+    };
+
     struct AppearanceSelection {
         std::string id;
     };

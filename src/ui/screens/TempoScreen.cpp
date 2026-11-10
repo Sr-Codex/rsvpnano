@@ -337,6 +337,11 @@ namespace screens {
         primeiro_ = 0;
     }
 
+    void TempoScreen::recarregarProjetos(fs::FS* filesystem) {
+        if (!carregado_ || fase_ != Fase::Nenhuma || filesystem == nullptr) return;
+        carregar(filesystem, false, 0);
+    }
+
     void TempoScreen::acumular(uint32_t nowMs) {
         const uint64_t agora = tempo::ms(nowMs);
         const uint64_t delta = agora > ultimoMs_ ? agora - ultimoMs_ : 0;

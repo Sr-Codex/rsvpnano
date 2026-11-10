@@ -8,6 +8,7 @@
 #include <string>
 
 #include "board/BoardAudio.h"
+#include "board/BoardClock.h"
 #include "board/BoardConfig.h"
 #include "board/BoardInput.h"
 #include "board/BoardPower.h"
@@ -15,6 +16,8 @@
 #include "board/BoardSystem.h"
 #include "freertos/task.h"
 #include "logging/Logger.h"
+#include "network/TickTickSync.h"
+#include "tempo/Relogio.h"
 #include "feeds/RssFeeds.h"
 #include "settings/NvsSecurity.h"
 #include "library/ReadingProgress.h"
@@ -36,6 +39,8 @@ namespace {
     constexpr uint32_t kStandbyPowerOffMs = 5UL * 60UL * 1000UL;
     constexpr UBaseType_t kJobQueueLength = 8;
     constexpr uint32_t kJobStackBytes = 12288;
+    constexpr uint32_t kTickTickPeriodMs = 30UL * 60UL * 1000UL;  // sync periodica do TickTick
+    constexpr uint32_t kTickTickReopenMinMs = 2UL * 60UL * 1000UL; // reabrir launcher/Tempo nao sincroniza de novo antes disso
     constexpr UBaseType_t kJobPriority = 1;
 
     template<size_t Size>
@@ -57,6 +62,9 @@ namespace {
 } // namespace
 
 void App::begin() {
+    // Relogio do Tempo: ancora na hora de parede que o RTC/sistema ja ajustou em Board::Clock::begin() (offline).
+    if (const auto now = static_cast<int64_t>(time(nullptr)); tempo::deEpoch(now).valida)
+        tempo::ancorar(now, millis());
     prefs_.begin(settings::kStateNvsNamespace);
     storage_.setStatusCallback(&App::renderStorageStatus, this);
     bootMs_ = millis();
@@ -160,6 +168,7 @@ void App::update(uint32_t nowMs) {
     }
 
     updateBackgroundJob();
+    updateTickTickSync(nowMs);
     immediateUi_.setBackgroundBusy(backgroundJobActive()&&!(onboardingJobActive()&&screen_==screens::Screen::Onboarding));
     const bool preparingTypography = typographyJobActive();
     if (focusScreen_.breakVisible()) {
@@ -1050,6 +1059,14 @@ void App::updateBackgroundJob() {
             }
             return;
         }
+        if (completed == JobKind::TickTick) {
+            // Sem tela de status: o Tempo so passa a mostrar a lista nova. Hora de rede/RTC -> relogio do Tempo.
+            if (const auto now = static_cast<int64_t>(time(nullptr)); tempo::deEpoch(now).valida)
+                tempo::ancorar(now, millis());
+            tempoScreen_.recarregarProjetos(storage_.mounted() ? &Board::Storage::filesystem() : nullptr);
+            immediateUi_.invalidate();
+            return;
+        }
         if (completed == JobKind::Rss) {
             libraryScreen_.invalidate();
             showTransientStatus("RSS", update.line1, update.line2, 1400, screens::Screen::Reader);
@@ -1136,6 +1153,13 @@ void App::runBackgroundJob() {
         storage_.refreshBooks();
         copyText(complete.line1, result.summary.c_str());
         copyText(complete.line2, result.detail.c_str());
+        break;
+    }
+    case JobKind::TickTick: {
+        Logger::checkpoint("ticktick_sync");
+        if (storage_.mounted())
+            (void) net::ticktick::sync(settingsStore_.settings().network, settingsStore_.secrets(),
+                                       Board::Storage::filesystem());  // resultado fica em net::ticktick::status()
         break;
     }
     case JobKind::StorageCheck: {
@@ -1263,6 +1287,26 @@ void App::runRss() {
     screens::status(immediateUi_, "RSS", immediateUi_.text(UiText::CheckingFeeds));
     if (!startBackgroundJob(JobKind::Rss))
         showTransientStatus("RSS", immediateUi_.text(UiText::CouldNotStart), {}, 1200, screens::Screen::Reader);
+}
+
+// Dispara a sync do TickTick (job em segundo plano, como RSS/OTA): ao abrir o launcher/Tempo e a cada 30 min
+// enquanto o app esta no launcher/Tempo. So com token configurado, cartao montado, sem outro job, sem
+// Companion/USB abertos e fora da batalha (nao liga o radio durante o foco).
+void App::updateTickTickSync(uint32_t nowMs) {
+    const bool launcher = screen_ == screens::Screen::Home || screens::TempoScreen::owns(screen_);
+    const bool entered = launcher && !tickTickWasLauncher_;
+    tickTickWasLauncher_ = launcher;
+    if (!launcher || backgroundJobActive() || !storage_.mounted() || companionApi_.active() || usbTransfer_.active()
+        || tempoScreen_.battleActive() || settingsStore_.secrets().ticktickToken.empty())
+        return;
+    const uint32_t sinceMs = nowMs - tickTickLastMs_;
+    const bool due = !tickTickTried_ || sinceMs >= kTickTickPeriodMs || (entered && sinceMs >= kTickTickReopenMinMs);
+    if (!due)
+        return;
+    tickTickTried_ = true;
+    tickTickLastMs_ = nowMs;
+    if (!startBackgroundJob(JobKind::TickTick))
+        ESP_LOGW("ticktick", "sync job could not start");
 }
 
 void App::runBookOpen(size_t index, uint32_t nowMs) {

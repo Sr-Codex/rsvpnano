@@ -18,5 +18,7 @@ std::expected<size_t, std::string> download(
     const DownloadSink& sink, const DownloadControl& control = {});
 std::expected<std::string, std::string> downloadText(std::string_view url, size_t maximum);
 std::expected<void, std::string> syncDownloadClock();
+// Forca uma consulta SNTP (mesmo com hora valida, ex.: vinda do RTC) e, se der certo, grava no RTC.
+std::expected<void, std::string> syncNetworkClock();
 bool httpsUrl(std::string_view url);
 }

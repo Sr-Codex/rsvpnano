@@ -129,6 +129,9 @@ CompanionApi::OperationResult CompanionApi::startServer() {
         makeRoute("/api/v2/feeds", HTTP_PUT, &CompanionApi::handle<&CompanionApi::putFeeds>),
         makeRoute("/api/v2/focus-timers", HTTP_GET, &CompanionApi::handle<&CompanionApi::getFocusTimers>),
         makeRoute("/api/v2/focus-timers", HTTP_PUT, &CompanionApi::handle<&CompanionApi::putFocusTimers>),
+        makeRoute("/api/v2/tempo/ticktick", HTTP_GET, &CompanionApi::handle<&CompanionApi::getTickTick>),
+        makeRoute("/api/v2/tempo/ticktick", HTTP_PUT, &CompanionApi::handle<&CompanionApi::putTickTick>),
+        makeRoute("/api/v2/tempo/projetos", HTTP_PUT, &CompanionApi::handle<&CompanionApi::putTempoProjects>),
         makeRoute("/api/v2/*", HTTP_OPTIONS, &CompanionApi::handleOptions),
     };
 
