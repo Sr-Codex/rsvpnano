@@ -209,6 +209,12 @@ namespace {
                 touchAt(true, x, y);
                 std::this_thread::sleep_for(std::chrono::milliseconds(120));
                 touchAt(false, x, y);
+            } else if ((step.verb == "down" || step.verb == "move") && step.args.size() >= 1) {
+                parsePoint(step.args[0], x, y);   // dedo continua apoiado ate o "up" (captura no meio de um arrasto)
+                touchAt(true, x, y);
+            } else if (step.verb == "up") {
+                if (!step.args.empty()) parsePoint(step.args[0], x, y);
+                touchAt(false, x, y);
             } else if (step.verb == "hold" && step.args.size() >= 2) {
                 parsePoint(step.args[0], x, y);
                 touchAt(true, x, y);

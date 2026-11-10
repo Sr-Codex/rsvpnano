@@ -209,6 +209,7 @@ namespace tempo {
         int ultimaCategoria = 0;       // Categoria (enum) da ultima sessao
         int ultimaDuracaoMin = 25;     // 5..60
         bool ciclopomodoro = false;    // interruptor "ciclo pomodoro 4x"
+        int metaSemanalMin = 900;      // meta de foco da semana no Perfil (padrao 15 h; editavel no estado.json)
     };
 
     // ---------------------------------------------------------------- resumo

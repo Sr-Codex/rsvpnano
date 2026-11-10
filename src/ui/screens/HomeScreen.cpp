@@ -17,9 +17,9 @@ namespace screens {
 
         constexpr uint16_t kLaranja = rgb565(255, 120, 50);
         constexpr uint16_t kRoxo = rgb565(150, 120, 235);
-        constexpr uint16_t kVerde = rgb565(25, 158, 112);
         constexpr uint16_t kAmbar = rgb565(255, 196, 80);
         constexpr uint16_t kTinta = rgb565(12, 13, 14);   // texto sobre o botao laranja
+        constexpr uint16_t kVerdeBat = rgb565(60, 200, 110);
 
         using Desenho = std::function<void(Arduino_GFX&, int, int)>;   // (gfx, dx, dy) somados as coords absolutas
 
@@ -81,31 +81,6 @@ namespace screens {
             }
         }
 
-        void iconeHabitos(Arduino_GFX& g, int cx, int cy, uint16_t c) {
-            for (int i = 0; i < 3; ++i) {
-                const int y = cy - 7 + i * 7;
-                g.drawCircle(cx - 9, y, 3, c);
-                g.drawLine(cx - 3, y, cx + 10, y, c);
-                g.drawLine(cx - 3, y + 1, cx + 10, y + 1, c);
-            }
-            grossa(g, cx - 10, cy - 7, cx - 8, cy - 5, kVerde);
-            grossa(g, cx - 8, cy - 5, cx - 5, cy - 10, kVerde);
-        }
-
-        void iconeHumor(Arduino_GFX& g, int cx, int cy, uint16_t c) {
-            g.drawCircle(cx, cy, 10, c);
-            g.drawCircle(cx, cy, 9, c);
-            g.fillCircle(cx - 3, cy - 4, 1, c);
-            g.fillCircle(cx + 3, cy - 4, 1, c);
-            arco(g, cx, cy, 4.5, 4.5, 25, 155, c);
-        }
-
-        void iconeRecibo(Arduino_GFX& g, int cx, int cy, uint16_t c) {
-            g.drawRect(cx - 8, cy - 10, 16, 19, c);
-            g.drawRect(cx - 7, cy - 9, 14, 17, c);
-            for (int i = 0; i < 3; ++i) g.drawLine(cx - 4, cy - 5 + i * 5, cx + 4, cy - 5 + i * 5, c);
-        }
-
         void iconeAjustes(Arduino_GFX& g, int cx, int cy, uint16_t c) {
             constexpr double kRad = 3.14159265358979 / 180.0;
             for (int i = 0; i < 8; ++i) {
@@ -118,15 +93,70 @@ namespace screens {
             g.fillCircle(cx, cy, 3, c);
         }
 
-        std::string dataHora(const tempo::Agora& agora) {
+        std::string hora(const tempo::Agora& agora) {
+            if (!agora.valida) return "--:--";
+            char texto[8];
+            std::snprintf(texto, sizeof texto, "%02d:%02d", agora.minutoDoDia / 60, agora.minutoDoDia % 60);
+            return texto;
+        }
+
+        std::string data(const tempo::Agora& agora) {
             if (!agora.valida) return {};
             static constexpr const char* kSemana[] = {"Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"};
             static constexpr const char* kMes[] = {"jan", "fev", "mar", "abr", "mai", "jun",
                                                    "jul", "ago", "set", "out", "nov", "dez"};
-            char texto[48];
-            std::snprintf(texto, sizeof texto, "%02d:%02d · %s, %d %s", agora.minutoDoDia / 60, agora.minutoDoDia % 60,
-                          kSemana[tempo::diaDaSemana(agora.data)], agora.data.dia, kMes[std::clamp(agora.data.mes, 1, 12) - 1]);
+            char texto[32];
+            std::snprintf(texto, sizeof texto, "%s, %d %s", kSemana[tempo::diaDaSemana(agora.data)], agora.data.dia,
+                          kMes[std::clamp(agora.data.mes, 1, 12) - 1]);
             return texto;
+        }
+
+        std::string horaMin(int minutos) {
+            char texto[16];
+            std::snprintf(texto, sizeof texto, "%dh%02d", minutos / 60, minutos % 60);
+            return texto;
+        }
+
+        // Corta em `maximo` caracteres UTF-8 e acrescenta "..." (sem depender de glifo especial).
+        std::string cortar(const std::string& texto, size_t maximo) {
+            size_t letras = 0, i = 0;
+            while (i < texto.size()) {
+                if (letras == maximo) return texto.substr(0, i) + "...";
+                ++i;
+                while (i < texto.size() && (static_cast<unsigned char>(texto[i]) & 0xC0) == 0x80) ++i;
+                ++letras;
+            }
+            return texto;
+        }
+
+        // Wi-Fi: tres arcos + ponto; desconectado = apagado e riscado.
+        void iconeWifi(Arduino_GFX& g, int cx, int cy, bool conectado, uint16_t cor, uint16_t apagado, uint16_t risco) {
+            constexpr double kRad = 3.14159265358979 / 180.0;
+            const uint16_t c = conectado ? cor : apagado;
+            for (int r : {5, 9, 13})
+                for (int a = 228; a <= 312; a += 3) {
+                    const int x = cx + int(std::lround(r * std::cos(a * kRad))), y = cy + int(std::lround(r * std::sin(a * kRad)));
+                    g.fillRect(x, y, 2, 2, c);
+                }
+            g.fillCircle(cx, cy - 1, 2, c);
+            if (!conectado) {
+                g.drawLine(cx - 8, cy - 10, cx + 8, cy + 2, risco);
+                g.drawLine(cx - 8, cy - 9, cx + 8, cy + 3, risco);
+            }
+        }
+
+        // Bateria desenhada: corpo, ponta, nivel (verde; ambar carregando com raio; carmim abaixo de 15 %).
+        void iconeBateria(Arduino_GFX& g, int x, int y, int pct, bool carregando, uint16_t contorno, uint16_t fundo) {
+            pct = std::clamp(pct, 0, 100);
+            const uint16_t nivel = carregando ? kAmbar : pct < 15 ? rgb565(235, 50, 90) : kVerdeBat;
+            g.drawRoundRect(x, y, 26, 14, 3, contorno);
+            g.fillRect(x + 26, y + 4, 2, 6, contorno);
+            const int w = std::max(pct > 0 ? 2 : 0, 20 * pct / 100);
+            if (w > 0) g.fillRect(x + 3, y + 3, w, 8, nivel);
+            if (carregando) {   // raio
+                g.fillTriangle(x + 15, y + 2, x + 9, y + 8, x + 14, y + 8, fundo);
+                g.fillTriangle(x + 12, y + 6, x + 17, y + 6, x + 11, y + 12, fundo);
+            }
         }
     } // namespace
 
@@ -137,19 +167,23 @@ namespace screens {
         const uint16_t cMudo = ui.color(Muted), cTexto = ui.color(Foreground);
         using Estado = ResumoTempo::Estado;
 
-        // ---- barra de status
+        // ---- barra de status: hora grande, data, Wi-Fi e bateria desenhados
         {
-            std::string direita = info.wifi ? "Wi-Fi" : "Wi-Fi off";
-            if (info.bateriaPresente)
-                direita += " · " + std::to_string(info.bateriaPct) + "%" + (info.carregando ? " · carregando" : "");
-            Bloco barra(ui, {0, 0, 640, 22}, Background, 0, 1);
-            barra.texto({12, 2, 300, 18}, dataHora(agora), 11, cMudo);
-            barra.texto({332, 2, 296, 18}, direita, 11, cMudo, TextAlign::Right);
-            barra.desenhar();
+            Bloco barra(ui, {0, 0, 640, 24}, Background, 0, 1);
+            barra.texto({14, 1, 60, 22}, hora(agora), 14, cTexto);
+            barra.texto({78, 5, 110, 16}, data(agora), 10, cMudo);
+            if (info.bateriaPresente) barra.texto({536, 5, 56, 16}, std::to_string(info.bateriaPct) + "%", 10, cMudo, TextAlign::Right);
+            barra.marca(uint32_t(info.wifi) * 2U + uint32_t(info.bateriaPresente) * 4U + uint32_t(info.carregando) * 8U
+                        + uint32_t(info.bateriaPct) * 16U);
+            const uint16_t fundo = ui.color(Background);
+            barra.desenhar([&](Arduino_GFX& g, int dx, int dy) {
+                iconeWifi(g, 520 + dx, 19 + dy, info.wifi, cTexto, rgb565(70, 72, 70), rgb565(235, 50, 90));
+                if (info.bateriaPresente) iconeBateria(g, 598 + dx, 5 + dy, info.bateriaPct, info.carregando, cTexto, fundo);
+            });
         }
 
         // ---- cartao AGORA
-        const Rect cartao{12, 24, 318, 140};
+        const Rect cartao{10, 26, 290, 138};
         {
             const bool batalha = r.estado == Estado::Batalha;
             std::string titulo = "AGORA";
@@ -168,24 +202,24 @@ namespace screens {
                 linha2 = "inimigo 100% · " + std::to_string(r.planejadoMin) + " min";
                 botao = "Começar";
             }
-            const std::string leitura = info.temLivro ? "Leitura: " + info.livro + " · " + std::to_string(info.livroPct) + "%"
+            const std::string leitura = info.temLivro ? "Leitura: " + cortar(info.livro, 16) + " · " + std::to_string(info.livroPct) + "%"
                                                       : std::string{"Nenhum livro aberto"};
             Bloco bloco(ui, cartao, SurfaceMuted, 12, uint32_t(r.estado) + 10);
-            bloco.texto({26, 30, 200, 18}, titulo, 11, kLaranja);
-            if (r.estado != Estado::Reflexao) bloco.texto({40, 91, 60, 18}, r.centro, 11, cTexto, TextAlign::Center);
-            bloco.texto({124, 48, 196, 24}, nome, 14, cTexto);
-            bloco.texto({124, 76, 196, 18}, linha2, 11, cMudo);
-            bloco.texto({124, 100, 196, 18}, leitura, 11, cMudo);
+            bloco.texto({24, 33, 200, 16}, titulo, 10, kLaranja);
+            if (r.estado != Estado::Reflexao) bloco.texto({34, 94, 60, 16}, r.centro, 11, cTexto, TextAlign::Center);
+            bloco.texto({114, 50, 180, 24}, nome, 14, cTexto);
+            bloco.texto({114, 74, 180, 16}, linha2, 11, cMudo);
+            bloco.texto({114, 92, 180, 16}, leitura, 11, cMudo);
             bloco.marca(r.assinatura);
             bloco.marca(ui::Context::signature(botao));
-            const Rect areaBotao{124, 126, 192, 30};
+            const Rect areaBotao{114, 124, 172, 30};
             const auto layoutBotao = ui.prepareText(areaBotao, botao, 13, TextAlign::Center, 1);
             bloco.desenhar([&](Arduino_GFX& g, int dx, int dy) {
                 g.fillRoundRect(areaBotao.x + dx, areaBotao.y + dy, areaBotao.w, areaBotao.h, 10, kLaranja);
                 ui.drawText(g, layoutBotao, kTinta, dx, dy, kLaranja);
                 const double voce = batalha ? r.vocePct / 100.0 : 0.0;
                 const double inimigo = batalha ? r.inimigoPct / 100.0 : 1.0;
-                desenharAneisMini(ui, g, cartao.x + dx + 58, cartao.y + dy + 76, 38, voce, inimigo, r.bonus);
+                desenharAneisMini(ui, g, cartao.x + dx + 54, cartao.y + dy + 75, 31, voce, inimigo, r.bonus);
             });
             if (ui.tap(areaBotao)) {
                 if (r.estado == Estado::Reflexao || batalha) tempo.abrirBatalha(screen);
@@ -193,41 +227,60 @@ namespace screens {
             }
         }
 
-        // ---- grade de apps (3 x 2)
-        static constexpr const char* kNomes[6] = {"Tempo", "Leitor", "Hábitos", "Humor", "Recibo", "Ajustes"};
-        if (breveApp_ >= 0 && nowMs >= breveAteMs_) breveApp_ = -1;
-        for (int i = 0; i < 6; ++i) {
-            const int cx = 372 + (i % 3) * 96, cy = 58 + (i / 3) * 66;
-            const Rect rect{int16_t(cx - 42), int16_t(cy - 30), 84, 60};
-            const bool breve = breveApp_ == i;
-            std::string infoCanto;
-            if (i == 0) infoCanto = r.saldo + " cr";
-            else if (i == 1 && info.temLivro) infoCanto = std::to_string(info.livroPct) + "%";
-            Bloco cartaoApp(ui, rect, SurfaceMuted, 12, 100 + i * 7 + breve);
-            cartaoApp.texto({int16_t(cx - 42), int16_t(cy + 5), 84, 18}, breve ? "em breve" : kNomes[i], 11, breve ? kAmbar : cTexto,
-                            TextAlign::Center);
-            if (!infoCanto.empty()) cartaoApp.texto({int16_t(cx), int16_t(cy - 28), 40, 13}, infoCanto, 9, cMudo, TextAlign::Right);
-            if (i == 0) cartaoApp.marca(r.assinatura);
-            cartaoApp.desenhar([&](Arduino_GFX& g, int dx, int dy) {
-                const int X = rect.x + dx + 42, Y = rect.y + dy + 22;
+        // ---- 2 x 2 blocos grandes: Tempo, Leitor, Perfil, Ajustes
+        static constexpr const char* kNomes[4] = {"Tempo", "Leitor", "Perfil", "Ajustes"};
+        for (int i = 0; i < 4; ++i) {
+            const Rect rect{int16_t(308 + (i % 2) * 164), int16_t(26 + (i / 2) * 70), 158, 64};
+            std::string detalhe;
+            uint16_t corDetalhe = cMudo;
+            switch (i) {
+            case 0:
+                detalhe = r.saldo + " cr · " + horaMin(r.focoHojeMin);
+                corDetalhe = kLaranja;
+                break;
+            case 1:
+                detalhe = info.temLivro ? cortar(info.livro, 8) + " · " + std::to_string(info.livroPct) + "%" : std::string{"Biblioteca"};
+                corDetalhe = kRoxo;
+                break;
+            case 2:
+                detalhe = "nível " + std::to_string(r.nivel) + " · " + std::to_string(r.streak) + (r.streak == 1 ? " dia" : " dias");
+                corDetalhe = kAmbar;
+                break;
+            default: detalhe = "Wi-Fi, TickTick"; break;
+            }
+            Bloco bloco(ui, rect, SurfaceMuted, 12, 100 + i * 7);
+            bloco.texto({int16_t(rect.x + 58), int16_t(rect.y + 10), 96, 22}, kNomes[i], 15, cTexto);
+            bloco.texto({int16_t(rect.x + 58), int16_t(rect.y + 36), 98, 16}, detalhe, 11, corDetalhe);
+            if (i == 0) bloco.marca(uint32_t(r.vocePct) * 131U + uint32_t(r.inimigoPct) * 17U + uint32_t(r.bonus) * 3U + uint32_t(r.estado == Estado::Batalha));
+            const int icx = rect.x + 30, icy = rect.y + 32;
+            bloco.desenhar([&](Arduino_GFX& g, int dx, int dy) {
+                const int X = icx + dx, Y = icy + dy;
                 switch (i) {
                 case 0: {
                     const bool batalha = r.estado == Estado::Batalha;
-                    desenharAneisMini(ui, g, X - 14, Y + 1, 12, batalha ? r.vocePct / 100.0 : 0.62, batalha ? r.inimigoPct / 100.0 : 0.38, r.bonus);
+                    desenharAneisMini(ui, g, X, Y, 19, batalha ? r.vocePct / 100.0 : 0.62, batalha ? r.inimigoPct / 100.0 : 0.38, r.bonus);
                     break;
                 }
                 case 1: iconeLivro(g, X, Y, kRoxo); break;
-                case 2: iconeHabitos(g, X, Y, ui.color(Foreground)); break;
-                case 3: iconeHumor(g, X, Y, kAmbar); break;
-                case 4: iconeRecibo(g, X, Y, ui.color(Foreground)); break;
+                case 2: {
+                    desenharAnelXp(ui, g, X, Y, 17, 7, r.xpFrac, SurfaceMuted);
+                    break;
+                }
                 default: iconeAjustes(g, X, Y, ui.color(Muted)); break;
                 }
             });
+            if (i == 2) {   // nivel dentro do anel (texto proprio, 2 passes: o Bloco ja foi pintado)
+                const Rect numero{int16_t(icx - 14), int16_t(icy - 9), 28, 18};
+                const std::string nivel = std::to_string(r.nivel);
+                Bloco centro(ui, numero, SurfaceMuted, 2, 200 + uint32_t(r.nivel));
+                centro.texto(numero, nivel, 13, cTexto, TextAlign::Center);
+                centro.desenhar();
+            }
             if (ui.tap(rect)) {
                 if (i == 0) screen = Screen::TempoHoje;
                 else if (i == 1) screen = Screen::Read;
-                else if (i == 5) screen = Screen::Settings;
-                else { breveApp_ = i; breveAteMs_ = nowMs + 2000; }
+                else if (i == 2) screen = Screen::Perfil;
+                else screen = Screen::Settings;
             }
         }
         return Action::None;

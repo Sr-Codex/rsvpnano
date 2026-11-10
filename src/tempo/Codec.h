@@ -69,9 +69,11 @@ namespace tempo {
         int distraiu = 0;        // reflexao: 0 = sem resposta, 1 = Nao, 2 = Um pouco, 3 = Muito
         double cr = 0.0;
         double xp = 0.0;
+        bool perfeita = false;   // vitoria sem nenhuma distracao (lume.5; logs antigos nao tem)
     };
 
     std::string linhaLog(const EventoLog& evento);   // 1 linha JSON terminada em '\n'
+    bool lerLinhaLog(std::string_view linha, EventoLog& saida);   // false = linha invalida (saida intacta)
     std::string caminhoLog(const Data& data);         // /tempo/log/AAAA-MM-DD.jsonl
     std::string textoData(const Data& data);          // AAAA-MM-DD
 

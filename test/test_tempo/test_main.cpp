@@ -9,6 +9,7 @@
 #include "tempo/Codec.h"
 #include "tempo/Motor.h"
 #include "tempo/Parametros.h"
+#include "tempo/Perfil.h"
 #include "tempo/Progressao.h"
 #include "tempo/Relogio.h"
 #include "tempo/Sessao.h"
@@ -913,6 +914,214 @@ void test_log_foco_livre_registra_categoria() {
     TEST_ASSERT_TRUE(linha.find("\"categoria\":\"Estudo\"") != std::string::npos);
 }
 
+
+// ------------------------------------------------------------------ Perfil (lume.5)
+static EventoLog bat(const char* data, const char* hora, const char* cat, int foco, const char* projeto = "", int dist = 0,
+                     bool vit = true) {
+    EventoLog e;
+    e.data = data;
+    e.hora = hora;
+    e.tipo = "batalha";
+    e.projeto = projeto[0] ? projeto : "Foco livre";
+    e.projetoId = projeto[0] ? "id" : "";
+    e.categoria = cat;
+    e.resultado = vit ? "vitoria" : "fuga";
+    e.planejadoMin = foco;
+    e.focadoMin = foco;
+    e.distraidoMin = dist;
+    e.distracoes = dist > 0 ? 1 : 0;
+    return e;
+}
+
+void test_perfil_log_ida_e_volta_e_linha_invalida() {
+    EventoLog e = bat("2026-11-10", "09:30:00", "Estudo", 25, "Plataforma");
+    e.perfeita = true;
+    EventoLog lido;
+    TEST_ASSERT_TRUE(lerLinhaLog(linhaLog(e), lido));
+    TEST_ASSERT_EQUAL_STRING("Plataforma", lido.projeto.c_str());
+    TEST_ASSERT_TRUE(lido.perfeita);
+    EventoLog intacto = bat("x", "y", "z", 1);
+    TEST_ASSERT_FALSE(lerLinhaLog("{nao json", intacto));
+    TEST_ASSERT_EQUAL_STRING("x", intacto.data.c_str());
+    EventoLog antigo;   // log antigo: sem categoria/perfeita
+    TEST_ASSERT_TRUE(lerLinhaLog("{\"data\":\"2026-11-09\",\"tipo\":\"batalha\",\"projetoId\":\"a\",\"focadoMin\":10}", antigo));
+    TEST_ASSERT_FALSE(antigo.perfeita);
+    TEST_ASSERT_EQUAL_INT(4, chipDoEvento(antigo));   // projeto sem categoria -> Projetos
+}
+
+void test_perfil_datas_e_horas() {
+    Data d;
+    TEST_ASSERT_TRUE(lerDataTexto("2026-11-10", d));
+    TEST_ASSERT_EQUAL_INT(10, d.dia);
+    TEST_ASSERT_FALSE(lerDataTexto("2026-13-10", d));
+    TEST_ASSERT_FALSE(lerDataTexto("26-11-10", d));
+    TEST_ASSERT_EQUAL_INT(9 * 60 + 5, minutoDeHora("09:05:33"));
+    TEST_ASSERT_EQUAL_INT(-1, minutoDeHora("25:00"));
+    TEST_ASSERT_EQUAL_INT(-1, minutoDeHora(""));
+}
+
+void test_perfil_resumo_projetos_horas_e_vitorias() {
+    Resumo r;
+    registrarEvento(r, bat("2026-11-09", "10:00:00", "Projetos", 50, "Alfa"), 1);
+    registrarEvento(r, bat("2026-11-09", "11:00:00", "Projetos", 25, "Alfa", 0, false), 1);
+    registrarEvento(r, bat("2026-11-10", "09:00:00", "Estudo", 30), 2);
+    EventoLog ruido;
+    ruido.tipo = "humor";
+    registrarEvento(r, ruido, 9);   // ignorado
+    TEST_ASSERT_EQUAL_INT(3, r.batalhas);
+    TEST_ASSERT_EQUAL_INT(2, r.vitorias);
+    TEST_ASSERT_EQUAL_INT(105, r.focoTotalMin);
+    TEST_ASSERT_EQUAL_INT(30, r.focoLivreMin);
+    TEST_ASSERT_EQUAL_INT(2, r.maxStreak);
+    TEST_ASSERT_EQUAL_INT(1, static_cast<int>(r.projetos.size()));
+    TEST_ASSERT_EQUAL_INT(75, r.projetos[0].minutos);
+    TEST_ASSERT_EQUAL_INT(1, r.projetos[0].vitorias);
+    TEST_ASSERT_EQUAL_INT(2, static_cast<int>(r.dias.size()));
+    TEST_ASSERT_TRUE(r.dias[0].dia < r.dias[1].dia);
+    TEST_ASSERT_EQUAL_INT(75, r.dias[0].focoMin);
+}
+
+void test_perfil_resumo_ida_e_volta_e_reconstrucao() {
+    std::vector<EventoLog> evs = {bat("2026-11-09", "10:00:00", "Trabalho", 25), bat("2026-11-10", "10:00:00", "Estudo", 40, "P")};
+    const Resumo a = reconstruirResumo(evs);
+    Resumo b;
+    TEST_ASSERT_TRUE(lerResumo(serializarResumo(a), b));
+    TEST_ASSERT_EQUAL_INT(a.focoTotalMin, b.focoTotalMin);
+    TEST_ASSERT_EQUAL_INT(2, static_cast<int>(b.dias.size()));
+    TEST_ASSERT_EQUAL_INT(1, static_cast<int>(b.projetos.size()));
+    TEST_ASSERT_EQUAL_INT(a.minutosPorHora[9], b.minutosPorHora[9]);
+    Resumo intacto;
+    intacto.vitorias = 7;
+    TEST_ASSERT_FALSE(lerResumo("{lixo", intacto));
+    TEST_ASSERT_EQUAL_INT(7, intacto.vitorias);
+}
+
+void test_perfil_limita_projetos_e_dias() {
+    Resumo r;
+    for (int i = 0; i < int(kMaxProjetosResumo) + 5; ++i)
+        registrarEvento(r, bat("2026-11-10", "10:00:00", "Projetos", 10 + i, (std::string{"P"} + std::to_string(i)).c_str()));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(kMaxProjetosResumo), static_cast<int>(r.projetos.size()));
+    Resumo q;
+    for (int i = 0; i < int(kMaxDiasResumo) + 10; ++i) {
+        const Data d = dataDeSerial(diaSerial(D(2025, 1, 1)) + i);
+        registrarEvento(q, bat(textoData(d).c_str(), "10:00:00", "Trabalho", 10));
+    }
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(kMaxDiasResumo), static_cast<int>(q.dias.size()));
+}
+
+void test_perfil_faixa_mais_focada_e_media() {
+    Resumo r;
+    TEST_ASSERT_EQUAL_INT(-1, faixaMaisFocada(r));
+    registrarEvento(r, bat("2026-11-09", "11:00:00", "Trabalho", 60));    // foco 10:00-11:00
+    registrarEvento(r, bat("2026-11-10", "12:00:00", "Trabalho", 60));    // foco 11:00-12:00
+    registrarEvento(r, bat("2026-11-10", "10:30:00", "Trabalho", 30));    // 10:00-10:30
+    TEST_ASSERT_EQUAL_INT(10, faixaMaisFocada(r));    // 10h-12h
+    TEST_ASSERT_EQUAL_INT((60 + 90) / 2, mediaFocoPorDia(r));
+}
+
+void test_perfil_semana_agrega_por_dia_e_categoria() {
+    const int64_t seg = segundaDaSemana(D(2026, 11, 10));
+    Semana s;
+    somarSemana(s, bat("2026-11-09", "10:00:00", "Trabalho", 60), seg);
+    somarSemana(s, bat("2026-11-10", "10:00:00", "Estudo", 30, "", 5), seg);
+    somarSemana(s, bat("2026-11-10", "11:00:00", "Estudo", 20, "", 1), seg);
+    somarSemana(s, bat("2026-11-08", "10:00:00", "Trabalho", 99), seg);   // semana anterior: ignorado
+    somarSemana(s, bat("2026-11-16", "10:00:00", "Trabalho", 99), seg);   // semana seguinte: ignorado
+    TEST_ASSERT_EQUAL_INT(110, s.total);
+    TEST_ASSERT_EQUAL_INT(60, s.min[0][0]);
+    TEST_ASSERT_EQUAL_INT(50, s.min[1][1]);
+    TEST_ASSERT_EQUAL_INT(50, s.porCategoria[1]);
+    TEST_ASSERT_EQUAL_INT(5, s.perdidoMin);   // so distracao > 2 min conta como perdido
+    TEST_ASSERT_EQUAL_INT(60, s.maiorDia);
+}
+
+void test_perfil_titulos_por_nivel() {
+    TEST_ASSERT_EQUAL_STRING("Recruta", tituloDoNivel(1));
+    TEST_ASSERT_EQUAL_STRING("Guerreiro do Foco", tituloDoNivel(7));
+    TEST_ASSERT_EQUAL_STRING("Lenda do Foco", tituloDoNivel(30));
+}
+
+void test_perfil_conquistas_vitorias_e_maratona() {
+    Resumo r;
+    auto c = avaliarConquistas(r, 0);
+    TEST_ASSERT_EQUAL_INT(0, conquistasGanhas(c));
+    for (int i = 0; i < 10; ++i) registrarEvento(r, bat("2026-11-09", "10:00:00", "Trabalho", 25));
+    registrarEvento(r, bat("2026-11-10", "10:00:00", "Trabalho", 25));
+    c = avaliarConquistas(r, 0);
+    TEST_ASSERT_TRUE(c[0].ganha);    // Primeira vitoria
+    TEST_ASSERT_TRUE(c[1].ganha);    // 10 vitorias
+    TEST_ASSERT_FALSE(c[2].ganha);   // 100 vitorias
+    TEST_ASSERT_EQUAL_INT(11, c[2].atual);
+    TEST_ASSERT_TRUE(c[3].ganha);    // Maratona: 10 x 25 min = 250 min no dia 09
+}
+
+void test_perfil_maratona_4h_num_dia() {
+    Resumo r;
+    registrarEvento(r, bat("2026-11-09", "12:00:00", "Trabalho", 120));
+    registrarEvento(r, bat("2026-11-09", "15:00:00", "Trabalho", 119));
+    TEST_ASSERT_EQUAL_INT(239, avaliarConquistas(r, 0)[3].atual);
+    TEST_ASSERT_FALSE(avaliarConquistas(r, 0)[3].ganha);
+    registrarEvento(r, bat("2026-11-09", "16:00:00", "Trabalho", 1));
+    TEST_ASSERT_TRUE(avaliarConquistas(r, 0)[3].ganha);
+}
+
+void test_perfil_streak_conquista_usa_maximo() {
+    Resumo r;
+    registrarEvento(r, bat("2026-11-09", "12:00:00", "Trabalho", 25), 7);
+    TEST_ASSERT_TRUE(avaliarConquistas(r, 0)[4].ganha);          // maxStreak do resumo
+    Resumo vazio;
+    TEST_ASSERT_TRUE(avaliarConquistas(vazio, 7)[4].ganha);      // streak atual do estado
+    TEST_ASSERT_EQUAL_INT(3, avaliarConquistas(vazio, 3)[4].atual);
+}
+
+void test_perfil_monge_sete_dias_seguidos() {
+    Resumo r;
+    for (int i = 0; i < 6; ++i) registrarEvento(r, bat(textoData(dataDeSerial(diaSerial(D(2026, 11, 1)) + i)).c_str(), "08:00:00", "Meditação", 10));
+    TEST_ASSERT_EQUAL_INT(6, avaliarConquistas(r, 0)[5].atual);
+    TEST_ASSERT_FALSE(avaliarConquistas(r, 0)[5].ganha);
+    registrarEvento(r, bat("2026-11-07", "08:00:00", "Meditação", 10));
+    TEST_ASSERT_TRUE(avaliarConquistas(r, 0)[5].ganha);
+    // um buraco zera a sequencia
+    Resumo q;
+    for (int i : {0, 1, 2, 4, 5, 6}) registrarEvento(q, bat(textoData(dataDeSerial(diaSerial(D(2026, 11, 1)) + i)).c_str(), "08:00:00", "Meditação", 10));
+    TEST_ASSERT_EQUAL_INT(3, avaliarConquistas(q, 0)[5].atual);
+}
+
+void test_perfil_madrugador_5_dias_antes_das_7h() {
+    Resumo r;
+    for (int i = 0; i < 4; ++i) registrarEvento(r, bat(textoData(dataDeSerial(diaSerial(D(2026, 11, 1)) + i)).c_str(), "06:30:00", "Trabalho", 25));
+    registrarEvento(r, bat("2026-11-05", "09:00:00", "Trabalho", 25));   // comecou 08:35: nao conta
+    TEST_ASSERT_EQUAL_INT(4, avaliarConquistas(r, 0)[6].atual);
+    registrarEvento(r, bat("2026-11-06", "06:50:00", "Trabalho", 25));   // comecou 06:25
+    TEST_ASSERT_TRUE(avaliarConquistas(r, 0)[6].ganha);
+    Resumo tarde;   // comecou 07:00 em ponto: nao e madrugada
+    registrarEvento(tarde, bat("2026-11-06", "07:25:00", "Trabalho", 25));
+    TEST_ASSERT_EQUAL_INT(0, avaliarConquistas(tarde, 0)[6].atual);
+}
+
+void test_perfil_dia_perfeito_exige_todas_perfeitas_e_2h() {
+    Resumo r;
+    registrarEvento(r, bat("2026-11-09", "10:00:00", "Trabalho", 60));
+    registrarEvento(r, bat("2026-11-09", "12:00:00", "Trabalho", 59));
+    TEST_ASSERT_EQUAL_INT(119, avaliarConquistas(r, 0)[7].atual);
+    TEST_ASSERT_FALSE(avaliarConquistas(r, 0)[7].ganha);
+    registrarEvento(r, bat("2026-11-09", "13:00:00", "Trabalho", 1));
+    TEST_ASSERT_TRUE(avaliarConquistas(r, 0)[7].ganha);
+    Resumo q;   // uma batalha com distracao quebra o dia perfeito
+    registrarEvento(q, bat("2026-11-09", "10:00:00", "Trabalho", 130, "", 3));
+    TEST_ASSERT_FALSE(avaliarConquistas(q, 0)[7].ganha);
+    TEST_ASSERT_EQUAL_INT(0, avaliarConquistas(q, 0)[7].atual);
+}
+
+void test_perfil_proxima_conquista_e_contagem() {
+    Resumo r;
+    for (int i = 0; i < 7; ++i) registrarEvento(r, bat("2026-11-09", "10:00:00", "Trabalho", 10, "", 0, i < 6));
+    auto c = avaliarConquistas(r, 0);
+    // 6 vitorias: "10 vitorias" (60 %) e a mais adiantada entre as nao ganhas
+    TEST_ASSERT_EQUAL_INT(1, conquistasGanhas(c));
+    TEST_ASSERT_EQUAL_INT(1, proximaConquista(c));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_datas);
@@ -960,5 +1169,20 @@ int main(int, char**) {
     RUN_TEST(test_ciclo_pomodoro_cada_rodada_liquida_separado);
     RUN_TEST(test_estado_preferencias_da_tela_inicial);
     RUN_TEST(test_log_foco_livre_registra_categoria);
+    RUN_TEST(test_perfil_log_ida_e_volta_e_linha_invalida);
+    RUN_TEST(test_perfil_datas_e_horas);
+    RUN_TEST(test_perfil_resumo_projetos_horas_e_vitorias);
+    RUN_TEST(test_perfil_resumo_ida_e_volta_e_reconstrucao);
+    RUN_TEST(test_perfil_limita_projetos_e_dias);
+    RUN_TEST(test_perfil_faixa_mais_focada_e_media);
+    RUN_TEST(test_perfil_semana_agrega_por_dia_e_categoria);
+    RUN_TEST(test_perfil_titulos_por_nivel);
+    RUN_TEST(test_perfil_conquistas_vitorias_e_maratona);
+    RUN_TEST(test_perfil_maratona_4h_num_dia);
+    RUN_TEST(test_perfil_streak_conquista_usa_maximo);
+    RUN_TEST(test_perfil_monge_sete_dias_seguidos);
+    RUN_TEST(test_perfil_madrugador_5_dias_antes_das_7h);
+    RUN_TEST(test_perfil_dia_perfeito_exige_todas_perfeitas_e_2h);
+    RUN_TEST(test_perfil_proxima_conquista_e_contagem);
     return UNITY_END();
 }

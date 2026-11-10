@@ -20,6 +20,10 @@ namespace screens {
     void desenharAneisMini(ui::Context& ui, Arduino_GFX& g, int cx, int cy, int raio, double voce, double inimigo,
                            bool bonus = false);
 
+    // Anel de XP estilo Apple (laranja -> ambar) para Home/Perfil. raio = linha central; frac 0..1 (>1 = 2a volta).
+    void desenharAnelXp(ui::Context& ui, Arduino_GFX& g, int cx, int cy, int raio, int larg, double frac,
+                        ui::themes::ColorRole fundo);
+
     // Resumo para o launcher (Home). So leitura.
     struct ResumoTempo {
         enum class Estado : uint8_t { Livre, Batalha, Reflexao } estado = Estado::Livre;
@@ -34,6 +38,10 @@ namespace screens {
         bool temProjetos = false;
         bool livre = true;               // foco escolhido = Foco livre
         int planejadoMin = 25;
+        int nivel = 1;                   // nivel de XP (Perfil)
+        double xpFrac = 0.0;             // progresso dentro do nivel (0..1)
+        int streak = 0;
+        int focoHojeMin = 0;             // foco pago hoje
         uint32_t assinatura = 0;         // muda quando o resumo muda
     };
 
@@ -122,6 +130,8 @@ namespace screens {
         int ultimoBipeFocoMin_ = 0;          // ultimo multiplo de 10 min de foco ja avisado
         bool avisoFimDado_ = false;
         bool arrastando_ = false;            // dedo no anel do preparo
+        bool puxando_ = false;               // dedo no puxador da categoria
+        int puxadorX_ = 0;
         uint64_t descansoInicioMs_ = 0;
         bool descansoVolta_ = false;         // pausa veio do overtime: volta para a batalha (pausada)
 

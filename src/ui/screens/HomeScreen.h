@@ -8,8 +8,8 @@
 
 namespace screens {
 
-    // Launcher "B · Agora + apps": barra de status, cartao AGORA (batalha do Tempo / proximo projeto) e grade de
-    // 6 apps. Textos em pt-BR direto no codigo (fora do pacote de idiomas).
+    // Launcher "B2": barra de status (hora, data, Wi-Fi e bateria desenhados), cartao AGORA (batalha do Tempo /
+    // proximo projeto) e 2 x 2 blocos grandes (Tempo, Leitor, Perfil, Ajustes). Textos em pt-BR direto no codigo (fora do pacote de idiomas).
     struct HomeInfo {
         bool wifi = false;
         bool bateriaPresente = false;
@@ -23,13 +23,9 @@ namespace screens {
     class HomeScreen {
     public:
         // Desenha so o que mudou. Leitor -> menu do leitor (Screen::Read); Ajustes -> Screen::Settings;
-        // Tempo -> Inicio; apps "em breve" mostram um aviso de 2 s e nao navegam.
+        // Tempo -> Inicio; Perfil -> Screen::Perfil.
         Action draw(ui::Context& ui, uint32_t nowMs, Screen& screen, TempoScreen& tempo, fs::FS* filesystem,
                     const HomeInfo& info);
-
-    private:
-        uint32_t breveAteMs_ = 0;
-        int breveApp_ = -1;
     };
 
 } // namespace screens

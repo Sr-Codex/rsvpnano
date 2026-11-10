@@ -121,6 +121,14 @@ namespace tempo {
         return std::string{kPastaLog} + "/" + textoData(data) + ".jsonl";
     }
 
+    bool lerLinhaLog(std::string_view linha, EventoLog& saida) {
+        if (linha.empty() || linha.size() > 4096) return false;
+        EventoLog lido;
+        if (glz::read<kLeitura>(lido, linha)) return false;
+        saida = std::move(lido);
+        return true;
+    }
+
     std::string linhaLog(const EventoLog& evento) {
         std::string saida;
         if (glz::write_json(evento, saida)) return {};

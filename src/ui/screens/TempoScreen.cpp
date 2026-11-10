@@ -146,6 +146,7 @@ namespace screens {
         constexpr Cor kAgua{60, 200, 170}, kAgua2{150, 235, 215};       // pausa
         constexpr Cor kVerde{25, 158, 112};
         constexpr Cor kPreto{0, 0, 0};
+        constexpr Cor kCorCat[tempo::kNumChips] = {{255, 140, 60}, {150, 120, 235}, {60, 190, 170}, {90, 200, 255}, {255, 196, 80}};
         constexpr int kCx = 86, kCy = 86;      // centro dos aneis
         constexpr int kRaioFora = 70, kRaioDentro = 48, kEspessura = 18;
         constexpr int kAutoSalvarSeg = 60;
@@ -265,6 +266,11 @@ namespace screens {
         anel(g, 0, 0, cx, cy, int(raio * 0.62), larg, inimigo, kCarmim, kVinho, fundo, kCarmim);
     }
 
+    void desenharAnelXp(ui::Context& ui, Arduino_GFX& g, int cx, int cy, int raio, int larg, double frac,
+                        ui::themes::ColorRole fundo) {
+        anel(g, 0, 0, cx, cy, raio, larg, frac, kLaranja, kAmbar, deRole(ui, fundo), kLaranja);
+    }
+
     // ====================================================================== launcher
     ResumoTempo TempoScreen::resumo(fs::FS* filesystem, uint32_t nowMs) {
         if (!carregado_) carregar(filesystem, true, nowMs);
@@ -275,6 +281,13 @@ namespace screens {
         r.temProjetos = !titulos_.empty();
         r.planejadoMin = planejadoMin_;
         r.livre = escolha_ < 0;
+        r.nivel = tempo::nivelDeXp(estado_.xpTotal);
+        {
+            const double base = double(tempo::xpAcumulado(r.nivel));
+            r.xpFrac = std::clamp((estado_.xpTotal - base) / std::max(1.0, double(tempo::xpProximo(r.nivel))), 0.0, 1.0);
+        }
+        r.streak = estado_.streak;
+        r.focoHojeMin = estado_.dia.fochoPagoMin;
         if (fase_ == Fase::Reflexao) {
             r.estado = ResumoTempo::Estado::Reflexao;
         } else if (battleActive()) {
@@ -296,7 +309,9 @@ namespace screens {
         }
         r.assinatura = ui::Context::signature(r.projeto + "|" + r.centro + "|" + r.saldo,
                                               uint32_t(r.estado) * 1000003U + r.pausada * 7U + r.descanso * 11U + r.bonus * 13U
-                                                  + uint32_t(r.vocePct) * 131U + uint32_t(r.inimigoPct) * 17U + r.temProjetos);
+                                                  + uint32_t(r.vocePct) * 131U + uint32_t(r.inimigoPct) * 17U + r.temProjetos
+                                                  + uint32_t(r.nivel) * 977U + uint32_t(r.xpFrac * 100) * 31U + uint32_t(r.streak) * 53U
+                                                  + uint32_t(r.focoHojeMin) * 7U);
         return r;
     }
 
@@ -548,6 +563,7 @@ namespace screens {
         evento.overtimeMin = liquidacao.minutosOvertime;
         evento.cr = liquidacao.cr;
         evento.xp = liquidacao.xp;
+        evento.perfeita = liquidacao.perfeita;
         dataPendente_ = agora.valida ? agora.data : tempo::Data{};
 
         humor_ = distraiu_ = -1;
@@ -572,7 +588,10 @@ namespace screens {
         eventoPendente_.humor = humor_ >= 0 ? humor_ + 1 : 0;
         eventoPendente_.distraiu = distraiu_ >= 0 ? distraiu_ + 1 : 0;
         if (filesystem == nullptr) filesystem = fs_;
-        if (filesystem != nullptr) TempoStorage::appendLog(*filesystem, dataPendente_, eventoPendente_);
+        if (filesystem != nullptr) {
+            TempoStorage::appendLog(*filesystem, dataPendente_, eventoPendente_);
+            TempoStorage::recordBattle(*filesystem, eventoPendente_, estado_.streak);   // resumo.json do Perfil
+        }
         fase_ = Fase::Nenhuma;
     }
 
@@ -732,36 +751,69 @@ namespace screens {
             if (ui.tap(caixa, !emBatalha)) { seletor_ = true; primeiro_ = 0; return Action::None; }
         }
 
-        // ---- chips de categoria (1 toque seleciona)
+        // ---- categoria arrastavel: trilho com 5 paradas + puxador ("garra") que encaixa na parada mais proxima
         {
-            static constexpr Cor kCorChip[tempo::kNumChips] = {{255, 140, 60}, {150, 120, 235}, {60, 190, 170}, {90, 200, 255}, {255, 196, 80}};
-            int x = 182;
-            for (int i = 0; i < int(tempo::kNumChips); ++i) {
-                const char* nome = tempo::nomeCategoria(tempo::categoriaDoChip(i));
-                int letras = 0;
-                for (const char* c = nome; *c; ++c) letras += (static_cast<unsigned char>(*c) & 0xC0) != 0x80;
-                const int w = int(letras * 6.3) + 8;   // largura estimada da fonte (tamanho 9)
-                const bool sel = categoria_ == tempo::categoriaDoChip(i);
-                if (botao(ui, {int16_t(x), 66, int16_t(w), 20}, nome, sel ? c565(kCorChip[i]) : cPainel, sel ? cBg : cMudo, 9, !emBatalha))
-                    categoria_ = tempo::categoriaDoChip(i);
-                x += w + 3;
+            constexpr int kTx0 = 198, kTx1 = 454, kTy = 88, kRaioPux = 13;
+            const int n = int(tempo::kNumChips);
+            const Rect areaTrilho{182, 70, 288, 36};
+            const auto xParada = [&](int i) { return kTx0 + (kTx1 - kTx0) * i / (n - 1); };
+            const auto paradaMaisPerto = [&](int x) {
+                int melhor = 0;
+                for (int i = 1; i < n; ++i)
+                    if (std::abs(x - xParada(i)) < std::abs(x - xParada(melhor))) melhor = i;
+                return melhor;
+            };
+            if (!emBatalha) {
+                if (const auto* t = ui.touch()) {
+                    if (hasTouch(*t, ui::TouchStart)) {
+                        puxando_ = t->x >= areaTrilho.x && t->x < areaTrilho.x + areaTrilho.w && t->y >= areaTrilho.y
+                                   && t->y < areaTrilho.y + areaTrilho.h;
+                    }
+                    if (puxando_ && (hasTouch(*t, ui::TouchStart) || hasTouch(*t, ui::TouchMove) || hasTouch(*t, ui::TouchRelease))) {
+                        puxadorX_ = std::clamp(int(t->x), kTx0, kTx1);
+                        categoria_ = tempo::categoriaDoChip(paradaMaisPerto(puxadorX_));
+                    }
+                    if (hasTouch(*t, ui::TouchRelease) || hasTouch(*t, ui::TouchCancel)) puxando_ = false;   // encaixa
+                }
+            } else {
+                puxando_ = false;
             }
-        }
+            const int sel = tempo::chipDaCategoria(categoria_);
+            const int hx = puxando_ ? puxadorX_ : xParada(sel);
+            const Cor corSel = kCorCat[sel];
+            const char* nomeSel = tempo::nomeCategoria(categoria_);
 
-        // ---- dica + interruptor do ciclo pomodoro
-        {
-            const Rect area{182, 92, 288, 28};
-            Bloco bloco(ui, area, Background, 0, 43);
-            bloco.textoCor({182, 92, 258, 28},
-                           ciclo ? "ciclo 4×: 25 foco · 5 pausa · 15 longa" : "anel: 5–60 min  ·  ciclo pomodoro 4×", 9, cMudo);
-            bloco.marca(ciclo);
-            const uint16_t cTrilho = rgb565(50, 52, 50), cBotao = ui.color(Foreground);
-            bloco.desenhar([&](Arduino_GFX& g, int dx, int dy) {
-                const int x = 446 + dx, y = 100 + dy;
-                g.fillRoundRect(x, y - 1, 22, 12, 6, ciclo ? cLaranja : cTrilho);
-                g.fillCircle(x + (ciclo ? 16 : 6), y + 5, 4, cBotao);
+            Bloco cab(ui, {182, 50, 288, 20}, Background, 0, 45);
+            cab.textoCor({182, 52, 70, 16}, "CATEGORIA", 10, cMudo);
+            cab.textoCor({250, 49, 120, 22}, nomeSel, 16, c565(corSel));
+            cab.textoCor({372, 52, 66, 16}, "ciclo 4×", 10, ciclo ? cLaranja : cMudo, TextAlign::Right);
+            cab.marca(uint32_t(sel) * 4U + ciclo * 2U);
+            cab.desenhar([&](Arduino_GFX& g, int dx, int dy) {
+                const int x = 444 + dx, y = 51 + dy;
+                g.fillRoundRect(x, y, 22, 12, 6, ciclo ? cLaranja : rgb565(50, 52, 50));
+                g.fillCircle(x + (ciclo ? 16 : 6), y + 6, 4, cTexto);
             });
-            if (ui.tap({330, 92, 140, 28}, !emBatalha)) pomodoro_ = !pomodoro_;
+            if (ui.tap({372, 48, 98, 22}, !emBatalha)) pomodoro_ = !pomodoro_;
+
+            Bloco trilho(ui, areaTrilho, Background, 0, 46);
+            trilho.marca(uint32_t(sel) * 1024U + uint32_t(hx) * 2U + puxando_ + (emBatalha ? 8192U : 0U));
+            const uint16_t cLinha = rgb565(50, 52, 50);
+            trilho.desenhar([&](Arduino_GFX& g, int dx, int dy) {
+                const int y = kTy + dy;
+                g.fillRoundRect(kTx0 + dx, y - 3, kTx1 - kTx0, 6, 3, cLinha);
+                g.fillRoundRect(kTx0 + dx, y - 3, std::max(6, hx - kTx0), 6, 3, c565(corSel));
+                for (int i = 0; i < n; ++i)
+                    g.fillCircle(xParada(i) + dx, y, 4, xParada(i) <= hx ? c565(kCorCat[i]) : cMudo);
+                const int r = puxando_ ? kRaioPux + 2 : kRaioPux;
+                g.fillCircle(hx + dx, y, r + 2, cBg);
+                g.fillCircle(hx + dx, y, r, c565(corSel));
+                for (int k = -4; k <= 4; k += 4) g.fillRect(hx + dx + k - 1, y - 6, 2, 13, cBg);   // "garras"
+            });
+
+            Bloco dica(ui, {182, 106, 288, 16}, Background, 0, 43);
+            dica.textoCor({182, 106, 288, 16}, ciclo ? "ciclo 4×: 25 foco · 5 pausa · 15 longa" : "anel: 5–60 min · arraste o puxador", 10, cMudo);
+            dica.marca(ciclo);
+            dica.desenhar();
         }
 
         // ---- botoes

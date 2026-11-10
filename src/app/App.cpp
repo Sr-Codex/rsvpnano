@@ -560,6 +560,10 @@ void App::renderScreen(uint32_t nowMs) {
                                   storage_.mounted() ? &Board::Storage::filesystem() : nullptr, info);
         break;
     }
+    case screens::Screen::Perfil:
+        immediateUi_.beginFrame(static_cast<uint8_t>(screen_), perfilScreen_.surface());
+        action = perfilScreen_.draw(immediateUi_, nowMs, screen_, storage_.mounted() ? &Board::Storage::filesystem() : nullptr);
+        break;
     case screens::Screen::TempoHoje:
     case screens::Screen::TempoBatalha:
     case screens::Screen::TempoVitoria:
@@ -772,6 +776,12 @@ void App::handleInput(Input::ActionMask actions, uint32_t nowMs) {
         else if(Input::hasAction(actions,Input::ActionSelect)||Input::hasAction(actions,Input::ActionPlayPause)){
             onboardingScreen_.hardwarePlay(nowMs);renderScreen(nowMs);
         }
+        return;
+    }
+    if (screen_ == screens::Screen::Perfil
+        && (Input::hasAction(actions, Input::ActionOpenMenu) || Input::hasAction(actions, Input::ActionBack))) {
+        perfilScreen_.back(screen_);   // PWR no Perfil volta ao launcher
+        renderScreen(nowMs);
         return;
     }
     if (screens::TempoScreen::owns(screen_)) {

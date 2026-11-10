@@ -61,7 +61,7 @@ acelerômetro, dados em `0x35…0x3A`, ±4 g). É o que `focus::OrientationReade
 ```
 
 Verbos (`@ms` = tempo desde o início): `tap X,Y` · `hold X,Y MS` · `drag X1,Y1 X2,Y2 MS` ·
-`press boot|power` · `long boot|power MS` · `pose up|down|a|b` · `shake` · `turn` · `shot ARQ.png` ·
+`down X,Y` / `move X,Y` / `up` (dedo apoiado, para capturar no meio de um arrasto) · `press boot|power` · `long boot|power MS` · `pose up|down|a|b` · `shake` · `turn` · `shot ARQ.png` ·
 `imucheck` (autoteste: o `OrientationReader` real classifica cada pose) · `quit`.
 Coordenadas = as da janela (640×172 deitada). Log de depuração: `LUME_SIM_DEBUG=1`.
 

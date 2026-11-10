@@ -77,6 +77,7 @@ namespace screens {
         TempoBatalha,
         TempoVitoria,
         Home,   // launcher "Agora + apps" (menu inicial)
+        Perfil,   // app Perfil (5 paginas: Ficha, Semana, Projetos, Conquistas, Hoje)
     };
 
     enum class Action : uint8_t {

@@ -33,6 +33,7 @@
 #include "ui/screens/StandbyScreen.h"
 #include "ui/screens/TempoScreen.h"
 #include "ui/screens/HomeScreen.h"
+#include "ui/screens/PerfilScreen.h"
 #include "update/OtaUpdater.h"
 #include "usb/UsbMassStorageManager.h"
 
@@ -130,6 +131,7 @@ private:
     std::atomic<bool> dictionaryCancel_{false};
     bool dictionaryWifiReturn_ = false;
     screens::HomeScreen homeScreen_;
+    screens::PerfilScreen perfilScreen_;
     screens::Screen lastRenderedScreen_ = screens::Screen::Home;
     bool settingsFromHome_ = false;
     OtaUpdater::Offer otaOffer_;
