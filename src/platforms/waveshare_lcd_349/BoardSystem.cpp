@@ -1,5 +1,6 @@
 #include "board/BoardSystem.h"
 #include <esp_log.h>
+#include "board/BoardClock.h"
 #include "board/BoardPower.h"
 #include "logging/Logger.h"
 
@@ -47,6 +48,7 @@ namespace Board {
                       WaveshareLcd349::System::kSystemI2cClockHz, WaveshareLcd349::System::kSystemI2cTimeoutMs);
 
             Board::Power::begin();
+            Board::Clock::begin();  // fuso America/Sao_Paulo + hora do RTC PCF85063
         }
 
         EspLightSleep::WakeReason lightSleep(uint32_t timeoutMs) {

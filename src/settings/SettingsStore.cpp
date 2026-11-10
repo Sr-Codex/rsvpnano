@@ -100,6 +100,8 @@ namespace settings {
 
         void sanitize(DeviceSecrets& value) {
             wifi::sanitize(value);
+            truncate(value.ticktickToken, 512);
+            truncate(value.ticktickTag, 64);
         }
 
     } // namespace

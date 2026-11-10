@@ -496,6 +496,10 @@ void CompanionSerial::dispatchRequest(companion::BufferedRequest& buffered) {
         sendValue(api_.getFeeds(request));
         return;
     }
+    if (method == "GET" && path == "/api/v2/tempo/ticktick") {
+        sendValue(api_.getTickTick(request));
+        return;
+    }
     if (method == "GET" && path == "/api/v2/focus-timers") {
         sendValue(api_.getFocusTimers(request));
         return;
@@ -563,6 +567,10 @@ void CompanionSerial::dispatchRequest(companion::BufferedRequest& buffered) {
         sendEmpty(api_.putFeeds(request));
     else if (method == "PUT" && path == "/api/v2/focus-timers")
         sendEmpty(api_.putFocusTimers(request));
+    else if (method == "PUT" && path == "/api/v2/tempo/ticktick")
+        sendEmpty(api_.putTickTick(request));
+    else if (method == "PUT" && path == "/api/v2/tempo/projetos")
+        sendEmpty(api_.putTempoProjects(request));
     else
         failed(api::httpError(HTTP_CODE_NOT_FOUND, "not_found", "API endpoint not found"));
 }

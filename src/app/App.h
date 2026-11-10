@@ -56,6 +56,7 @@ private:
         BookSettings,
         DictionaryInstall,
         Covers,
+        TickTick,
     };
 
     struct JobUpdate {
@@ -74,6 +75,7 @@ private:
     void handleInput(Input::ActionMask actions, uint32_t nowMs);
     void handleTouch(uint32_t nowMs);
     void runRss();
+    void updateTickTickSync(uint32_t nowMs);
     void runBookOpen(size_t index, uint32_t nowMs);
     bool requestTypographyRefresh();
     void updateBackgroundJob();
@@ -156,4 +158,8 @@ private:
     std::atomic<bool> onboardingStorageCancel_{false};
     uint32_t onboardingJobRequest_=0,onboardingJobStartedMs_=0;
     bool onboardingJobWasMounted_=false,onboardingStorageNeedsRecovery_=false,onboardingReloadUiPending_=false;
+    // Sincronizacao TickTick -> /tempo/projetos.json (segundo plano; ver updateTickTickSync)
+    bool tickTickWasLauncher_ = false;
+    bool tickTickTried_ = false;
+    uint32_t tickTickLastMs_ = 0;
 };

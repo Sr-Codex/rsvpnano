@@ -54,6 +54,8 @@ namespace screens {
         Action draw(ui::Context& ui, uint32_t nowMs, Screen& screen, fs::FS* filesystem);
         void boot(uint32_t nowMs, Screen& screen, fs::FS* filesystem);   // BOOT curto
         void back(uint32_t nowMs, Screen& screen, fs::FS* filesystem);   // PWR curto
+        // Recarrega so a lista de projetos do SD (apos a sync do TickTick). Ignorado durante preparo/batalha/reflexao.
+        void recarregarProjetos(fs::FS* filesystem);
         bool battleActive() const { return fase_ == Fase::Lutando || fase_ == Fase::Pausada || fase_ == Fase::Descanso; }
         uint8_t surface() const {
             return static_cast<uint8_t>(static_cast<uint8_t>(fase_) * 4 + (distraido_ ? 1 : 0) + (overtime_ ? 2 : 0)

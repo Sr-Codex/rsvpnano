@@ -10,7 +10,18 @@ namespace TempoStorage {
 
     bool loadProjects(fs::FS& filesystem, tempo::ListaProjetos& out) {
         auto text = StorageFiles::readTextFile(filesystem, tempo::kCaminhoProjetos, tempo::kMaxBytesProjetos);
-        return text && tempo::lerProjetos(*text, out);
+        if (text && tempo::lerProjetos(*text, out)) return true;
+        // gravacao interrompida entre os renames: o .bak guarda a ultima versao boa
+        auto backup = StorageFiles::readTextFile(filesystem, "/tempo/projetos.json.bak", tempo::kMaxBytesProjetos);
+        return backup && tempo::lerProjetos(*backup, out);
+    }
+
+    bool saveProjects(fs::FS& filesystem, std::string_view json) {
+        tempo::ListaProjetos check;
+        if (!tempo::lerProjetos(json, check) || !ensureFolders()) return false;
+        return StorageFiles::writeFileAtomic(filesystem, tempo::kCaminhoProjetos, "/tempo/projetos.json.tmp",
+                                             "/tempo/projetos.json.bak", json)
+            .has_value();
     }
 
     bool loadState(fs::FS& filesystem, tempo::Estado& out) {

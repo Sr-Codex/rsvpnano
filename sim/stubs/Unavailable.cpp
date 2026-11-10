@@ -13,6 +13,7 @@
 #include "dictionary/DictionaryInstaller.h"
 #include "feeds/RssFeeds.h"
 #include "logging/Logger.h"
+#include "network/TickTickSync.h"
 #include "network/VerifiedDownload.h"
 #include "network/WifiConnection.h"
 #include "settings/NvsSecurity.h"
@@ -62,6 +63,14 @@ bool UsbMassStorageManager::active() const { return false; }
 bool UsbMassStorageManager::ejected() const { return false; }
 uint64_t UsbMassStorageManager::cardSizeBytes() const { return 0; }
 const char* UsbMassStorageManager::statusMessage() const { return statusMessage_; }
+
+// ------------------------------------------------------------------ TickTick (Wi-Fi HTTPS)
+namespace net::ticktick {
+    Status status() { return {.lastSync = {}, .error = kUnavailable}; }
+    std::expected<size_t, std::string> sync(const settings::NetworkSettings&, const settings::DeviceSecrets&, fs::FS&) {
+        return std::unexpected(std::string{kUnavailable});
+    }
+} // namespace net::ticktick
 
 // ------------------------------------------------------------------ OTA
 std::string_view OtaUpdater::currentVersion() { return kFirmwareVersion; }
