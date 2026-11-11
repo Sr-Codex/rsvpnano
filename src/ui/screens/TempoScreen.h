@@ -28,6 +28,11 @@ namespace screens {
     void desenharAneisMini(ui::Context& ui, Arduino_GFX& g, int cx, int cy, int raio, double voce, double inimigo,
                            bool bonus = false);
 
+    // Anel estilo Apple generico (Habitos v2): arco em degrade cor0 -> cor1 sobre trilho (22 % de cor0 sobre `fundo`), comeca
+    // no topo, sentido horario, pontas redondas; frac > 1 = 2a volta. Cores em RGB565; `fundo` = cor opaca sob o anel.
+    void desenharAnelApple(Arduino_GFX& g, int cx, int cy, int raio, int larg, double frac, uint16_t cor0, uint16_t cor1,
+                           uint16_t fundo);
+
     // Anel de XP estilo Apple (laranja -> ambar) para Home/Perfil. raio = linha central; frac 0..1 (>1 = 2a volta).
     void desenharAnelXp(ui::Context& ui, Arduino_GFX& g, int cx, int cy, int raio, int larg, double frac,
                         ui::themes::ColorRole fundo);
@@ -107,9 +112,19 @@ namespace screens {
         void forcarAvisoInicial(int minutoAlvo) { if (carregado_) lembretes_.forcarAvisoInicial(estado_, minutoAlvo); }
         // "Feito agora" na ocorrencia `indice` de estado().dia.ocorrencias: paga, grava o log e enfileira o check-in
         // (enviado ao TickTick na proxima sync com Wi-Fi). Devolve false se ja estava feita ou sem SD.
-        bool marcarHabito(uint32_t nowMs, fs::FS* filesystem, size_t indice);
-        // true uma vez depois de um check-in novo entrar na fila (o App dispara a sync do TickTick).
-        bool pegarCheckinNovo() { const bool v = checkinNovo_; checkinNovo_ = false; return v; }
+        // `resultado` (opcional) recebe cr/XP/status para a celebracao. Guarda o instante para o "Desfazer" (8 s).
+        bool marcarHabito(uint32_t nowMs, fs::FS* filesystem, size_t indice, tempo::ResultadoOcorrencia* resultado = nullptr);
+        // "Desfazer" do ultimo Feito/Pular (Habitos v2): reverte cr/XP/coracoes/eventos do dia, tira o check-in da fila (se ja foi
+        // enviado enfileira o valor menor; ver tempo::DestinoDesfazer), anula o evento no log e salva. false = nao da mais.
+        bool desfazerHabito(uint32_t nowMs, fs::FS* filesystem);
+        bool podeDesfazerHabito() const { return carregado_ && tempo::podeDesfazerHabito(estado_, desfazer_); }
+        // true uma vez depois de um check-in novo entrar na fila (o App dispara a sync do TickTick). Depois de um "Feito" da
+        // tela, so liberado quando a janela do "Desfazer" fecha (nao envia um check-in que o usuario ainda pode desfazer).
+        bool pegarCheckinNovo(uint32_t nowMs) {
+            if (!checkinNovo_ || static_cast<int32_t>(nowMs - checkinLiberaEmMs_) < 0) return false;
+            checkinNovo_ = false;
+            return true;
+        }
         // "Pular": sem cr/XP, nao entra na fila, nao conta como esquecido (tempo::pularOcorrencia). Devolve false se ja resolvida/sem SD.
         bool pularHabito(uint32_t nowMs, fs::FS* filesystem, size_t indice);
         // "Ainda nao" (medicacao): o lembrete volta em 15 min (nao grava nada: so a agenda de lembretes em RAM).
@@ -165,6 +180,8 @@ namespace screens {
         Action drawVitoria(ui::Context& ui, uint32_t nowMs, Screen& screen);
 
         bool checkinNovo_ = false;
+        uint32_t checkinLiberaEmMs_ = 0;
+        tempo::InstanteHabito desfazer_;     // ultimo Feito/Pular (Habitos v2)
         bool carregado_ = false;
         uint32_t ultimoDesenhoMs_ = 0;
         fs::FS* fs_ = nullptr;

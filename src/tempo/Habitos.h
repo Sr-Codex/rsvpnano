@@ -44,6 +44,8 @@ namespace tempo {
         std::vector<std::string> reminders;   // "HH:MM" locais
         double goal = 1.0;
         int targetStartDate = 0;              // AAAAMMDD (ancora de INTERVAL > 1); 0 = desconhecida
+        std::string iconRes;                  // icone do TickTick ("habit_reading", "txt_<emoji>"); so visual; "" = sem (JSON antigo)
+        std::string color;                    // "#RRGGBB" do TickTick ("" quando o icone e emoji); so visual
     };
 
     struct ListaHabitos {
@@ -115,6 +117,8 @@ namespace tempo {
         bool confirmar2Toques = false;
         double cr = 0.0;         // valor "no horario" do tipo
         double xp = 0.0;
+        uint8_t icone = 9;       // tempo::IconeHabito (HabitosVista.h; 9 = Generico) — so visual
+        int32_t cor = -1;        // 0xRRGGBB ja com contraste garantido; -1 = sem cor do TickTick
     };
 
     FaseOcorrencia faseDaOcorrencia(const OcorrenciaDia& oc, int minutoAgora);
@@ -197,6 +201,21 @@ namespace tempo {
     // Batalha de Meditacao vencida: marca a proxima ocorrencia pendente do habito de Meditacao como feita NO HORARIO
     // (independente da hora atual), 1 por sessao, e enfileira.
     ResultadoOcorrencia marcarMeditacaoPorTimer(Estado& e, std::vector<ItemFila>& fila);
+
+    // ------------------------------------------------------------------ desfazer (Habitos v2)
+    enum class DestinoDesfazer : uint8_t {
+        RemovidoDaFila,       // o check-in ainda nao tinha sido enviado e nao sobrou nenhuma ocorrencia feita: sai da fila
+        SubstituidoNaFila,    // ainda nao enviado: o item da fila passa a ter o novo valor (menor)
+        CorrecaoEnfileirada,  // JA enviado: enfileira o valor menor (a API "cria ou atualiza" por habito+dia). O caso valor 0
+                              // NAO foi verificado na API (nao ha DELETE documentado): se o TickTick mantiver o check-in, a
+                              // proxima sync o reaplica como feito (aplicarCheckinsRemotos).
+    };
+    // `novo` = itemFilaDoHabito(estado DEPOIS do desfazer). Diferente de `enfileirar`, aceita valor MENOR.
+    DestinoDesfazer desfazerNaFila(std::vector<ItemFila>& fila, ItemFila novo);
+    // Evento de log "habito" com resultado "desfeito" (o log e so de anexar; o Perfil usa removerDesfeitos).
+    EventoLog eventoHabitoDesfeito(const Estado& e, size_t indice);
+    // Remove do vetor os eventos "habito/desfeito" e o ultimo evento "habito" anterior do mesmo habito+horario que eles anulam.
+    void removerDesfeitos(std::vector<EventoLog>& eventos);
 
     // Evento de log (tipo "habito") para o recibo/Perfil. origem: "" (placa), "ticktick" (celular), "timer".
     EventoLog eventoHabito(const Estado& e, const ResultadoOcorrencia& r, std::string_view origem);

@@ -165,6 +165,7 @@ namespace screens {
                 std::vector<tempo::EventoLog> eventos;
                 const auto dia = tempo::dataDeSerial(segunda + i);
                 TempoStorage::loadLogDay(*filesystem, dia, eventos);
+                tempo::removerDesfeitos(eventos);   // Habitos v2: "Desfazer" anexa um evento que anula o Feito/Pular anterior
                 for (const auto& e : eventos) tempo::somarSemana(semana_, e, segunda);
                 if (segunda + i == tempo::diaSerial(data_)) hoje_ = std::move(eventos);
             }

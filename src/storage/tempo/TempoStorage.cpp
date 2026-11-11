@@ -161,6 +161,14 @@ namespace TempoStorage {
         return writeQueue(filesystem, queue);
     }
 
+    tempo::DestinoDesfazer undoCheckin(fs::FS& filesystem, const tempo::ItemFila& item, bool& ok) {
+        const std::lock_guard lock{gQueueMutex};
+        auto queue = readQueue(filesystem);
+        const auto destino = tempo::desfazerNaFila(queue, item);
+        ok = writeQueue(filesystem, queue);
+        return destino;
+    }
+
     bool applyQueueResults(fs::FS& filesystem, const std::vector<std::pair<tempo::ItemFila, int>>& results) {
         const std::lock_guard lock{gQueueMutex};
         auto queue = readQueue(filesystem);

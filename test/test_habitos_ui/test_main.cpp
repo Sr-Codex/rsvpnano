@@ -2,6 +2,7 @@
 #include <unity.h>
 
 #include <cmath>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -508,6 +509,390 @@ namespace {
         TEST_PASS();
     }
 
+
+    // ============================================================ Habitos v2: desfazer
+    // Marca como a tela faz: captura antes, marca (motor + fila), fecha a captura.
+    InstanteHabito marcarComCaptura(Estado& e, size_t i, std::vector<ItemFila>& fila, ResultadoOcorrencia* saida = nullptr) {
+        InstanteHabito s = capturarHabito(e, i);
+        const auto r = marcarFeita(e, i, fila);
+        fecharCapturaHabito(s, e);
+        if (saida) *saida = r;
+        return s;
+    }
+
+    void test_desfazer_feito_no_horario_restaura_tudo() {
+        Estado e = estadoCom(rotina(), 12 * 60 + 30);
+        const Estado antes = e;
+        std::vector<ItemFila> fila;
+        ResultadoOcorrencia r;
+        const InstanteHabito s = marcarComCaptura(e, achar(e, "al"), fila, &r);
+        TEST_ASSERT_TRUE(r.registrado);
+        TEST_ASSERT_TRUE(e.saldo > antes.saldo);
+        TEST_ASSERT_TRUE(podeDesfazerHabito(e, s));
+        TEST_ASSERT_TRUE(desfazerOcorrencia(e, s));
+        TEST_ASSERT_EQUAL_FLOAT(antes.saldo, e.saldo);
+        TEST_ASSERT_EQUAL_FLOAT(antes.xpTotal, e.xpTotal);
+        TEST_ASSERT_EQUAL_FLOAT(antes.dia.habitosCr, e.dia.habitosCr);
+        TEST_ASSERT_EQUAL_FLOAT(antes.dia.crGanho, e.dia.crGanho);
+        TEST_ASSERT_EQUAL_FLOAT(antes.dia.xpGanho, e.dia.xpGanho);
+        for (size_t a = 0; a < kNumAtributos; ++a) TEST_ASSERT_EQUAL_FLOAT(antes.pontosAtributo[a], e.pontosAtributo[a]);
+        TEST_ASSERT_EQUAL_UINT((unsigned)antes.dia.eventos.size(), (unsigned)e.dia.eventos.size());
+        const auto& oc = e.dia.ocorrencias[achar(e, "al")];
+        TEST_ASSERT_FALSE(oc.feita);
+        TEST_ASSERT_EQUAL_INT((int)StatusHabito::Pendente, (int)oc.status);
+        TEST_ASSERT_EQUAL_INT(-1, oc.minutoReal);
+        TEST_ASSERT_EQUAL_INT(antes.streak, e.streak);
+        // pendente de novo: volta a ser o cartao automatico
+        TEST_ASSERT_EQUAL_INT((int)achar(e, "al"), (int)montarCartao(e, 12 * 60 + 30, std::nullopt).indice);
+        // nao desfaz duas vezes
+        TEST_ASSERT_FALSE(desfazerOcorrencia(e, s));
+    }
+
+    void test_desfazer_pular_e_medicacao_atrasada_coracoes() {
+        Estado e = estadoCom(rotina(), 8 * 60 + 5);
+        const size_t su = achar(e, "su");
+        InstanteHabito s = capturarHabito(e, su);
+        TEST_ASSERT_TRUE(pularOcorrencia(e, su).registrado);
+        fecharCapturaHabito(s, e);
+        TEST_ASSERT_TRUE(desfazerOcorrencia(e, s));
+        TEST_ASSERT_EQUAL_INT((int)StatusHabito::Pendente, (int)e.dia.ocorrencias[su].status);
+        // medicacao feita muito depois da janela: -coracoes; desfazer devolve
+        Estado m = estadoCom(rotina(), 10 * 60);
+        const int coracoes = m.coracoesMeios;
+        std::vector<ItemFila> fila;
+        ResultadoOcorrencia r;
+        const InstanteHabito sm = marcarComCaptura(m, achar(m, "md", 0), fila, &r);
+        TEST_ASSERT_TRUE(m.coracoesMeios < coracoes);
+        TEST_ASSERT_TRUE(desfazerOcorrencia(m, sm));
+        TEST_ASSERT_EQUAL_INT(coracoes, m.coracoesMeios);
+        TEST_ASSERT_EQUAL_INT(0, m.dia.coracoesDeltaMeios);
+    }
+
+    void test_desfazer_respeita_teto_de_cr_e_recusa_se_algo_mudou() {
+        Estado e = estadoCom(rotina(), 6 * 60 + 30);
+        std::vector<ItemFila> fila;
+        const InstanteHabito s = marcarComCaptura(e, achar(e, "ac"), fila);   // academia 15 cr
+        TEST_ASSERT_EQUAL_FLOAT(15.0, e.dia.habitosCr);
+        // outra marcacao depois (eventos mudaram): a captura antiga nao pode mais desfazer
+        avancarRelogio(e, 8 * 60);
+        marcarFeita(e, achar(e, "su"), fila);
+        TEST_ASSERT_FALSE(podeDesfazerHabito(e, s));
+        TEST_ASSERT_FALSE(desfazerOcorrencia(e, s));
+        TEST_ASSERT_TRUE(e.dia.ocorrencias[achar(e, "ac")].feita);
+        // captura invalida / dia diferente
+        TEST_ASSERT_FALSE(podeDesfazerHabito(e, InstanteHabito{}));
+        Estado f = estadoCom(rotina(), 8 * 60);
+        std::vector<ItemFila> fila2;
+        const InstanteHabito sf = marcarComCaptura(f, achar(f, "su"), fila2);
+        f.dia.data = {2026, 11, 11};
+        TEST_ASSERT_FALSE(podeDesfazerHabito(f, sf));
+        // dia fechado: nao desfaz
+        Estado g = estadoCom(rotina(), 8 * 60);
+        const InstanteHabito sg = marcarComCaptura(g, achar(g, "su"), fila2);
+        g.dia.fechado = true;
+        TEST_ASSERT_FALSE(desfazerOcorrencia(g, sg));
+    }
+
+    void test_desfazer_fila_remove_substitui_ou_enfileira_correcao() {
+        Estado e = estadoCom(rotina(), 8 * 60 + 10);
+        std::vector<ItemFila> fila;
+        // 1a dose da medicacao: valor 1 / meta 2 na fila
+        const InstanteHabito s0 = marcarComCaptura(e, achar(e, "md", 0), fila);
+        TEST_ASSERT_EQUAL_UINT(1, (unsigned)fila.size());
+        // desfazer ainda nao enviado, sobrou 0 feitas: sai da fila
+        TEST_ASSERT_TRUE(desfazerOcorrencia(e, s0));
+        TEST_ASSERT_EQUAL_INT((int)DestinoDesfazer::RemovidoDaFila, (int)desfazerNaFila(fila, itemFilaDoHabito(e, "md")));
+        TEST_ASSERT_TRUE(fila.empty());
+        // 2 doses: desfazer a 2a deixa valor 1 na fila (substitui, aceita valor menor)
+        std::vector<ItemFila> f2;
+        marcarFeita(e, achar(e, "md", 0), f2);
+        avancarRelogio(e, 20 * 60);
+        const InstanteHabito s1 = marcarComCaptura(e, achar(e, "md", 1), f2);
+        TEST_ASSERT_EQUAL_FLOAT(2.0, f2[0].valor);
+        f2[0].tentativas = 3;
+        TEST_ASSERT_TRUE(desfazerOcorrencia(e, s1));
+        TEST_ASSERT_EQUAL_INT((int)DestinoDesfazer::SubstituidoNaFila, (int)desfazerNaFila(f2, itemFilaDoHabito(e, "md")));
+        TEST_ASSERT_EQUAL_UINT(1, (unsigned)f2.size());
+        TEST_ASSERT_EQUAL_FLOAT(1.0, f2[0].valor);
+        TEST_ASSERT_EQUAL_INT(0, f2[0].tentativas);
+        // ja enviado (fila vazia): enfileira a correcao com o valor menor (inclusive 0)
+        std::vector<ItemFila> f3;
+        TEST_ASSERT_EQUAL_INT((int)DestinoDesfazer::CorrecaoEnfileirada, (int)desfazerNaFila(f3, itemFilaDoHabito(e, "md")));
+        TEST_ASSERT_EQUAL_UINT(1, (unsigned)f3.size());
+        TEST_ASSERT_EQUAL_FLOAT(1.0, f3[0].valor);
+    }
+
+    void test_log_desfeito_anula_o_evento_anterior() {
+        Estado e = estadoCom(rotina(), 12 * 60 + 30);
+        std::vector<ItemFila> fila;
+        ResultadoOcorrencia r;
+        marcarComCaptura(e, achar(e, "al"), fila, &r);
+        std::vector<EventoLog> log;
+        log.push_back(eventoHabito(e, r, ""));
+        const EventoLog outro = [&] { EventoLog x; x.tipo = "batalha"; x.projeto = "Livro"; return x; }();
+        log.push_back(outro);
+        log.push_back(eventoHabitoDesfeito(e, r.indice));
+        TEST_ASSERT_EQUAL_STRING("desfeito", log.back().resultado.c_str());
+        removerDesfeitos(log);
+        TEST_ASSERT_EQUAL_UINT(1, (unsigned)log.size());
+        TEST_ASSERT_EQUAL_STRING("batalha", log[0].tipo.c_str());
+        // feito, desfeito, feito de novo: sobra o ultimo
+        std::vector<EventoLog> l2{eventoHabito(e, r, ""), eventoHabitoDesfeito(e, r.indice), eventoHabito(e, r, "")};
+        removerDesfeitos(l2);
+        TEST_ASSERT_EQUAL_UINT(1, (unsigned)l2.size());
+        TEST_ASSERT_EQUAL_STRING("no_horario", l2[0].resultado.c_str());
+    }
+
+    void test_lembrete_ja_avisada_nao_toca_de_novo_na_hora() {
+        Estado e = estadoCom(rotina(), 12 * 60 + 30);
+        AgendaLembretes ag;
+        const size_t al = achar(e, "al");
+        ag.jaAvisada(e, al, 1000);
+        const auto a = ag.avaliar(e, 12 * 60 + 30, 2000, false);
+        TEST_ASSERT_FALSE(a.has_value());   // sem aviso inicial depois do desfazer
+        const auto b = ag.avaliar(e, 12 * 60 + 33, 1000 + kIntervaloReavisoMs + 10, true);   // mas o re-aviso por movimento vale
+        TEST_ASSERT_TRUE(b.has_value());
+        TEST_ASSERT_TRUE(b->repeticao);
+    }
+
+    // ============================================================ Habitos v2: vista
+    void test_icones_por_tipo_e_nome() {
+        const auto I = [](TipoHabito t, const char* n) { return (int)iconeDoHabito(t, n); };
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Haltere, I(TipoHabito::Academia, "Academia"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Frasco, I(TipoHabito::Suplemento, "Suplemento"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Capsula, I(TipoHabito::Medicacao, "Medica\xC3\xA7\xC3\xA3o"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Talher, I(TipoHabito::Almoco, "Almo\xC3\xA7o"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Dente, I(TipoHabito::Dentes, "Escovar dentes"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Xicara, I(TipoHabito::Descanso, "Descanso"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Gota, I(TipoHabito::Banho, "Banho"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Lotus, I(TipoHabito::Meditacao, "Medita\xC3\xA7\xC3\xA3o"));
+        // Geral: pelo nome
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Livro, I(TipoHabito::Geral, "Leitura"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Livro, I(TipoHabito::Geral, "Ler um pouco"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Talher, I(TipoHabito::Geral, "Jantar"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Talher, I(TipoHabito::Geral, "Caf\xC3\xA9 da manh\xC3\xA3"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Generico, I(TipoHabito::Geral, "Regar as plantas"));
+    }
+
+    void test_fracao_da_janela_e_do_dia() {
+        Estado e = estadoCom(rotina(), 12 * 60 + 10);
+        const auto& al = e.dia.ocorrencias[achar(e, "al")];   // 12:30, janela +-45
+        TEST_ASSERT_FLOAT_WITHIN(0.01, 25.0 / 90.0, fracaoJanela(al, 12 * 60 + 10));
+        TEST_ASSERT_FLOAT_WITHIN(0.01, 0.5, fracaoJanela(al, 12 * 60 + 30));
+        TEST_ASSERT_FLOAT_WITHIN(0.01, 1.0, fracaoJanela(al, 13 * 60 + 15));
+        // atrasado: andamento dos 120 min de atraso
+        TEST_ASSERT_FLOAT_WITHIN(0.01, 30.0 / 120.0, fracaoJanela(al, 13 * 60 + 45));
+        TEST_ASSERT_FLOAT_WITHIN(0.001, 1.0, fracaoJanela(al, 23 * 60));
+        TEST_ASSERT_EQUAL_FLOAT(0.0, fracaoJanela(e.dia.ocorrencias[achar(e, "lv")], 12 * 60));   // sem horario
+        OcorrenciaDia feita = al;
+        feita.feita = true;
+        feita.status = StatusHabito::NoHorario;
+        TEST_ASSERT_EQUAL_FLOAT(1.0, fracaoJanela(feita, 0));
+        TotaisDia t;
+        TEST_ASSERT_EQUAL_FLOAT(0.0, fracaoDoDia(t));
+        t.total = 10;
+        t.feitas = 3;
+        TEST_ASSERT_FLOAT_WITHIN(0.001, 0.3, fracaoDoDia(t));
+        t.puladas = 5;
+        TEST_ASSERT_FLOAT_WITHIN(0.001, 0.6, fracaoDoDia(t));
+    }
+
+    void test_grupos_da_linha_do_tempo() {
+        // a rotina do mockup: 06:30 | 08:00 + 08:10 | 12:30 (Almoco) 12:30? aqui so Almoco 12:30 + Dentes 13:00 | 14:00 | 19:00 | 20:00 | 22:30
+        Estado e = estadoCom(rotina(), 12 * 60 + 10);
+        pularOcorrencia(e, achar(e, "ac"));
+        marcarFeita(e, achar(e, "su"), *std::make_unique<std::vector<ItemFila>>());
+        auto vistas = ocorrenciasDoDia(e, 12 * 60 + 10);
+        const auto foco = ocorrenciaAgora(e, 12 * 60 + 10);
+        const auto grupos = agruparLinhaDoTempo(vistas, foco->indice);
+        // 06:30 | 08:00,08:10 | 12:30,13:00 (30 min) | 14:00 | 19:00 | 20:00 | 22:30  (a "sem horario" fica de fora)
+        TEST_ASSERT_EQUAL_UINT(7, (unsigned)grupos.size());
+        TEST_ASSERT_EQUAL_UINT(1, (unsigned)grupos[0].indices.size());
+        TEST_ASSERT_TRUE(grupos[0].todasResolvidas && !grupos[0].todasFeitas);   // pulado
+        TEST_ASSERT_EQUAL_UINT(2, (unsigned)grupos[1].indices.size());
+        TEST_ASSERT_EQUAL_INT(8 * 60, grupos[1].minutoIni);
+        TEST_ASSERT_EQUAL_INT(8 * 60 + 10, grupos[1].minutoFim);
+        TEST_ASSERT_FALSE(grupos[1].todasResolvidas);                            // a medicacao 08:10 segue pendente
+        TEST_ASSERT_EQUAL_UINT((unsigned)achar(e, "md", 0), (unsigned)grupos[1].representante);
+        TEST_ASSERT_EQUAL_UINT(2, (unsigned)grupos[2].indices.size());           // Almoco 12:30 + Dentes 13:00
+        TEST_ASSERT_TRUE(grupos[2].temFoco);
+        TEST_ASSERT_EQUAL_UINT((unsigned)achar(e, "al"), (unsigned)grupos[2].representante);
+        TEST_ASSERT_FALSE(grupos[3].temFoco);
+        size_t total = 0;
+        for (const auto& g : grupos) total += g.indices.size();
+        TEST_ASSERT_EQUAL_UINT(vistas.size() - 1, (unsigned)total);              // todas menos a sem horario
+        // limite: exatamente 30 min agrupa, 31 nao
+        ListaHabitos l = lista({def("a", "Alfa", {"10:00"}), def("b", "Beta", {"10:30"}), def("c", "Gama", {"11:01"})});
+        Estado f = estadoCom(l, 9 * 60);
+        const auto g2 = agruparLinhaDoTempo(ocorrenciasDoDia(f, 9 * 60), std::nullopt);
+        TEST_ASSERT_EQUAL_UINT(2, (unsigned)g2.size());
+        TEST_ASSERT_EQUAL_UINT(2, (unsigned)g2[0].indices.size());
+        // tudo feito no grupo
+        std::vector<ItemFila> fila;
+        avancarRelogio(f, 10 * 60 + 30);
+        marcarFeita(f, 0, fila);
+        marcarFeita(f, 1, fila);
+        const auto g3 = agruparLinhaDoTempo(ocorrenciasDoDia(f, 10 * 60 + 30), std::nullopt);
+        TEST_ASSERT_TRUE(g3[0].todasFeitas && g3[0].todasResolvidas);
+        // atrasado marca o grupo
+        const auto g4 = agruparLinhaDoTempo(ocorrenciasDoDia(f, 14 * 60), std::nullopt);
+        TEST_ASSERT_TRUE(g4[1].atrasado);
+    }
+
+    void test_posicoes_no_eixo_espacamento_e_limite() {
+        const auto y = posicoesNoEixo({100, 110, 300}, 48, 556);
+        TEST_ASSERT_EQUAL_INT(100, y[0]);
+        TEST_ASSERT_EQUAL_INT(148, y[1]);   // empurrado para manter 48 px
+        TEST_ASSERT_EQUAL_INT(300, y[2]);
+        // estourou o limite: o ultimo fica em yMax e os anteriores sobem respeitando o espacamento
+        const auto z = posicoesNoEixo({500, 520, 540, 560}, 48, 556);
+        TEST_ASSERT_EQUAL_INT(556, z[3]);
+        TEST_ASSERT_EQUAL_INT(508, z[2]);
+        TEST_ASSERT_EQUAL_INT(460, z[1]);
+        TEST_ASSERT_EQUAL_INT(412, z[0]);
+        TEST_ASSERT_TRUE(posicoesNoEixo({}, 48, 556).empty());
+    }
+
+    void test_primeiro_habito_de_amanha() {
+        const auto a = primeiroHabitoDeAmanha(rotina(), kTerca);
+        TEST_ASSERT_TRUE(a.has_value());
+        TEST_ASSERT_EQUAL_STRING("Academia", a->nome.c_str());
+        TEST_ASSERT_EQUAL_INT(6 * 60 + 30, a->minuto);
+        TEST_ASSERT_EQUAL_INT((int)TipoHabito::Academia, (int)a->tipo);
+        TEST_ASSERT_FALSE(primeiroHabitoDeAmanha(lista({def("lv", "Ler")}), kTerca).has_value());   // so "qualquer hora"
+        TEST_ASSERT_FALSE(primeiroHabitoDeAmanha(lista({}), kTerca).has_value());
+    }
+
+    void test_animacao_da_celebracao_e_janela_do_desfazer() {
+        const auto zero = animacaoCelebracao(0);
+        TEST_ASSERT_EQUAL_FLOAT(0.0, zero.anel);
+        TEST_ASSERT_EQUAL_FLOAT(0.0, zero.disco);
+        TEST_ASSERT_EQUAL_FLOAT(0.0, zero.faiscas);
+        const auto meio = animacaoCelebracao(300);
+        TEST_ASSERT_TRUE(meio.anel > 0.5 && meio.anel < 1.0);
+        TEST_ASSERT_TRUE(meio.faiscas > 0.0 && meio.faiscas < 1.0);
+        const auto fim = animacaoCelebracao(kAnimacaoCelebracaoMs + 500);
+        TEST_ASSERT_EQUAL_FLOAT(1.0, fim.anel);
+        TEST_ASSERT_EQUAL_FLOAT(1.0, fim.disco);
+        TEST_ASSERT_EQUAL_FLOAT(1.0, fim.faiscas);
+        TEST_ASSERT_TRUE(desfazerDisponivel(10000, 10000));
+        TEST_ASSERT_TRUE(desfazerDisponivel(17999, 10000));
+        TEST_ASSERT_FALSE(desfazerDisponivel(18000, 10000));
+    }
+
+    void test_lista_do_dia_rolagem_em_pixels_e_toque_na_linha() {
+        constexpr int kH = kAlturaLinhaLista, kVis = 140;   // tela deitada: ~2,5 linhas visiveis
+        TEST_ASSERT_EQUAL_INT(0, rolarPx(0, -30, 10, kH, kVis));
+        TEST_ASSERT_EQUAL_INT(30, rolarPx(0, 30, 10, kH, kVis));
+        TEST_ASSERT_EQUAL_INT(10 * kH - kVis, rolarPx(400, 9999, 10, kH, kVis));
+        TEST_ASSERT_EQUAL_INT(0, rolarPx(0, 50, 2, kH, kVis));   // cabe tudo
+        TEST_ASSERT_EQUAL_INT(0, (int)*linhaNoToque(0, 10, 10, kH));
+        TEST_ASSERT_EQUAL_INT(1, (int)*linhaNoToque(0, 60, 10, kH));
+        TEST_ASSERT_EQUAL_INT(3, (int)*linhaNoToque(56, 130, 10, kH));   // (130 + 56) / 56
+        TEST_ASSERT_FALSE(linhaNoToque(0, -1, 10, kH).has_value());
+        TEST_ASSERT_FALSE(linhaNoToque(0, 600, 3, kH).has_value());
+        // foco centralizado e clampado
+        TEST_ASSERT_EQUAL_INT(0, rolagemPxPara(10, 0, kH, kVis));
+        TEST_ASSERT_EQUAL_INT(5 * kH - (kVis - kH) / 2, rolagemPxPara(10, 5, kH, kVis));
+        TEST_ASSERT_EQUAL_INT(10 * kH - kVis, rolagemPxPara(10, 9, kH, kVis));
+        // selecao: tocar numa linha seleciona; tocar na selecionada volta ao automatico (alternarSelecao)
+        std::optional<size_t> sel;
+        sel = alternarSelecao(sel, *linhaNoToque(56, 30, 10, kH));
+        TEST_ASSERT_EQUAL_INT(1, (int)*sel);
+        sel = alternarSelecao(sel, 1);
+        TEST_ASSERT_FALSE(sel.has_value());
+    }
+
+    void test_estado_do_cartao_perdido_sem_feito_e_medicacao_2_toques() {
+        Estado e = estadoCom(rotina(), 23 * 60);
+        // 23:00: o Banho (19:00, janela +-60, atraso +2 h ate 22:00) esta perdido: so ver/pular, sem "Feito"
+        const Cartao banho = montarCartao(e, 23 * 60, achar(e, "ba"));
+        TEST_ASSERT_EQUAL_INT((int)ModoCartao::Perdido, (int)banho.modo);
+        TEST_ASSERT_FALSE(banho.podeFeito);
+        // medicacao perdida ainda aceita "Sim, tomei agora" (2 toques) e nao tem "Pular" como acao normal
+        const Cartao med = montarCartao(e, 23 * 60, achar(e, "md", 1));
+        TEST_ASSERT_TRUE(med.confirmar2Toques && med.podeFeito);
+        // depois de marcar (celebracao na tela), o cartao automatico vai para o proximo pendente
+        Estado f = estadoCom(rotina(), 12 * 60 + 31);
+        for (const char* id : {"ac", "su"}) pularOcorrencia(f, achar(f, id));
+        pularOcorrencia(f, achar(f, "md", 0));
+        std::vector<ItemFila> fila;
+        marcarFeita(f, achar(f, "al"), fila);
+        const Cartao prox = montarCartao(f, 12 * 60 + 31, std::nullopt);
+        TEST_ASSERT_EQUAL_INT((int)achar(f, "de", 0), (int)prox.indice);   // Escovar 13:00
+        TEST_ASSERT_EQUAL_INT((int)ModoCartao::Proximo, (int)prox.modo);
+    }
+
+    void test_icone_do_ticktick_e_cor() {
+        const auto I = [](const char* nome, const char* res, TipoHabito t = TipoHabito::Geral) { return (int)iconeDoHabito(t, nome, res); };
+        // (a) habit_* por palavra
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Livro, I("x", "habit_reading"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Lotus, I("x", "habit_meditating"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Haltere, I("x", "habit_workout"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Gota, I("x", "habit_drink_water"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Frasco, I("x", "habit_vitamins"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Capsula, I("x", "habit_medicine"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Talher, I("x", "habit_eat_breakfast"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Dente, I("x", "habit_brush_teeth"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Xicara, I("x", "habit_coffee"));
+        // habit_* sem mapa (os 4 reais da conta) -> nome/tipo -> Generico
+        for (const char* r : {"habit_stay_positive", "habit_plan", "habit_quit_snacks", "habit_daily_check_in"})
+            TEST_ASSERT_EQUAL_INT((int)IconeHabito::Generico, I("Regar plantas", r));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Dente, I("Escovar dentes", "habit_plan", TipoHabito::Dentes));
+        // (b) emoji
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Xicara, I("x", "txt_\xE2\x98\x95"));     // cafe
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Livro, I("x", "txt_\xF0\x9F\x93\x96"));  // livro
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Capsula, I("x", "txt_\xF0\x9F\x92\x8A"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Generico, I("x", "txt_\xF0\x9F\x9A\xAB"));  // proibido -> generico
+        // iconRes vence o tipo; vazio cai no nome; o tipo/valores nao mudam
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Livro, I("Medica\xC3\xA7\xC3\xA3o", "habit_reading", TipoHabito::Medicacao));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Capsula, I("Medica\xC3\xA7\xC3\xA3o", "", TipoHabito::Medicacao));
+        // (c) palavras do nome
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Livro, I("Estudo de ingles", ""));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Haltere, I("Corrida", ""));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Gota, I("Hidratar", ""));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Talher, I("Caf\xC3\xA9 da manh\xC3\xA3", ""));
+        // cor
+        TEST_ASSERT_EQUAL_INT(-1, corDoHabito(""));
+        TEST_ASSERT_EQUAL_INT(-1, corDoHabito("A0EFED"));
+        TEST_ASSERT_EQUAL_INT(-1, corDoHabito("#GG0000"));
+        TEST_ASSERT_EQUAL_INT(0xA0EFED, corDoHabito("#A0EFED"));   // ja claro: intacta
+        const int32_t escura = corDoHabito("#101030");
+        TEST_ASSERT_TRUE(escura > 0x101030);
+        const double lum = (0.2126 * ((escura >> 16) & 255) + 0.7152 * ((escura >> 8) & 255) + 0.0722 * (escura & 255)) / 255.0;
+        TEST_ASSERT_TRUE(lum >= 0.42);
+        TEST_ASSERT_TRUE(corDoHabito("#000000") > 0);
+    }
+
+    void test_icone_e_cor_preservados_do_json_ao_dia_e_json_antigo() {
+        ListaHabitos l;
+        const char* novo = R"({"fonte":"ticktick","gerado_em":"x","habitos":[{"id":"a","name":"Ler","repeatRule":"RRULE:FREQ=DAILY;INTERVAL=1","reminders":["09:00"],"goal":1,"targetStartDate":20260101,"iconRes":"habit_reading","color":"#A0EFED"}]})";
+        TEST_ASSERT_TRUE(lerHabitos(novo, l));
+        TEST_ASSERT_EQUAL_STRING("habit_reading", l.habitos[0].iconRes.c_str());
+        TEST_ASSERT_EQUAL_STRING("#A0EFED", l.habitos[0].color.c_str());
+        Estado e = estadoCom(l, 9 * 60);
+        TEST_ASSERT_EQUAL_STRING("habit_reading", e.dia.ocorrencias[0].iconRes.c_str());
+        const auto v = ocorrenciasDoDia(e, 9 * 60);
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Livro, (int)v[0].icone);
+        TEST_ASSERT_EQUAL_INT(0xA0EFED, v[0].cor);
+        // muda no TickTick: pendente acompanha
+        l.habitos[0].iconRes = "habit_meditating";
+        reconciliarDia(e, l);
+        TEST_ASSERT_EQUAL_STRING("habit_meditating", e.dia.ocorrencias[0].iconRes.c_str());
+        // JSON antigo (sem os campos) continua valido; estado serializado vai e volta com os campos
+        const char* antigo = R"({"fonte":"ticktick","gerado_em":"x","habitos":[{"id":"a","name":"Ler","repeatRule":"","reminders":["09:00"],"goal":1,"targetStartDate":0}]})";
+        ListaHabitos o;
+        TEST_ASSERT_TRUE(lerHabitos(antigo, o));
+        TEST_ASSERT_EQUAL_STRING("", o.habitos[0].iconRes.c_str());
+        Estado f = estadoCom(o, 9 * 60);
+        TEST_ASSERT_EQUAL_INT(-1, ocorrenciasDoDia(f, 9 * 60)[0].cor);
+        const std::string js = serializarEstado(e);
+        Estado volta;
+        TEST_ASSERT_TRUE(lerEstado(js, volta));
+        TEST_ASSERT_EQUAL_STRING("habit_meditating", volta.dia.ocorrencias[0].iconRes.c_str());
+        TEST_ASSERT_EQUAL_STRING("#A0EFED", volta.dia.ocorrencias[0].color.c_str());
+    }
+
 } // namespace
 
 int main(int, char**) {
@@ -532,5 +917,21 @@ int main(int, char**) {
     RUN_TEST(test_medicacao_insiste_15min_adia_e_para);
     RUN_TEST(test_varias_vencendo_juntas_e_virada_do_dia);
     RUN_TEST(test_adiar_e_resolvida_ignoram_indice_invalido);
+    RUN_TEST(test_desfazer_feito_no_horario_restaura_tudo);
+    RUN_TEST(test_desfazer_pular_e_medicacao_atrasada_coracoes);
+    RUN_TEST(test_desfazer_respeita_teto_de_cr_e_recusa_se_algo_mudou);
+    RUN_TEST(test_desfazer_fila_remove_substitui_ou_enfileira_correcao);
+    RUN_TEST(test_log_desfeito_anula_o_evento_anterior);
+    RUN_TEST(test_lembrete_ja_avisada_nao_toca_de_novo_na_hora);
+    RUN_TEST(test_icones_por_tipo_e_nome);
+    RUN_TEST(test_fracao_da_janela_e_do_dia);
+    RUN_TEST(test_grupos_da_linha_do_tempo);
+    RUN_TEST(test_posicoes_no_eixo_espacamento_e_limite);
+    RUN_TEST(test_primeiro_habito_de_amanha);
+    RUN_TEST(test_animacao_da_celebracao_e_janela_do_desfazer);
+    RUN_TEST(test_lista_do_dia_rolagem_em_pixels_e_toque_na_linha);
+    RUN_TEST(test_estado_do_cartao_perdido_sem_feito_e_medicacao_2_toques);
+    RUN_TEST(test_icone_do_ticktick_e_cor);
+    RUN_TEST(test_icone_e_cor_preservados_do_json_ao_dia_e_json_antigo);
     return UNITY_END();
 }

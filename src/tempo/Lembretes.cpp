@@ -68,6 +68,15 @@ namespace tempo {
         it.adiadoAteMs = agoraMs + adiarMs;
     }
 
+    void AgendaLembretes::jaAvisada(const Estado& e, size_t indice, uint32_t agoraMs) {
+        if (indice >= e.dia.ocorrencias.size()) return;
+        stamp_ = stampDe(e.dia.data);
+        Item& it = garantir(e.dia.ocorrencias[indice]);
+        it.avisos = std::max(it.avisos, 1);
+        it.ultimoMs = agoraMs;
+        it.adiado = false;
+    }
+
     void AgendaLembretes::resolvida(const Estado& e, size_t indice) {
         if (indice >= e.dia.ocorrencias.size()) return;
         const OcorrenciaDia& oc = e.dia.ocorrencias[indice];

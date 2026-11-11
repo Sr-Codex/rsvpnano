@@ -68,6 +68,10 @@ namespace tempo {
         // "Ainda nao" (medicacao): sem aviso ate agoraMs + kAdiarMedicacaoMin; depois avisa de novo.
         void adiar(const Estado& e, size_t indice, uint32_t agoraMs, uint32_t adiarMs = 15U * 60U * 1000U);
 
+        // "Desfazer" devolveu a ocorrencia a pendente: conta como ja avisada agora (nao toca de novo na hora; so o
+        // re-aviso por movimento, com os limites de sempre).
+        void jaAvisada(const Estado& e, size_t indice, uint32_t agoraMs);
+
         // Ocorrencia resolvida (feita/pulada): esquece o estado dela.
         void resolvida(const Estado& e, size_t indice);
 
