@@ -5,6 +5,9 @@
 // RTC PCF85063 (I2C 0x51 no barramento do sistema, Wire1) -> src/board/BoardClock.cpp
 #define RSVP_BOARD_HAS_PCF85063 1
 
+// Deep sleep com despertador (ADR-009) -> src/platforms/waveshare_lcd_349/BoardDeepSleep.cpp (simulador: sim/platform)
+#define RSVP_BOARD_HAS_DEEP_SLEEP 1
+
 namespace Board::Config {
     constexpr int DISPLAY_WRITE_ALIGNMENT = 1;
     constexpr int DISPLAY_BUFFER_ROWS = 0;

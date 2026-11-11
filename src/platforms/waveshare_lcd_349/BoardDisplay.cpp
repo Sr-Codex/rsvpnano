@@ -189,3 +189,14 @@ namespace Board::Display {
     }
 
 } // namespace Board::Display
+
+#include "platforms/waveshare_lcd_349/PanelSleep.h"
+
+namespace WaveshareLcd349::PanelSleep {
+
+    void enter() {
+        Board::Display::sleep();   // backlight PWM + BL_EN
+        gPanel.displayOff();       // SLPIN (o boot seguinte refaz o reset completo do painel)
+    }
+
+} // namespace WaveshareLcd349::PanelSleep

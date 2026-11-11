@@ -45,6 +45,11 @@ namespace tempo {
         gMsBase = ms(nowMs);
     }
 
+    int64_t epochAgora(uint32_t nowMs) {
+        if (!agora(nowMs).valida) return 0;   // ancora se preciso
+        return gEpochBase + static_cast<int64_t>((ms(nowMs) - gMsBase) / 1000);
+    }
+
     Agora agora(uint32_t nowMs) {
         if (!gAncorado) {
             const int64_t epoch = static_cast<int64_t>(std::time(nullptr));

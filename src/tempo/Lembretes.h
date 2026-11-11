@@ -71,6 +71,10 @@ namespace tempo {
         // Ocorrencia resolvida (feita/pulada): esquece o estado dela.
         void resolvida(const Estado& e, size_t indice);
 
+        // Despertar por INSISTENCIA da medicacao (ADR-009): a agenda em RAM se perdeu no deep sleep. Arma as medicacoes
+        // pendentes (na janela/atrasadas) para insistirem ja no proximo avaliar(); `insistenciasFeitas` inclui esta.
+        void semearInsistenciaMedicacao(const Estado& e, int minutoAgora, uint32_t agoraMs, int insistenciasFeitas);
+
         void zerar() { itens_.clear(); stamp_ = 0; }
 
     private:

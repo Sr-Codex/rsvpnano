@@ -32,6 +32,9 @@ namespace tempo {
     // Hora de parede agora. Ancora na 1a chamada com hora de sistema valida e avanca por ms().
     Agora agora(uint32_t nowMs);
 
+    // Epoch (UTC, s) agora pelo relogio do app; 0 se a hora e desconhecida. Na placa = hora do sistema (RTC/NTP).
+    int64_t epochAgora(uint32_t nowMs);
+
     // Reancora o relogio (ex.: quando o RTC/NTP fornecer a hora). epoch invalido => desancora.
     void ancorar(int64_t epoch, uint32_t nowMs);
 

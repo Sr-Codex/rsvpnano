@@ -72,6 +72,9 @@ simulador lê a variável (`sim/main.cpp`); o roteiro `@ms` continua em tempo re
 
 **Relógio de parede do app Tempo:** `LUME_SIM_CLOCK=2026-11-10T14:20 sim/run.sh` ancora a hora do app (Tempo/Hábitos, hora local do Mac)
 nesse instante e ela segue andando (combine com `LUME_SIM_TIME_SCALE`). Serve para capturar os Hábitos em horários específicos; só o simulador lê a variável.
+**Deep sleep com despertador (ADR-009):** sem sono real; `enter()` registra `[sim] deep sleep ate HH:MM` e espera o PWR (boot normal).
+`LUME_SIM_DEEPSLEEP_WAKE=1` religa na hora como se o timer disparasse (boot de lembrete, relógio no instante do despertar);
+`LUME_SIM_BOOT_CAUSE=timer|button` + `LUME_SIM_RTC=...` sobem direto um boot por timer/botão. `LUME_SIM_CLOCK` aceita segundos (`...T19:59:55`).
 
 **Projetos do app Tempo:** `sim/run.sh` copia `$WS/data/tempo/projetos.json` (se existir) para
 `sim/state/sd/tempo/projetos.json` a cada execução (arquivo do Mac, nunca vai para o repositório). Estado e

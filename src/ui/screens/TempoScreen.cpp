@@ -482,6 +482,13 @@ namespace screens {
         return lembretes_.avaliar(estado_, agora.minutoDoDia, nowMs, pegouAgora);
     }
 
+    void TempoScreen::semearInsistenciaMedicacao(uint32_t nowMs, int insistenciasFeitas) {
+        if (!carregado_) return;
+        const auto agora = tempo::agora(nowMs);
+        if (!agora.valida || !(estado_.dia.data == agora.data)) return;
+        lembretes_.semearInsistenciaMedicacao(estado_, agora.minutoDoDia, nowMs, insistenciasFeitas);
+    }
+
     void TempoScreen::salvar(fs::FS* filesystem) {
         if (filesystem != nullptr) TempoStorage::saveState(*filesystem, estado_);
     }

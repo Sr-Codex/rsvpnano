@@ -305,7 +305,7 @@ namespace {
         // Serve para capturar o app Habitos em horarios especificos (a placa real usa o RTC).
         if (const char* clock = std::getenv("LUME_SIM_CLOCK")) {
             std::tm tm{};
-            if (strptime(clock, "%Y-%m-%dT%H:%M", &tm) != nullptr) {
+            if (strptime(clock, "%Y-%m-%dT%H:%M:%S", &tm) != nullptr || strptime(clock, "%Y-%m-%dT%H:%M", &tm) != nullptr) {
                 tm.tm_isdst = -1;
                 const std::time_t epoch = std::mktime(&tm);
                 if (epoch > 0) {

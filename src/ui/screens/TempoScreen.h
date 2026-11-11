@@ -99,6 +99,9 @@ namespace screens {
         // Lembretes (bipe + aviso no topo): devolve o aviso a mostrar agora (o App toca o bipe). `pegouAgora` = pulso do
         // detector de pegada (IMU). Nao pausa leitura nem batalha. Chamar ~1x/s fora do desenho.
         std::optional<tempo::Aviso> lembretesTick(uint32_t nowMs, bool pegouAgora);
+        // Depois de despertar por insistencia de medicacao (ADR-009): arma a agenda de lembretes (so RAM) para insistir ja.
+        void semearInsistenciaMedicacao(uint32_t nowMs, int insistenciasFeitas);
+        const tempo::ListaHabitos& listaHabitos() const { return habitos_; }
         const tempo::Estado& estadoTempo() const { return estado_; }
         bool estadoCarregado() const { return carregado_; }
         bool battleActive() const { return fase_ == Fase::Lutando || fase_ == Fase::Pausada || fase_ == Fase::Descanso; }

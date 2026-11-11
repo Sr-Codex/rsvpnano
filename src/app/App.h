@@ -10,6 +10,7 @@
 #include <string_view>
 
 #include "board/BoardDisplay.h"
+#include "tempo/Despertador.h"
 #include "dictionary/Dictionary.h"
 #include "board/BoardPower.h"
 #include "companion/http/CompanionApi.h"
@@ -99,7 +100,10 @@ private:
     void enterStandby(uint32_t nowMs);
     void exitStandby(uint32_t nowMs);
     void lightSleepFromStandby();
-    void powerOff(uint32_t nowMs);
+    // automatic = desligamento por descanso expirado (pode virar deep sleep com despertador, ADR-009); false = manual.
+    void powerOff(uint32_t nowMs, bool automatic = false);
+    tempo::DecisaoDespertador decidirSono(uint32_t nowMs);
+    void iniciarLembreteBoot(uint32_t nowMs);
     static void renderStorageStatus(void* context, const char* title, const char* line1, const char* line2,
                                     int progressPercent);
     bool backgroundJobActive() const {
@@ -151,6 +155,11 @@ private:
     bool avisoPintar_ = false;
     uint32_t avisoAteMs_ = 0;
     uint32_t avisoPintadoMs_ = 0;
+    // Boot "de lembrete" (despertou do deep sleep pelo timer): sem introducao, direto nos Habitos, 60 s esperando interacao.
+    bool lembreteBoot_ = false;
+    bool lembreteBootIniciado_ = false;
+    uint32_t lembreteBootMs_ = 0;
+    uint32_t lembreteAtividade0_ = 0;
     bool tickHabitos(uint32_t nowMs);                 // IMU + manutencao + lembretes (fora do desenho). true = tocou um aviso novo
     bool handleAvisoTouch(uint32_t nowMs);            // toque no aviso abre os Habitos (consome o toque)
     void desenharAvisoHabito(uint32_t nowMs);         // por cima da tela atual, enquanto ativo

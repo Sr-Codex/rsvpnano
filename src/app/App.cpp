@@ -1,7 +1,9 @@
 #include "app/App.h"
 #include <esp_log.h>
 
+#include <algorithm>
 #include <array>
+#include <optional>
 #include <cstdio>
 #include <esp_system.h>
 #include <esp_random.h>
@@ -10,6 +12,8 @@
 #include "board/BoardAudio.h"
 #include "board/BoardClock.h"
 #include "board/BoardConfig.h"
+#include "board/BoardDeepSleep.h"
+#include "tempo/Despertador.h"
 #include "board/BoardInput.h"
 #include "board/BoardPower.h"
 #include "board/BoardStorage.h"
@@ -63,6 +67,15 @@ namespace {
 } // namespace
 
 void App::begin() {
+    {   // ADR-009: acordou do deep sleep pelo timer = boot "de lembrete"; qualquer outro boot zera a memoria RTC
+        auto& rtc = Board::DeepSleep::rtc();
+        if (Board::DeepSleep::bootCause() == Board::DeepSleep::BootCause::Timer && rtc.magic == Board::DeepSleep::kRtcMagic) {
+            lembreteBoot_ = true;
+        } else {
+            rtc = Board::DeepSleep::Rtc{};
+            rtc.magic = Board::DeepSleep::kRtcMagic;
+        }
+    }
     // Relogio do Tempo: ancora na hora de parede que o RTC/sistema ja ajustou em Board::Clock::begin() (offline).
     if (const auto now = static_cast<int64_t>(time(nullptr)); tempo::deEpoch(now).valida)
         tempo::ancorar(now, millis());
@@ -71,6 +84,7 @@ void App::begin() {
     bootMs_ = millis();
     lastActivityMs_ = bootMs_;
     statusUntilMs_ = bootMs_ + kBootSplashMs;
+    if (lembreteBoot_) statusUntilMs_ = bootMs_ + 1;   // sem splash
 
     if (!Board::Display::begin()) {
         ESP_LOGE("app", "display init failed");
@@ -80,12 +94,12 @@ void App::begin() {
     const bool modernStartup = immediateUi_.width() == 640 && immediateUi_.height() == 172;
     immediateUi_.setStartupPresentation(modernStartup);
     const auto startupStage = [&](UiText title) {
-        if (modernStartup)
+        if (modernStartup && !lembreteBoot_)
             screens::status(immediateUi_, immediateUi_.text(title), immediateUi_.text(UiText::Checking));
     };
     if (modernStartup)
         startupStage(UiText::Storage);
-    else
+    else if (!lembreteBoot_)
         screens::status(immediateUi_, immediateUi_.text(UiText::Ready));
     if (!Input::begin())
         ESP_LOGE("input", "startup failed");
@@ -128,8 +142,20 @@ void App::begin() {
     libraryScreen_.invalidate();
     // Leave the last real status (including failures) visible until the usual
     // transition. Do not introduce a second splash delay or fake a Ready state.
+    if (lembreteBoot_ && !(modernStartup && settingsStore_.settings().interface.onboardingComplete)) {
+        // Sem introducao concluida nao ha habitos: boot normal.
+        lembreteBoot_ = false;
+        Board::DeepSleep::rtc() = Board::DeepSleep::Rtc{};
+        Board::DeepSleep::rtc().magic = Board::DeepSleep::kRtcMagic;
+    }
+    if (lembreteBoot_) {
+        networkScreen_.startupCheckPending = false;   // nada de Wi-Fi/OTA no despertar
+        tickTickTried_ = true;                         // nem sincronizacao do TickTick (economiza bateria)
+        tickTickLastMs_ = bootMs_;
+    }
     if(modernStartup){
-        statusDestination_=settingsStore_.settings().interface.onboardingComplete?screens::Screen::Home:screens::Screen::Onboarding;
+        statusDestination_=lembreteBoot_?screens::Screen::Habitos
+            :settingsStore_.settings().interface.onboardingComplete?screens::Screen::Home:screens::Screen::Onboarding;
         if(!settingsStore_.settings().interface.onboardingComplete)onboardingScreen_.begin(immediateUi_,settingsStore_.settings(),millis());
         if(settingsStore_.settings().reading.mode==settings::ReadingMode::page){
             settingsStore_.settings().reading.mode=settings::ReadingMode::rsvp;settingsStore_.acceptChanges();
@@ -228,6 +254,22 @@ void App::update(uint32_t nowMs) {
         }
     }
 
+    if (lembreteBoot_) {
+        if (!lembreteBootIniciado_) iniciarLembreteBoot(nowMs);
+        if (lastActivityMs_ != lembreteAtividade0_) {   // toque/botao: vira uso normal
+            ESP_LOGI("app", "boot de lembrete: interacao, uso normal");
+            lembreteBoot_ = false;
+            Board::DeepSleep::rtc().ciclosSemInteracao = 0;
+        } else if (deadlineReached(nowMs, lembreteBootMs_ + tempo::kJanelaLembreteBootMs)
+                   && !backgroundJobActive()) {
+            ESP_LOGI("app", "boot de lembrete: sem interacao em %u s; decidindo de novo",
+                     static_cast<unsigned>(tempo::kJanelaLembreteBootMs / 1000));
+            lembreteBoot_ = false;
+            ++Board::DeepSleep::rtc().ciclosSemInteracao;
+            powerOff(nowMs, true);
+            return;
+        }
+    }
     {
         const bool avisou = tickHabitos(nowMs);
         if (avisou && screen_ == screens::Screen::Standby) {   // lembrete acorda a tela (descanso com protetor ligado)
@@ -238,7 +280,7 @@ void App::update(uint32_t nowMs) {
 
     if (screen_ == screens::Screen::Standby) {
         if (nowMs - standbyEnteredMs_ >= kStandbyPowerOffMs) {
-            powerOff(nowMs);
+            powerOff(nowMs, true);
             return;
         }
         standbyScreen_.update(immediateUi_, nowMs);
@@ -271,7 +313,7 @@ void App::update(uint32_t nowMs) {
     renderScreen(nowMs);
     desenharAvisoHabito(nowMs);
     if (!preparingTypography && !readerScreen_.session.playing && !companionApi_.active() && !usbTransfer_.active()
-        && !focusScreen_.active() && !tempoScreen_.battleActive() && screen_ != screens::Screen::FocusSession && screen_ != screens::Screen::Status
+        && !lembreteBoot_ && !focusScreen_.active() && !tempoScreen_.battleActive() && screen_ != screens::Screen::FocusSession && screen_ != screens::Screen::Status
         && screen_ != screens::Screen::Onboarding
         && kStandbyMs[settingsStore_.settings().interface.standbyTimerIndex] > 0
         && nowMs - lastActivityMs_ >= kStandbyMs[settingsStore_.settings().interface.standbyTimerIndex]) {
@@ -1406,9 +1448,13 @@ bool App::tickHabitos(uint32_t nowMs) {
     ESP_LOGI("habitos", "lembrete: %s %02d:%02d%s tela=%u", aviso->nome.c_str(), aviso->minuto / 60, aviso->minuto % 60,
              aviso->repeticao ? " (re-aviso)" : "", static_cast<unsigned>(screen_));
     if (screen_ == screens::Screen::Habitos) {   // ja esta olhando: bipe so no aviso inicial, sem aviso no topo
-        if (!aviso->repeticao) Board::Audio::beep();
+        if (aviso->tipo == tempo::TipoHabito::Medicacao)
+            Board::DeepSleep::rtc().ultimoAvisoMedicacaoEpoch = tempo::epochAgora(nowMs);
+        if (!aviso->repeticao || lembreteBoot_) Board::Audio::beep();
         return false;
     }
+    if (aviso->tipo == tempo::TipoHabito::Medicacao)
+        Board::DeepSleep::rtc().ultimoAvisoMedicacaoEpoch = tempo::epochAgora(nowMs);   // base da insistencia no deep sleep
     Board::Audio::beep();
     if (avisoPermitido()) {
         avisoHabito_ = *aviso;
@@ -1679,14 +1725,14 @@ void App::lightSleepFromStandby() {
         const uint32_t elapsedMs = millis() - sleepStartedAtMs;
         if (elapsedMs >= kStandbyPowerOffMs) {
             ESP_LOGI("app", "screen-off standby expired; powering off");
-            powerOff(millis());
+            powerOff(millis(), true);
             return;
         }
 
         switch (Board::System::lightSleep(kStandbyPowerOffMs - elapsedMs)) {
         case EspLightSleep::WakeReason::timer:
             ESP_LOGI("app", "screen-off standby expired; powering off");
-            powerOff(millis());
+            powerOff(millis(), true);
             return;
         case EspLightSleep::WakeReason::input:
             if constexpr (Board::Config::HAS_LIGHT_SLEEP_TOUCH_IRQ) {
@@ -1720,7 +1766,66 @@ void App::lightSleepFromStandby() {
     Input::resume();
 }
 
-void App::powerOff(uint32_t nowMs) {
+// ADR-009: ao fim do descanso, dorme ate o proximo lembrete (deep sleep, SYS_EN mantido) em vez de desligar.
+tempo::DecisaoDespertador App::decidirSono(uint32_t nowMs) {
+    tempo::EntradaDespertador in;
+    in.motivo = tempo::MotivoDesligar::Automatico;
+    if (!Board::DeepSleep::supported()) {
+        in.relogioValido = false;   // placa sem deep sleep: desliga como sempre
+        return tempo::decidirDespertador(in);
+    }
+    const int64_t epoch = tempo::epochAgora(nowMs);
+    const auto agora = tempo::agora(nowMs);
+    in.relogioValido = epoch > 0 && agora.valida;
+    if (!in.relogioValido) return tempo::decidirDespertador(in);
+    in.epochAgora = epoch;
+    in.hoje = agora.data;
+    in.segundoDoDia = agora.segundoDoDia;
+    tempoScreen_.atualizarHabitos(storage_.mounted() ? &Board::Storage::filesystem() : nullptr, nowMs);   // garante Tempo/Habitos carregados
+    if (tempoScreen_.estadoCarregado()) in.estado = &tempoScreen_.estadoTempo();
+    in.primeiroLembreteAmanhaMin = tempo::primeiroLembreteDoDia(
+        tempoScreen_.listaHabitos(), tempo::dataDeSerial(tempo::diaSerial(agora.data) + 1));
+    Board::Power::updateBattery(battery_, nowMs, true);
+    in.bateriaPercent = battery_.status.present ? battery_.status.percent : -1;
+    in.carregando = battery_.charging;
+    const auto& rtc = Board::DeepSleep::rtc();
+    in.ciclosSemInteracao = rtc.ciclosSemInteracao;
+    in.insistenciasMedicacao = rtc.stampDia == tempo::stampDe(agora.data) ? rtc.insistenciasMedicacao : 0;
+    if (rtc.ultimoAvisoMedicacaoEpoch > 0) in.ultimoAvisoMedicacaoEpoch = rtc.ultimoAvisoMedicacaoEpoch;
+    const auto decisao = tempo::decidirDespertador(in);
+    ESP_LOGI("app", "sono: %s (bateria=%d%% carregando=%d ciclos=%d) alvo=%lld acordar=%lld", decisao.dormir ? "DORME" : tempo::nomePorqueDesliga(decisao.porque),
+             in.bateriaPercent, in.carregando ? 1 : 0, in.ciclosSemInteracao, static_cast<long long>(decisao.alvoEpoch),
+             static_cast<long long>(decisao.acordarEpoch));
+    return decisao;
+}
+
+// Boot "de lembrete": carrega Tempo/Habitos, abre os Habitos (o item vencendo fica em destaque) e arma a insistencia.
+void App::iniciarLembreteBoot(uint32_t nowMs) {
+    lembreteBootIniciado_ = true;
+    lembreteBootMs_ = nowMs;
+    lembreteAtividade0_ = lastActivityMs_;
+    fs::FS* tempoFs = storage_.mounted() ? &Board::Storage::filesystem() : nullptr;
+    tempoScreen_.atualizarHabitos(tempoFs, nowMs);
+    auto& rtc = Board::DeepSleep::rtc();
+    const auto agora = tempo::agora(nowMs);
+    const int stamp = agora.valida ? tempo::stampDe(agora.data) : 0;
+    if (rtc.stampDia != stamp) {
+        rtc.stampDia = stamp;
+        rtc.insistenciasMedicacao = 0;
+    }
+    if (rtc.origemProxima == static_cast<uint8_t>(tempo::OrigemDespertar::InsistenciaMedicacao)) {
+        ++rtc.insistenciasMedicacao;
+        tempoScreen_.semearInsistenciaMedicacao(nowMs, rtc.insistenciasMedicacao);
+    }
+    ESP_LOGI("app", "boot de lembrete: alvo=%lld origem=%u ciclos=%d insistencias=%d", static_cast<long long>(rtc.alvoEpoch),
+             static_cast<unsigned>(rtc.origemProxima), rtc.ciclosSemInteracao, rtc.insistenciasMedicacao);
+    if (screen_ != screens::Screen::Habitos) {
+        screen_ = screens::Screen::Habitos;
+        immediateUi_.invalidate();
+    }
+}
+
+void App::powerOff(uint32_t nowMs, bool automatic) {
 
     if (companionApi_.active())
         companionApi_.end();
@@ -1729,13 +1834,34 @@ void App::powerOff(uint32_t nowMs) {
     ReadingProgress::save(readerScreen_.session, prefs_, true, nowMs);
     ReadingProgress::mirror(readerScreen_.session, readerScreen_.store);
     ReadingLoop::pause(readerScreen_.session);
-    screens::status(immediateUi_, immediateUi_.text(UiText::Off), immediateUi_.text(UiText::ReleasePower));
-    delay(250);
+    std::optional<tempo::DecisaoDespertador> sono;
+    if (automatic) sono = decidirSono(nowMs);   // so o desligamento AUTOMATICO pode virar sono com despertador
+    const bool dormir = sono && sono->dormir;
+    if (!dormir) {
+        screens::status(immediateUi_, immediateUi_.text(UiText::Off), immediateUi_.text(UiText::ReleasePower));
+        delay(250);
+    }
     settingsStore_.flush();
     Board::Display::sleep();
     readerScreen_.store.close();
     storage_.end();
     Input::end();
+    if (dormir) {
+        const int64_t restante = sono->acordarEpoch - tempo::epochAgora(millis());
+        const uint32_t segundos = static_cast<uint32_t>(std::max<int64_t>(restante, tempo::kMinimoSonoS));
+        auto& rtc = Board::DeepSleep::rtc();
+        rtc.magic = Board::DeepSleep::kRtcMagic;
+        rtc.alvoEpoch = sono->alvoEpoch;
+        rtc.origemProxima = static_cast<uint8_t>(sono->origem);
+        const int stampHoje = tempo::stampDe(tempo::agora(millis()).data);
+        if (rtc.stampDia != stampHoje) rtc.insistenciasMedicacao = 0;
+        rtc.stampDia = stampHoje;
+        ESP_LOGI("app", "entrando em deep sleep por %u s (alvo %lld)", static_cast<unsigned>(segundos),
+                 static_cast<long long>(sono->alvoEpoch));
+        if (Board::DeepSleep::enter(segundos))
+            return;
+        ESP_LOGE("app", "deep sleep falhou; desligando");
+    }
     powerOffBoard();
 }
 

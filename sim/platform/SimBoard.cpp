@@ -3,6 +3,8 @@
 // framebuffer and feeds touch/buttons.
 #include "board/Board.h"
 #include "board/BoardImu.h"
+#include "board/BoardDeepSleep.h"
+#include "tempo/Relogio.h"
 
 #include <canvas/Arduino_Canvas.h>
 #include <esp_log.h>
@@ -10,7 +12,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <string>
 #include <mutex>
 #include <filesystem>
 
@@ -308,3 +313,97 @@ namespace Board::Imu {
         return true;
     }
 } // namespace Board::Imu
+
+// ------------------------------------------------------------------ Deep sleep com despertador (ADR-009) - stub
+// Sem deep sleep real: registra no log e fica "dormindo" (tela apagada) ate o PWR (boot normal) ou o despertador.
+//   LUME_SIM_DEEPSLEEP_WAKE=1  -> acorda na hora como se o timer tivesse disparado (boot de lembrete); o relogio do
+//                                 app (LUME_SIM_CLOCK) e ajustado para o instante do despertar.
+// A memoria RTC (Board::DeepSleep::Rtc) atravessa o reinicio do simulador na variavel LUME_SIM_RTC.
+namespace Board::DeepSleep {
+
+    namespace {
+        Rtc gRtc;
+        bool gRtcLoaded = false;
+
+        void loadRtc() {
+            if (gRtcLoaded) return;
+            gRtcLoaded = true;
+            if (const char* text = std::getenv("LUME_SIM_RTC")) {
+                unsigned magic = 0;
+                int ciclos = 0, ins = 0, stamp = 0, origem = 0;
+                long long ultimo = 0, alvo = 0;
+                if (std::sscanf(text, "%u,%d,%d,%d,%lld,%lld,%d", &magic, &ciclos, &ins, &stamp, &ultimo, &alvo, &origem) == 7) {
+                    gRtc.magic = magic;
+                    gRtc.ciclosSemInteracao = ciclos;
+                    gRtc.insistenciasMedicacao = ins;
+                    gRtc.stampDia = stamp;
+                    gRtc.ultimoAvisoMedicacaoEpoch = ultimo;
+                    gRtc.alvoEpoch = alvo;
+                    gRtc.origemProxima = static_cast<uint8_t>(origem);
+                }
+            }
+        }
+    } // namespace
+
+    bool supported() { return true; }
+
+    BootCause bootCause() {
+        static const BootCause cause = [] {
+            const char* text = std::getenv("LUME_SIM_BOOT_CAUSE");
+            if (text == nullptr) return BootCause::PowerOn;
+            if (std::string(text) == "timer") return BootCause::Timer;
+            if (std::string(text) == "button") return BootCause::Button;
+            return BootCause::PowerOn;
+        }();
+        return cause;
+    }
+
+    Rtc& rtc() {
+        loadRtc();
+        return gRtc;
+    }
+
+    bool enter(uint32_t seconds) {
+        loadRtc();
+        const auto now = tempo::agora(millis());
+        char clock[40] = "";
+        if (now.valida) {
+            int64_t serial = tempo::diaSerial(now.data) * 86400LL + now.segundoDoDia + seconds;
+            const tempo::Data data = tempo::dataDeSerial(serial / 86400);
+            const int sod = static_cast<int>(serial % 86400);
+            std::snprintf(clock, sizeof clock, "%04d-%02d-%02dT%02d:%02d:%02d", data.ano, data.mes, data.dia, sod / 3600,
+                          sod / 60 % 60, sod % 60);
+            std::fprintf(stderr, "[sim] deep sleep ate %02d:%02d (alvo do despertador: %s, em %u s)\n", sod / 3600,
+                         sod / 60 % 60, clock, static_cast<unsigned>(seconds));
+        } else {
+            std::fprintf(stderr, "[sim] deep sleep por %u s (relogio invalido)\n", static_cast<unsigned>(seconds));
+        }
+        std::fflush(nullptr);
+        char rtcText[160];
+        std::snprintf(rtcText, sizeof rtcText, "%u,%d,%d,%d,%lld,%lld,%d", static_cast<unsigned>(gRtc.magic),
+                      static_cast<int>(gRtc.ciclosSemInteracao), static_cast<int>(gRtc.insistenciasMedicacao),
+                      static_cast<int>(gRtc.stampDia), static_cast<long long>(gRtc.ultimoAvisoMedicacaoEpoch),
+                      static_cast<long long>(gRtc.alvoEpoch), static_cast<int>(gRtc.origemProxima));
+        setenv("LUME_SIM_RTC", rtcText, 1);
+        sim::board::panel().sleeping = true;
+        sim::board::panel().backlight = false;
+        const bool autoWake = std::getenv("LUME_SIM_DEEPSLEEP_WAKE") != nullptr;
+        while (true) {
+            if (autoWake) {
+                setenv("LUME_SIM_BOOT_CAUSE", "timer", 1);
+                if (clock[0] != 0) setenv("LUME_SIM_CLOCK", clock, 1);
+                unsetenv("LUME_SIM_DEEPSLEEP_WAKE");
+                std::fprintf(stderr, "[sim] despertador disparou (timer)\n");
+                sim::requestRestart();
+            }
+            if (sim::board::buttons().power) {
+                setenv("LUME_SIM_BOOT_CAUSE", "button", 1);
+                unsetenv("LUME_SIM_CLOCK");
+                std::fprintf(stderr, "[sim] PWR: acordou do deep sleep (boot normal)\n");
+                sim::requestRestart();
+            }
+            delay(20);
+        }
+    }
+
+} // namespace Board::DeepSleep

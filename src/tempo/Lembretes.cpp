@@ -74,6 +74,22 @@ namespace tempo {
         std::erase_if(itens_, [&](const Item& it) { return it.habitoId == oc.habitoId && it.indiceNoDia == oc.indice; });
     }
 
+    void AgendaLembretes::semearInsistenciaMedicacao(const Estado& e, int minutoAgora, uint32_t agoraMs, int insistenciasFeitas) {
+        stamp_ = stampDe(e.dia.data);
+        for (const OcorrenciaDia& oc : e.dia.ocorrencias) {
+            if (oc.feita || oc.status != StatusHabito::Pendente || oc.minuto < 0 || oc.tipo != TipoHabito::Medicacao) continue;
+            if (minutoAgora < oc.minuto) continue;
+            const FaseOcorrencia fase = faseDaOcorrencia(oc, minutoAgora);
+            if (fase != FaseOcorrencia::Agora && fase != FaseOcorrencia::Atrasada) continue;
+            Item& it = garantir(oc);
+            it.avisos = 1;
+            it.reavisos = 0;
+            it.insistencias = std::max(0, insistenciasFeitas - 1);   // o avaliar() soma a desta
+            it.ultimoMs = agoraMs - kInsistenciaMedicacaoMs;          // vence agora
+            it.adiado = false;
+        }
+    }
+
     std::optional<Aviso> AgendaLembretes::avaliar(const Estado& e, int minutoAgora, uint32_t agoraMs, bool pegouAgora) {
         const int stamp = stampDe(e.dia.data);
         if (stamp != stamp_) {   // virada do dia: estado novo
