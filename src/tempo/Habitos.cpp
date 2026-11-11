@@ -1,4 +1,5 @@
 #include "tempo/Habitos.h"
+#include "tempo/HabitosVista.h"
 
 #include <glaze/json.hpp>
 
@@ -104,7 +105,7 @@ namespace tempo {
         bool igual(const OcorrenciaDia& a, const OcorrenciaDia& b) {
             return a.habitoId == b.habitoId && a.nome == b.nome && a.tipo == b.tipo && a.indice == b.indice
                 && a.total == b.total && a.minuto == b.minuto && a.status == b.status && a.feita == b.feita
-                && a.minutoReal == b.minutoReal && a.remota == b.remota;
+                && a.minutoReal == b.minutoReal && a.remota == b.remota && a.iconRes == b.iconRes && a.color == b.color;
         }
 
         std::string horaTexto(int minuto) {
@@ -343,6 +344,8 @@ namespace tempo {
                 oc.habitoId = def.id;
                 oc.nome = nome;
                 oc.tipo = tipo;
+                oc.iconRes = def.iconRes;
+                oc.color = def.color;
                 oc.indice = static_cast<int>(i);
                 oc.total = static_cast<int>(total);
                 oc.minuto = i < minutos.size() ? minutos[i] : -1;
@@ -369,6 +372,8 @@ namespace tempo {
                 if (!oc.feita && oc.status != StatusHabito::Pulado) {   // pendente: acompanha a definicao atual; feita/pulada: congelada
                     oc.nome = g.nome;
                     oc.tipo = g.tipo;
+                    oc.iconRes = g.iconRes;
+                    oc.color = g.color;
                     oc.total = g.total;
                     oc.minuto = g.minuto;
                 }
@@ -422,6 +427,8 @@ namespace tempo {
             vista.confirmar2Toques = exigeConfirmacao(oc.tipo);
             vista.cr = v.cr;
             vista.xp = v.xp;
+            vista.icone = static_cast<uint8_t>(iconeDoHabito(oc.tipo, oc.nome, oc.iconRes));
+            vista.cor = corDoHabito(oc.color);
             saida.push_back(std::move(vista));
         }
         return saida;
@@ -688,6 +695,58 @@ namespace tempo {
         const ResultadoOcorrencia r = registrarOcorrencia(e, *idx, noHorario, false);
         if (r.registrado) enfileirar(fila, itemFilaDoHabito(e, e.dia.ocorrencias[*idx].habitoId));
         return r;
+    }
+
+    DestinoDesfazer desfazerNaFila(std::vector<ItemFila>& fila, ItemFila novo) {
+        for (auto it = fila.begin(); it != fila.end(); ++it) {
+            if (it->id != novo.id || it->stamp != novo.stamp) continue;
+            if (novo.valor <= 1e-9) {
+                fila.erase(it);
+                return DestinoDesfazer::RemovidoDaFila;
+            }
+            novo.tentativas = 0;
+            novo.ultimoHttp = 0;
+            *it = std::move(novo);
+            return DestinoDesfazer::SubstituidoNaFila;
+        }
+        fila.push_back(std::move(novo));
+        while (fila.size() > kMaxFila) fila.erase(fila.begin());
+        return DestinoDesfazer::CorrecaoEnfileirada;
+    }
+
+    EventoLog eventoHabitoDesfeito(const Estado& e, size_t indice) {
+        EventoLog ev;
+        if (indice >= e.dia.ocorrencias.size()) return ev;
+        const OcorrenciaDia& oc = e.dia.ocorrencias[indice];
+        ev.data = textoData(e.dia.data);
+        ev.hora = horaTexto(e.dia.minutoAtual);
+        ev.tipo = "habito";
+        ev.projeto = oc.nome;
+        ev.projetoId = oc.habitoId;
+        ev.categoria = nomeTipo(oc.tipo);
+        ev.resultado = "desfeito";
+        ev.planejadoMin = oc.minuto;
+        return ev;
+    }
+
+    void removerDesfeitos(std::vector<EventoLog>& eventos) {
+        for (size_t i = 0; i < eventos.size();) {
+            if (eventos[i].tipo != "habito" || eventos[i].resultado != "desfeito") {
+                ++i;
+                continue;
+            }
+            const EventoLog desfeito = eventos[i];
+            eventos.erase(eventos.begin() + static_cast<std::ptrdiff_t>(i));
+            for (size_t j = i; j-- > 0;) {
+                const EventoLog& anterior = eventos[j];
+                if (anterior.tipo == "habito" && anterior.resultado != "desfeito" && anterior.projetoId == desfeito.projetoId
+                    && anterior.planejadoMin == desfeito.planejadoMin) {
+                    eventos.erase(eventos.begin() + static_cast<std::ptrdiff_t>(j));
+                    --i;
+                    break;
+                }
+            }
+        }
     }
 
     EventoLog eventoHabito(const Estado& e, const ResultadoOcorrencia& r, std::string_view origem) {

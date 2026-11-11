@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <optional>
 
 #include "tempo/Tipos.h"
@@ -59,6 +60,34 @@ namespace tempo {
     // "Pular" (fase 2 dos Habitos): marca a ocorrencia pendente como Pulada. Sem cr/XP/coracoes, nao entra na fila do
     // TickTick e nao conta como esquecida (sai do denominador das fracoes do dia). registrado=false se ja estava resolvida.
     ResultadoOcorrencia pularOcorrencia(Estado& e, size_t indice);
+    // ---- "Desfazer" (Habitos v2): reverte um Feito/Pular RECENTE. A captura guarda os campos que a marcacao mexe
+    // (carteira, XP, atributos, coracoes, totais do dia, ocorrencia, tamanho do log de eventos do dia). So desfaz se nada
+    // mais mexeu no estado desde a marcacao (mesmo dia, mesma ocorrencia no mesmo estado, mesmo numero de eventos).
+    // Streak/Perfil: a marcacao nao mexe na sequencia (so o fechamento do dia mexe), entao nada a reverter ali.
+    struct InstanteHabito {
+        bool valido = false;
+        size_t indice = 0;
+        Data dia;
+        OcorrenciaDia antes;                 // a ocorrencia antes da marcacao
+        double saldo = 0.0, cofre = 0.0, xpTotal = 0.0;
+        std::array<double, kNumAtributos> pontosAtributo{};
+        int coracoesMeios = 0;
+        bool heroiCaido = false;
+        int resgateDiasValidos = 0;
+        int patamarDisparado = 0;
+        double habitosCr = 0.0, crGanho = 0.0, xpGanho = 0.0;
+        int ganhoCoracoesMeios = 0, coracoesDeltaMeios = 0;
+        size_t eventosAntes = 0;             // e.dia.eventos.size() antes
+        size_t eventosDepois = 0;            // idem depois (preenchido por fecharCapturaHabito)
+        StatusHabito statusDepois = StatusHabito::Pendente;
+        bool feitaDepois = false;
+    };
+    InstanteHabito capturarHabito(const Estado& e, size_t indice);                 // ANTES de marcar/pular
+    void fecharCapturaHabito(InstanteHabito& instante, const Estado& e);           // DEPOIS de marcar/pular
+    bool podeDesfazerHabito(const Estado& e, const InstanteHabito& instante);
+    // Reverte (true) ou nao faz nada (false). Devolve a ocorrencia a Pendente, cr/XP/coracoes/eventos do dia ao que eram.
+    bool desfazerOcorrencia(Estado& e, const InstanteHabito& instante);
+
     double registrarHumor(Estado& e);    // +2 XP, nunca credito; devolve XP
     double registrarTickTick(Estado& e); // +30 XP, max 3/dia; devolve XP
 

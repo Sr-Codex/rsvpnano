@@ -268,6 +268,12 @@ namespace screens {
         anel(g, 0, 0, cx, cy, int(raio * 0.62), larg, inimigo, kCarmim, kVinho, fundo, kCarmim);
     }
 
+    void desenharAnelApple(Arduino_GFX& g, int cx, int cy, int raio, int larg, double frac, uint16_t cor0, uint16_t cor1,
+                           uint16_t fundo) {
+        const auto de565 = [](uint16_t v) { return Cor{((v >> 11) & 31) * 255 / 31, ((v >> 5) & 63) * 255 / 63, (v & 31) * 255 / 31}; };
+        anel(g, 0, 0, cx, cy, raio, larg, frac, de565(cor0), de565(cor1), de565(fundo), de565(cor0));
+    }
+
     void desenharAnelXp(ui::Context& ui, Arduino_GFX& g, int cx, int cy, int raio, int larg, double frac,
                         ui::themes::ColorRole fundo) {
         anel(g, 0, 0, cx, cy, raio, larg, frac, kLaranja, kAmbar, deRole(ui, fundo), kLaranja);
@@ -433,15 +439,23 @@ namespace screens {
         if (mudou) salvar(filesystem);
     }
 
-    bool TempoScreen::marcarHabito(uint32_t nowMs, fs::FS* filesystem, size_t indice) {
+    bool TempoScreen::marcarHabito(uint32_t nowMs, fs::FS* filesystem, size_t indice, tempo::ResultadoOcorrencia* resultado) {
         if (filesystem == nullptr) return false;
         if (!carregado_) carregar(filesystem, true, nowMs);
         garantirDia(nowMs);
         std::vector<tempo::ItemFila> fila;
         const int nivelAntes = tempo::nivelDeXp(estado_.xpTotal);
+        tempo::InstanteHabito instante = tempo::capturarHabito(estado_, indice);
         const auto r = tempo::marcarFeita(estado_, indice, fila);
         if (!r.registrado) return false;
+        tempo::fecharCapturaHabito(instante, estado_);
+        desfazer_ = std::move(instante);
+        if (resultado != nullptr) *resultado = r;
         for (const auto& item : fila) TempoStorage::enqueueCheckin(*filesystem, item);
+        if (!fila.empty()) {
+            checkinNovo_ = true;   // "Feito" envia logo, mas so depois da janela do "Desfazer"
+            checkinLiberaEmMs_ = nowMs + tempo::kDesfazerMs + 500;
+        }
         lembretes_.resolvida(estado_, indice);
         gravarEventoHabito(filesystem, r, "");
         salvar(filesystem);
@@ -459,10 +473,34 @@ namespace screens {
         if (filesystem == nullptr) return false;
         if (!carregado_) carregar(filesystem, true, nowMs);
         garantirDia(nowMs);
+        tempo::InstanteHabito instante = tempo::capturarHabito(estado_, indice);
         const auto r = tempo::pularOcorrencia(estado_, indice);
         if (!r.registrado) return false;
+        tempo::fecharCapturaHabito(instante, estado_);
+        desfazer_ = std::move(instante);
         lembretes_.resolvida(estado_, indice);
         gravarEventoHabito(filesystem, r, "");
+        salvar(filesystem);
+        return true;
+    }
+
+    bool TempoScreen::desfazerHabito(uint32_t nowMs, fs::FS* filesystem) {
+        if (filesystem == nullptr || !podeDesfazerHabito()) return false;
+        const tempo::InstanteHabito instante = desfazer_;
+        const bool eraFeito = estado_.dia.ocorrencias[instante.indice].feita;
+        const std::string habitoId = estado_.dia.ocorrencias[instante.indice].habitoId;
+        if (!tempo::desfazerOcorrencia(estado_, instante)) return false;
+        desfazer_ = tempo::InstanteHabito{};
+        if (eraFeito) {
+            bool ok = false;
+            const auto destino = TempoStorage::undoCheckin(*filesystem, tempo::itemFilaDoHabito(estado_, habitoId), ok);
+            if (destino == tempo::DestinoDesfazer::CorrecaoEnfileirada) {   // o check-in antigo ja tinha ido: manda o valor menor
+                checkinNovo_ = true;
+                checkinLiberaEmMs_ = nowMs;
+            }
+        }
+        TempoStorage::appendLog(*filesystem, estado_.dia.data, tempo::eventoHabitoDesfeito(estado_, instante.indice));
+        lembretes_.jaAvisada(estado_, instante.indice, nowMs);
         salvar(filesystem);
         return true;
     }

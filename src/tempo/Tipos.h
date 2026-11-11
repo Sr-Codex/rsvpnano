@@ -90,6 +90,8 @@ namespace tempo {
         bool feita = false;                      // registrada (mesmo que tarde demais: status Esquecido)
         int minutoReal = -1;
         bool remota = false;                     // marcada a partir do TickTick (nao gera fila de volta)
+        std::string iconRes;                     // icone escolhido no TickTick ("habit_reading", "txt_<emoji>"); "" = sem
+        std::string color;                       // cor do TickTick ("#A0EFED"); "" = sem
     };
 
     struct ValorHabito {

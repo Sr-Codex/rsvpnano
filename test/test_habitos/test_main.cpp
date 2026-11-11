@@ -776,6 +776,19 @@ namespace {
         TEST_ASSERT_FALSE(lerHabitos("[1,2", lida));
     }
 
+    void test_montar_habitos_preserva_icone_e_cor() {
+        const auto m = ticktick::montarHabitos(
+            R"([{"id":"a","name":"Ler","reminders":["09:00"],"status":0,"iconRes":"habit_reading","color":"#A0EFED"},{"id":"b","name":"Cafe","status":0,"iconRes":"txt_\u2615","color":""},{"id":"c","name":"Sem","status":0}])", "g");
+        TEST_ASSERT_TRUE(m.has_value());
+        ListaHabitos l;
+        TEST_ASSERT_TRUE(lerHabitos(*m, l));
+        TEST_ASSERT_EQUAL_STRING("habit_reading", l.habitos[0].iconRes.c_str());
+        TEST_ASSERT_EQUAL_STRING("#A0EFED", l.habitos[0].color.c_str());
+        TEST_ASSERT_EQUAL_STRING("txt_\xE2\x98\x95", l.habitos[1].iconRes.c_str());
+        TEST_ASSERT_EQUAL_STRING("", l.habitos[1].color.c_str());
+        TEST_ASSERT_EQUAL_STRING("", l.habitos[2].iconRes.c_str());
+    }
+
 } // namespace
 
 int main(int, char**) {
@@ -812,5 +825,6 @@ int main(int, char**) {
     RUN_TEST(test_montar_habitos_so_ativos);
     RUN_TEST(test_montar_checkins_do_dia);
     RUN_TEST(test_lista_de_habitos_ida_e_volta_e_invalido);
+    RUN_TEST(test_montar_habitos_preserva_icone_e_cor);
     return UNITY_END();
 }

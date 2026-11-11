@@ -42,6 +42,8 @@ namespace TempoStorage {
     // do TickTick mexem na fila de tarefas diferentes) e releem o arquivo antes de gravar.
     std::vector<tempo::ItemFila> loadQueue(fs::FS& filesystem);
     bool enqueueCheckin(fs::FS& filesystem, const tempo::ItemFila& item);
+    // "Desfazer" (Habitos v2): aceita valor MENOR que o da fila (tempo::desfazerNaFila). `ok` = gravou.
+    tempo::DestinoDesfazer undoCheckin(fs::FS& filesystem, const tempo::ItemFila& item, bool& ok);
     // Aplica os resultados dos envios (item enviado, status HTTP; 0 = sem rede) a fila atual do SD.
     bool applyQueueResults(fs::FS& filesystem, const std::vector<std::pair<tempo::ItemFila, int>>& results);
     bool appendLog(fs::FS& filesystem, const tempo::Data& date, const tempo::EventoLog& event);

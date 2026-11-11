@@ -482,6 +482,70 @@ namespace tempo {
         return r;
     }
 
+    InstanteHabito capturarHabito(const Estado& e, size_t indice) {
+        InstanteHabito s;
+        if (indice >= e.dia.ocorrencias.size()) return s;
+        s.valido = true;
+        s.indice = indice;
+        s.dia = e.dia.data;
+        s.antes = e.dia.ocorrencias[indice];
+        s.saldo = e.saldo;
+        s.cofre = e.cofre;
+        s.xpTotal = e.xpTotal;
+        s.pontosAtributo = e.pontosAtributo;
+        s.coracoesMeios = e.coracoesMeios;
+        s.heroiCaido = e.heroiCaido;
+        s.resgateDiasValidos = e.resgateDiasValidos;
+        s.patamarDisparado = e.patamarDisparado;
+        s.habitosCr = e.dia.habitosCr;
+        s.crGanho = e.dia.crGanho;
+        s.xpGanho = e.dia.xpGanho;
+        s.ganhoCoracoesMeios = e.dia.ganhoCoracoesMeios;
+        s.coracoesDeltaMeios = e.dia.coracoesDeltaMeios;
+        s.eventosAntes = e.dia.eventos.size();
+        return s;
+    }
+
+    void fecharCapturaHabito(InstanteHabito& s, const Estado& e) {
+        if (!s.valido || s.indice >= e.dia.ocorrencias.size()) {
+            s.valido = false;
+            return;
+        }
+        s.eventosDepois = e.dia.eventos.size();
+        s.statusDepois = e.dia.ocorrencias[s.indice].status;
+        s.feitaDepois = e.dia.ocorrencias[s.indice].feita;
+    }
+
+    bool podeDesfazerHabito(const Estado& e, const InstanteHabito& s) {
+        if (!s.valido || s.indice >= e.dia.ocorrencias.size()) return false;
+        if (e.dia.fechado || !(e.dia.data == s.dia)) return false;
+        const OcorrenciaDia& oc = e.dia.ocorrencias[s.indice];
+        if (oc.habitoId != s.antes.habitoId || oc.indice != s.antes.indice) return false;
+        if (oc.status == StatusHabito::Pendente) return false;          // nada a reverter
+        if (oc.status != s.statusDepois || oc.feita != s.feitaDepois) return false;   // mudou desde a marcacao
+        return e.dia.eventos.size() == s.eventosDepois;                  // algo mais aconteceu: nao arrisca
+    }
+
+    bool desfazerOcorrencia(Estado& e, const InstanteHabito& s) {
+        if (!podeDesfazerHabito(e, s)) return false;
+        e.dia.ocorrencias[s.indice] = s.antes;
+        e.saldo = s.saldo;
+        e.cofre = s.cofre;
+        e.xpTotal = s.xpTotal;
+        e.pontosAtributo = s.pontosAtributo;
+        e.coracoesMeios = s.coracoesMeios;
+        e.heroiCaido = s.heroiCaido;
+        e.resgateDiasValidos = s.resgateDiasValidos;
+        e.patamarDisparado = s.patamarDisparado;
+        e.dia.habitosCr = s.habitosCr;
+        e.dia.crGanho = s.crGanho;
+        e.dia.xpGanho = s.xpGanho;
+        e.dia.ganhoCoracoesMeios = s.ganhoCoracoesMeios;
+        e.dia.coracoesDeltaMeios = s.coracoesDeltaMeios;
+        e.dia.eventos.resize(std::min(e.dia.eventos.size(), s.eventosAntes));
+        return true;
+    }
+
     double registrarHumor(Estado& e) {
         if (e.dia.humorRegistros >= param::kHumorMaxDia) {
             return 0.0;

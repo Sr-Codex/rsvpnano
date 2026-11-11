@@ -37,6 +37,8 @@ namespace tempo::ticktick {
             std::optional<int> status;
             std::optional<std::string> archivedTime;
             std::optional<int> targetStartDate;
+            std::optional<std::string> iconRes;
+            std::optional<std::string> color;
         };
 
         struct CheckinItemApi {
@@ -155,6 +157,8 @@ namespace tempo::ticktick {
             d.reminders = h.reminders.value_or(std::vector<std::string>{});
             d.goal = h.goal.value_or(1.0);
             d.targetStartDate = h.targetStartDate.value_or(0);
+            d.iconRes = h.iconRes.value_or("");
+            d.color = h.color.value_or("");
             saida.habitos.push_back(std::move(d));
         }
         if (saida.habitos.size() > kMaxHabitos) saida.habitos.resize(kMaxHabitos);
