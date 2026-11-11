@@ -8,6 +8,7 @@
 #include <functional>
 
 #include "storage/tempo/TempoStorage.h"
+#include "som/Regras.h"
 #include "tempo/Parametros.h"
 #include "tempo/Progressao.h"
 #include "tempo/Relogio.h"
@@ -434,12 +435,20 @@ namespace screens {
         if (!carregado_) carregar(filesystem, true, nowMs);
         garantirDia(nowMs);
         std::vector<tempo::ItemFila> fila;
+        const int nivelAntes = tempo::nivelDeXp(estado_.xpTotal);
         const auto r = tempo::marcarFeita(estado_, indice, fila);
         if (!r.registrado) return false;
         for (const auto& item : fila) TempoStorage::enqueueCheckin(*filesystem, item);
         lembretes_.resolvida(estado_, indice);
         gravarEventoHabito(filesystem, r, "");
         salvar(filesystem);
+        // Um som so: dia completo (todos resolvidos) e nivel valem mais que o "feito" simples.
+        const auto totais = tempo::totaisDoDia(estado_);
+        const bool diaCompleto = totais.feitas > 0 && totais.pendentes == 0 && totais.esquecidas == 0;
+        const bool subiu = tempo::nivelDeXp(estado_.xpTotal) > nivelAntes;
+        if (const auto id = som::escolher({som::SomId::SobeTres, diaCompleto ? som::SomId::FaseCompleta : som::SomId::Bip,
+                                           subiu ? som::SomId::PowerUp : som::SomId::Bip}))
+            pedirSom(*id);
         return true;
     }
 
@@ -491,6 +500,27 @@ namespace screens {
 
     void TempoScreen::salvar(fs::FS* filesystem) {
         if (filesystem != nullptr) TempoStorage::saveState(*filesystem, estado_);
+    }
+
+    void TempoScreen::pedirSom(som::SomId id) {
+        if (nSons_ < sons_.size()) sons_[nSons_++] = id;
+    }
+
+    bool TempoScreen::pegarSom(som::SomId& id) {
+        if (nSons_ == 0) return false;
+        id = sons_[0];
+        for (size_t i = 1; i < nSons_; ++i) sons_[i - 1] = sons_[i];
+        --nSons_;
+        return true;
+    }
+
+    bool TempoScreen::conquistaNova(fs::FS* filesystem, const tempo::EventoLog& evento, int streakAntes) const {
+        tempo::Resumo antes;
+        if (filesystem != nullptr) TempoStorage::loadSummary(*filesystem, antes);   // sem resumo = vazio (1a batalha)
+        tempo::Resumo depois = antes;
+        tempo::registrarEvento(depois, evento, estado_.streak);
+        return tempo::conquistasGanhas(tempo::avaliarConquistas(depois, estado_.streak))
+             > tempo::conquistasGanhas(tempo::avaliarConquistas(antes, streakAntes));
     }
 
     void TempoScreen::carregar(fs::FS* filesystem, bool recarregarEstado, uint32_t nowMs) {
@@ -596,12 +626,15 @@ namespace screens {
         avisoFimDado_ = false;
         ultimoMs_ = tempo::ms(nowMs);
         fase_ = Fase::Lutando;
+        pedirSom(som::SomId::SobeQuatro);   // comecar batalha/foco (inclui a proxima rodada do ciclo)
     }
 
     void TempoScreen::pausarOuRetomar(uint32_t nowMs) {
         acumular(nowMs);
-        if (fase_ == Fase::Lutando) fase_ = Fase::Pausada;
-        else if (fase_ == Fase::Pausada) { fase_ = Fase::Lutando; ultimoMs_ = tempo::ms(nowMs); }
+        if (fase_ == Fase::Lutando) {
+            fase_ = Fase::Pausada;
+            pedirSom(som::SomId::DesceAlerta);
+        } else if (fase_ == Fase::Pausada) { fase_ = Fase::Lutando; ultimoMs_ = tempo::ms(nowMs); }
     }
 
     void TempoScreen::alternarDistracao(uint32_t nowMs) {
@@ -609,6 +642,7 @@ namespace screens {
         acumular(nowMs);
         if (!distraido_) {
             distraido_ = true;
+            pedirSom(som::SomId::DesceAlerta);
             distracaoAtualMs_ = 0;
             comboMs_ = 0;
             ++numDistracoes_;
@@ -643,13 +677,15 @@ namespace screens {
         descansoVolta_ = false;
     }
 
-    void TempoScreen::finalizar(uint32_t nowMs, bool abandonou, fs::FS* filesystem) {
+    void TempoScreen::finalizar(uint32_t nowMs, bool abandonou, fs::FS* filesystem, bool tocarDesfecho) {
         acumular(nowMs);
         if (distraido_) {
             distraido_ = false;
             maiorDistracaoMin_ = std::max(maiorDistracaoMin_, static_cast<int>(distracaoAtualMs_ / 60000));
         }
         garantirDia(nowMs);
+        const int nivelAntes = tempo::nivelDeXp(estado_.xpTotal);
+        const int streakAntes = estado_.streak;
         tempo::EntradaBatalha entrada;
         entrada.categoria = categoriaBatalha_;
         entrada.minutosPlanejados = planejadoMin_;
@@ -664,7 +700,8 @@ namespace screens {
 
         const std::string titulo = nomeBatalha_;
         resultado_ = {liquidacao, titulo, planejadoMin_, entrada.minutosFocados,
-                      tempo::nivelAtributo(estado_, liquidacao.atributo), estado_.streak, abandonou};
+                      tempo::nivelAtributo(estado_, liquidacao.atributo), estado_.streak, abandonou,
+                      tempo::nivelDeXp(estado_.xpTotal) > nivelAntes, false};
 
         // O evento do log e gravado ao salvar a reflexao (campos humor/distraiu). A economia ja foi liquidada
         // e persistida aqui: a reflexao nunca da credito nem XP.
@@ -687,6 +724,13 @@ namespace screens {
         evento.xp = liquidacao.xp;
         evento.perfeita = liquidacao.perfeita;
         dataPendente_ = agora.valida ? agora.data : tempo::Data{};
+        resultado_.conquista = conquistaNova(filesystem != nullptr ? filesystem : fs_, evento, streakAntes);
+        if (tocarDesfecho) {   // no ciclo, concluirRodada escolhe o som (descanso); aqui so batalha unica / "Fim" / "Concluir"
+            if (const auto id = som::escolher({liquidacao.vitoria ? som::SomId::Moeda : som::SomId::DesceAlerta,
+                                               resultado_.subiuNivel ? som::SomId::PowerUp : som::SomId::Bip,
+                                               resultado_.conquista ? som::SomId::Jingle : som::SomId::Bip}))
+                pedirSom(*id);
+        }
 
         humor_ = distraiu_ = -1;
         reflexaoInicioMs_ = nowMs;
@@ -698,7 +742,12 @@ namespace screens {
     // Ciclo pomodoro: a rodada terminou (inimigo derrotado). Liquida a batalha sozinha, grava o log sem a reflexao
     // (nao da para pedir resposta no meio do ciclo) e entra na pausa curta ou longa.
     void TempoScreen::concluirRodada(uint32_t nowMs, fs::FS* filesystem) {
-        finalizar(nowMs, false, filesystem);
+        finalizar(nowMs, false, filesystem, false);
+        // Fim do foco -> descanso: um som so (a moeda/vitoria ficam na tela); nivel e conquista valem mais.
+        if (const auto id = som::escolher({som::SomId::SuaveDescendo,
+                                           resultado_.subiuNivel ? som::SomId::PowerUp : som::SomId::Bip,
+                                           resultado_.conquista ? som::SomId::Jingle : som::SomId::Bip}))
+            pedirSom(*id);
         salvarReflexao(filesystem);
         ciclo_ = tempo::avancarCiclo(ciclo_);   // foco -> pausa
         descansoMs_ = int64_t(tempo::duracaoCicloMin(ciclo_)) * 60000;
@@ -725,8 +774,15 @@ namespace screens {
         const auto agora = tempo::agora(nowMs);
         const std::string data = agora.valida ? tempo::textoData(agora.data) : std::string{};
         const bool batalhaAtiva = battleActive() || fase_ == Fase::Reflexao;
+        const int nivelAntes = tempo::nivelDeXp(estado_.xpTotal);
+        const int streakAntes = estado_.streak;
         const auto evento = tempo::liquidarFocoLeitor(estado_, rodada, batalhaAtiva, tituloLivro, data, horaTexto(agora));
         if (!evento) return false;
+        // Mesmo quadro do "fim do foco" (SuaveDescendo, no App): nivel/conquista valem mais, senao a moeda.
+        if (const auto id = som::escolher({som::SomId::Moeda,
+                                           tempo::nivelDeXp(estado_.xpTotal) > nivelAntes ? som::SomId::PowerUp : som::SomId::Bip,
+                                           conquistaNova(filesystem, *evento, streakAntes) ? som::SomId::Jingle : som::SomId::Bip}))
+            pedirSom(*id);
         TempoStorage::saveState(*filesystem, estado_);
         if (agora.valida) {
             TempoStorage::appendLog(*filesystem, agora.data, *evento);
@@ -739,6 +795,7 @@ namespace screens {
         if (fase_ == Fase::Descanso) {
             if (int64_t(tempo::ms(nowMs)) - int64_t(descansoInicioMs_) >= descansoMs_) {
                 encerrarDescanso(nowMs);
+                if (fase_ != Fase::Lutando) pedirSom(som::SomId::Bip);   // fim da pausa sem nova rodada (com rodada: SobeQuatro)
                 return true;
             }
             return false;
@@ -757,6 +814,7 @@ namespace screens {
         }
         if (!overtime_ && restanteMs() == 0) {   // inimigo derrotado: nao encerra, segue em overtime
             overtime_ = true;
+            pedirSom(som::SomId::Vitoria);   // inimigo derrotado (os creditos/moeda vem ao concluir)
             return true;
         }
         if (overtime_ && overtimeMs() >= plano) {   // teto de +100 % do planejado
@@ -769,10 +827,12 @@ namespace screens {
             if (minutosFoco >= ultimoBipeFocoMin_ + 10) {   // "presenca" a cada 10 min de foco
                 ultimoBipeFocoMin_ = minutosFoco - minutosFoco % 10;
                 bipe = true;
+                pedirSom(som::SomId::Bip);
             }
             if (!avisoFimDado_ && plano >= 5 * 60000 && restanteMs() <= 2 * 60000) {   // aviso 2 min antes do fim
                 avisoFimDado_ = true;
                 bipe = true;
+                pedirSom(som::SomId::Bip);
             }
         }
         return bipe;

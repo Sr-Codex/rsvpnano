@@ -133,6 +133,13 @@ namespace settings {
         BoundedValue<uint8_t, 0, 4> standbyTimerIndex{1};
         standby::Kind screensaver = standby::Kind::life;
         std::string selectedThemeId = "default";
+        // Sons do Lume (docs/app-tempo/sons.md): 0 baixo, 1 medio, 2 alto; "sons de jogo" liga/desliga (lembretes sempre
+        // tocam); horario de silencio (minutos do dia, passo de 30; lembrete comum respeita, medicacao nao).
+        BoundedValue<uint8_t, 0, 2> soundVolume{1};
+        bool gameSounds = true;
+        bool quietHours = false;
+        BoundedValue<uint16_t, 0, 1410, 30> quietStartMinute{1380};
+        BoundedValue<uint16_t, 0, 1410, 30> quietEndMinute{420};
 
         bool operator==(const InterfaceSettings&) const = default;
     };

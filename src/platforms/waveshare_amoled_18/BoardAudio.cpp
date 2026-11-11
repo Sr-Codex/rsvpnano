@@ -27,7 +27,15 @@ namespace Board::Audio {
     }
 
     bool beep() {
-        return BoardPlatform::Es8311BoardAudio::beep(gAudioContext);
+        return play({som::SomId::Bip, 1.0f, som::Classe::Interface});
+    }
+
+    bool play(const som::Pedido& pedido) {
+        return BoardPlatform::Es8311BoardAudio::play(gAudioContext, pedido);
+    }
+
+    void waitOrStop(uint32_t timeoutMs) {
+        BoardPlatform::Es8311BoardAudio::waitOrStop(timeoutMs);
     }
 
     bool available() {

@@ -2,56 +2,47 @@
 
 #include <Arduino.h>
 
-#include <array>
 #include <esp_log.h>
 #include "board/BoardPower.h"
 #include "drivers/audio/es8311/Es8311.h"
+#include "som/Tocador.h"
 
 namespace {
 
     constexpr char kAudioTag[] = "audio";
     constexpr uint32_t kAudioStartupDelayMs = 15;
-    constexpr uint32_t kBeepFrequencyHz = 1320;
-    constexpr int16_t kBeepAmplitude = 12000;
-    constexpr uint32_t kEnvelopeAttackMs = 6;
-    constexpr uint32_t kEnvelopeReleaseMs = 12;
-    constexpr uint32_t kSampleRateHz = 16000;
-    constexpr uint32_t kBeepDurationMs = 120;
     constexpr uint32_t kWriteTimeoutMs = 250;
-    constexpr size_t kBeepFrames = (static_cast<size_t>(kSampleRateHz) * kBeepDurationMs) / 1000U;
-    constexpr size_t kBeepSamples = kBeepFrames * 2U;
-
-    constexpr std::array<int16_t, kBeepSamples> makeBeepBuffer() {
-        std::array<int16_t, kBeepSamples> buffer{};
-        const size_t attackFrames = (static_cast<size_t>(kSampleRateHz) * kEnvelopeAttackMs) / 1000U;
-        const size_t releaseFrames = (static_cast<size_t>(kSampleRateHz) * kEnvelopeReleaseMs) / 1000U;
-        const uint32_t halfPeriodSamples = kSampleRateHz / (kBeepFrequencyHz * 2U);
-
-        for (size_t frame = 0; frame < kBeepFrames; ++frame) {
-            int32_t sample = ((frame / halfPeriodSamples) % 2U == 0U) ? kBeepAmplitude : -kBeepAmplitude;
-
-            if (attackFrames > 0 && frame < attackFrames) {
-                sample = (sample * static_cast<int32_t>(frame)) / static_cast<int32_t>(attackFrames);
-            } else if (releaseFrames > 0 && frame >= (kBeepFrames - releaseFrames)) {
-                const size_t remaining = kBeepFrames - frame;
-                sample = (sample * static_cast<int32_t>(remaining)) / static_cast<int32_t>(releaseFrames);
-            }
-
-            const size_t index = frame * 2U;
-            buffer[index] = static_cast<int16_t>(sample);
-            buffer[index + 1U] = static_cast<int16_t>(sample);
-        }
-        return buffer;
-    }
-
-    constexpr auto kBeepBuffer = makeBeepBuffer();
 
     bool enableAudioRail() {
         return Board::Power::enableAudioPowerIfAvailable();
     }
 
-    bool writeBeepBuffer(BoardDrivers::Es8311::Context& context) {
-        return BoardDrivers::Es8311::writeSamples(context, kBeepBuffer.data(), kBeepBuffer.size(), kWriteTimeoutMs);
+    // Sons gerados na placa (src/som): tarefa de audio + fila. O codec so e configurado (I2C) na thread de quem pede.
+    som::Tocador gTocador;
+
+    bool prepararSaida(void* contexto) {
+        auto& context = *static_cast<BoardDrivers::Es8311::Context*>(contexto);
+        if (!BoardDrivers::Es8311::available(context)) {
+            if (!enableAudioRail()) {
+                ESP_LOGW(kAudioTag, "Audio rail unavailable");
+                return false;
+            }
+            delay(kAudioStartupDelayMs);
+            if (!BoardDrivers::Es8311::begin(context)) return false;
+        }
+        return enableAudioRail() && BoardDrivers::Es8311::prepareOutput(context);
+    }
+
+    bool escreverSaida(void* contexto, const int16_t* estereo, size_t amostras) {
+        auto& context = *static_cast<BoardDrivers::Es8311::Context*>(contexto);
+        if (BoardDrivers::Es8311::writeSamples(context, estereo, amostras, kWriteTimeoutMs)) return true;
+        ESP_LOGW(kAudioTag, "Retrying speaker write after recovering output path");
+        if (!enableAudioRail() || !BoardDrivers::Es8311::recoverOutputPath(context)) return false;
+        return BoardDrivers::Es8311::writeSamples(context, estereo, amostras, kWriteTimeoutMs);
+    }
+
+    void aoComecarSom(void*, som::SomId id) {
+        ESP_LOGI(kAudioTag, "som: %s", som::nome(id));
     }
 
 } // namespace
@@ -72,21 +63,17 @@ namespace BoardPlatform::Es8311BoardAudio {
         return BoardDrivers::Es8311::begin(context);
     }
 
-    bool beep(BoardDrivers::Es8311::Context& context) {
-        if (!enableAudioRail() || !BoardDrivers::Es8311::prepareOutput(context)) {
-            return false;
-        }
+    bool play(BoardDrivers::Es8311::Context& context, const som::Pedido& pedido) {
+        som::Saida saida;
+        saida.preparar = &prepararSaida;
+        saida.escrever = &escreverSaida;
+        saida.aoComecar = &aoComecarSom;
+        saida.contexto = &context;
+        return gTocador.iniciar(saida) && gTocador.tocar(pedido);
+    }
 
-        if (writeBeepBuffer(context)) {
-            return true;
-        }
-
-        ESP_LOGW(kAudioTag, "Retrying speaker beep after recovering output path");
-        if (!enableAudioRail() || !BoardDrivers::Es8311::recoverOutputPath(context)) {
-            return false;
-        }
-
-        return writeBeepBuffer(context);
+    void waitOrStop(uint32_t timeoutMs) {
+        gTocador.esperarOuParar(timeoutMs);
     }
 
     bool available(const BoardDrivers::Es8311::Context& context) {

@@ -5,11 +5,13 @@
 #include <Arduino.h>
 #include <Preferences.h>
 
+#include <optional>
 #include <string>
 #include <atomic>
 #include <string_view>
 
 #include "board/BoardDisplay.h"
+#include "som/Regras.h"
 #include "tempo/Despertador.h"
 #include "dictionary/Dictionary.h"
 #include "board/BoardPower.h"
@@ -164,6 +166,13 @@ private:
     bool handleAvisoTouch(uint32_t nowMs);            // toque no aviso abre os Habitos (consome o toque)
     void desenharAvisoHabito(uint32_t nowMs);         // por cima da tela atual, enquanto ativo
     bool avisoPermitido() const;
+    // Sons (docs/app-tempo/sons.md): configuracao dos Ajustes, decisao (volume, jogo, silencio) e fila de audio.
+    som::Config configSom() const;
+    void tocarSom(som::SomId id, uint32_t nowMs);     // decide e enfileira (lembretes: direto, sem esperar o quadro)
+    void acumularSom(som::SomId id);                  // eventos do mesmo quadro viram UM som (o de maior valor)
+    void liberarSom(uint32_t nowMs);
+    std::optional<som::SomId> somDoQuadro_;
+    bool focoAtivoAntes_ = false;
     void sincronizarOrientacaoHabitos();              // em pe (IMU) so com os Habitos abertos
     screens::Screen lastRenderedScreen_ = screens::Screen::Home;
     bool settingsFromHome_ = false;

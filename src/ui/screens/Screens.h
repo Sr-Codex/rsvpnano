@@ -79,6 +79,7 @@ namespace screens {
         Home,   // launcher "Agora + apps" (menu inicial)
         Perfil,   // app Perfil (5 paginas: Ficha, Semana, Projetos, Conquistas, Hoje)
         Habitos,   // app Habitos (deitada: cartao + lista; em pe via IMU: linha do tempo)
+        SonsSettings,   // Ajustes > Sons (volume, sons de jogo, horario de silencio)
     };
 
     enum class Action : uint8_t {
@@ -125,6 +126,8 @@ namespace screens {
         const locales::Catalog* languages_ = nullptr;
     };
     bool pacingSettings(ui::Context& ui, settings::PacingSettings& settings, Screen& screen);
+    // Ajustes > Sons. true = mudou algo (salvar). `testar` = tocar um som de teste no volume atual.
+    bool sonsSettings(ui::Context& ui, settings::InterfaceSettings& settings, Screen& screen, bool& testar);
     bool bookFonts(ui::Context& ui, const BookMetadata& metadata, settings::ReadingOverrides& overrides,
                    const locales::Catalog& localeCatalog, FontCatalog& fonts, Screen& screen,
                    Screen parent = Screen::Settings, std::string_view bookTitle = {});

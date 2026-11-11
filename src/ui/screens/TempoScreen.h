@@ -2,6 +2,7 @@
 
 #include <FS.h>
 
+#include <array>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -12,6 +13,7 @@
 #include "tempo/Habitos.h"
 #include "tempo/Lembretes.h"
 #include "tempo/Motor.h"
+#include "som/Sintese.h"
 #include "tempo/Sessao.h"
 #include "ui/screens/ModernScreens.h"
 
@@ -68,9 +70,15 @@ namespace screens {
             return screen == Screen::TempoHoje || screen == Screen::TempoBatalha || screen == Screen::TempoVitoria;
         }
 
+        // Sons (docs/app-tempo/sons.md): os eventos do Tempo/Habitos enfileiram aqui o SomId do momento (um por evento
+        // composto: vitoria+moeda+nivel+conquista viram UM som, o de maior valor) e o App drena 1x por quadro.
+        // Devolve false quando nao ha mais nenhum.
+        bool pegarSom(som::SomId& id);
+
         // Avanca a batalha (acumula tempo), entra em overtime quando o inimigo zera, conclui no teto de +100 %,
         // cuida da pausa de 5 min e do auto-salvar da reflexao. Devolve true quando o app deve dar um bipe
-        // (inimigo derrotado, fim do overtime/pausa, "presenca" a cada 10 min, aviso 2 min antes do fim).
+        // (inimigo derrotado, fim do overtime/pausa, "presenca" a cada 10 min, aviso 2 min antes do fim). Os SONS saem
+        // por pegarSom() (o bool continua so como sinal de "algo aconteceu").
         bool tick(uint32_t nowMs, fs::FS* filesystem);
         Action draw(ui::Context& ui, uint32_t nowMs, Screen& screen, fs::FS* filesystem);
         void boot(uint32_t nowMs, Screen& screen, fs::FS* filesystem);   // BOOT curto
@@ -122,7 +130,7 @@ namespace screens {
         void pausarOuRetomar(uint32_t nowMs);
         void alternarDistracao(uint32_t nowMs);
         void acumular(uint32_t nowMs);
-        void finalizar(uint32_t nowMs, bool abandonou, fs::FS* filesystem);
+        void finalizar(uint32_t nowMs, bool abandonou, fs::FS* filesystem, bool tocarDesfecho = true);
         void iniciarDescanso(uint32_t nowMs, bool voltaParaBatalha);
         void encerrarDescanso(uint32_t nowMs);
         void salvarReflexao(fs::FS* filesystem);
@@ -130,6 +138,9 @@ namespace screens {
         void registrarHabitoMeditacao(fs::FS* filesystem);     // batalha de Meditacao vencida: marca o habito
         void gravarEventoHabito(fs::FS* filesystem, const tempo::ResultadoOcorrencia& r, std::string_view origem);
         void salvar(fs::FS* filesystem);
+        void pedirSom(som::SomId id);
+        // A rodada/batalha liquidada ainda ganha uma conquista nova? (resumo.json antes x depois do evento; sem resumo = vazio)
+        bool conquistaNova(fs::FS* filesystem, const tempo::EventoLog& evento, int streakAntes) const;
         int64_t restanteMs() const;      // vida restante do inimigo (ms)
         int64_t overtimeMs() const;      // foco alem do necessario para zerar o inimigo (ms)
         int pontosDeVida() const;        // 0..100
@@ -196,7 +207,11 @@ namespace screens {
             int nivelAtributo = 1;
             int streak = 0;
             bool abandonou = false;
+            bool subiuNivel = false;     // o XP desta liquidacao subiu o nivel
+            bool conquista = false;      // ganhou uma conquista nova
         } resultado_;
+        std::array<som::SomId, 4> sons_{};
+        size_t nSons_ = 0;
     };
 
 } // namespace screens

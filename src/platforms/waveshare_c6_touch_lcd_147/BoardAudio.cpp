@@ -10,6 +10,12 @@ namespace Board::Audio {
         return false;
     }
 
+    bool play(const som::Pedido&) {
+        return false;
+    }
+
+    void waitOrStop(uint32_t) {}
+
     bool available() {
         return false;
     }

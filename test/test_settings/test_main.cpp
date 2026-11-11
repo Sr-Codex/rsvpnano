@@ -138,6 +138,35 @@ void test_bounded_values_clamp_on_every_assignment() {
     TEST_ASSERT_EQUAL_UINT8(5, brightness);
 }
 
+void test_sound_settings_defaults_migrate_clamp_and_persist() {
+    // configuracao antiga (sem as chaves de som): padroes = medio, jogo ligado, silencio desligado 23:00-07:00
+    auto old = settings::codec::decodeToml("[interface]\nlocale = \"pt-BR\"\n", settings::SettingsSource::Nvs);
+    TEST_ASSERT_TRUE(old.has_value());
+    TEST_ASSERT_EQUAL_UINT8(1, old->interface.soundVolume);
+    TEST_ASSERT_TRUE(old->interface.gameSounds);
+    TEST_ASSERT_FALSE(old->interface.quietHours);
+    TEST_ASSERT_EQUAL_UINT16(23 * 60, old->interface.quietStartMinute);
+    TEST_ASSERT_EQUAL_UINT16(7 * 60, old->interface.quietEndMinute);
+    old->interface.soundVolume = 2;
+    old->interface.gameSounds = false;
+    old->interface.quietHours = true;
+    old->interface.quietStartMinute = 22 * 60 + 30;
+    old->interface.quietEndMinute = 6 * 60;
+    auto encoded = settings::codec::encodeToml(*old, settings::SettingsSource::Nvs);
+    TEST_ASSERT_TRUE(encoded.has_value());
+    auto restored = settings::codec::decodeToml(*encoded, settings::SettingsSource::Nvs);
+    TEST_ASSERT_TRUE(restored.has_value());
+    TEST_ASSERT_EQUAL_UINT8(2, restored->interface.soundVolume);
+    TEST_ASSERT_FALSE(restored->interface.gameSounds);
+    TEST_ASSERT_TRUE(restored->interface.quietHours);
+    TEST_ASSERT_EQUAL_UINT16(22 * 60 + 30, restored->interface.quietStartMinute);
+    TEST_ASSERT_EQUAL_UINT16(6 * 60, restored->interface.quietEndMinute);
+    auto fora = settings::codec::decodeToml("[interface]\nsoundVolume = 9\nquietStartMinute = 5000\n", settings::SettingsSource::Sd);
+    TEST_ASSERT_TRUE(fora.has_value());
+    TEST_ASSERT_EQUAL_UINT8(2, fora->interface.soundVolume);
+    TEST_ASSERT_EQUAL_UINT16(1410, fora->interface.quietStartMinute);
+}
+
 void test_invalid_input_cannot_mutate_a_live_value() {
     settings::DeviceSettings live;
     live.reading.wpm = 450;
@@ -394,6 +423,7 @@ int main() {
     RUN_TEST(test_saved_wifi_capacity_and_legacy_roundtrip);
     RUN_TEST(test_pocket_lines_guides_migrate_old_settings_without_reinterpreting_horizontal_gap);
     RUN_TEST(test_onboarding_and_touch_preference_migrate_and_persist);
+    RUN_TEST(test_sound_settings_defaults_migrate_clamp_and_persist);
     RUN_TEST(test_defaults_round_trip_through_toml_and_companion_json);
     RUN_TEST(test_battery_curve_reaches_full);
     RUN_TEST(test_visibility_toggles_only_selected_state_and_round_trips);

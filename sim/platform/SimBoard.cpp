@@ -4,6 +4,7 @@
 #include "board/Board.h"
 #include "board/BoardImu.h"
 #include "board/BoardDeepSleep.h"
+#include "som/Tocador.h"
 #include "tempo/Relogio.h"
 
 #include <canvas/Arduino_Canvas.h>
@@ -231,11 +232,30 @@ namespace Board::System {
 
 } // namespace Board::System
 
-// ------------------------------------------------------------------ Audio (absent in the simulator)
+// ------------------------------------------------------------------ Audio
+// Sem alto-falante: roda a MESMA tarefa/fila de audio do firmware (som::Tocador) com uma saida que so registra
+// "[sim] som: <Nome>" no log e consome o PCM em tempo real (16 kHz estereo), para exercitar fila e prioridades.
+namespace {
+    som::Tocador gSimTocador;
+    bool simPreparar(void*) { return true; }
+    bool simEscrever(void*, const int16_t*, size_t amostras) {
+        delay(static_cast<uint32_t>(amostras / 2 * 1000 / som::kTaxaHz));
+        return true;
+    }
+    void simComecou(void*, som::SomId id) { std::fprintf(stderr, "[sim] som: %s\n", som::nome(id)); }
+} // namespace
 namespace Board::Audio {
-    bool begin() { return false; }
-    bool beep() { return false; }
-    bool available() { return false; }
+    bool begin() { return true; }
+    bool available() { return true; }
+    bool play(const som::Pedido& pedido) {
+        som::Saida saida;
+        saida.preparar = &simPreparar;
+        saida.escrever = &simEscrever;
+        saida.aoComecar = &simComecou;
+        return gSimTocador.iniciar(saida) && gSimTocador.tocar(pedido);
+    }
+    bool beep() { return play({som::SomId::Bip, 1.0f, som::Classe::Interface}); }
+    void waitOrStop(uint32_t timeoutMs) { gSimTocador.esperarOuParar(timeoutMs); }
 } // namespace Board::Audio
 
 // Virtual QMI8658 at register level (what focus::OrientationReader talks to).

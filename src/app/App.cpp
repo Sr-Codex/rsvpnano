@@ -66,6 +66,27 @@ namespace {
     }
 } // namespace
 
+namespace {
+    // Lembrete de habito = DoisBipes; medicacao e a insistencia dela = AlertaLongo (toca mesmo no silencio).
+    som::SomId somDoLembrete(tempo::TipoHabito tipo) {
+        return tipo == tempo::TipoHabito::Medicacao ? som::SomId::AlertaLongo : som::SomId::DoisBipes;
+    }
+
+    // Fase do foco do leitor DEPOIS do corte: foco acabou -> descanso = SuaveDescendo; descanso acabou -> novo foco =
+    // SobeQuatro; sessao completa = Bip.
+    som::SomId somDoFimDeFase(focus::Phase fase) {
+        switch (fase) {
+        case focus::Phase::WaitingBreak:
+        case focus::Phase::Break:
+        case focus::Phase::PausedBreak: return som::SomId::SuaveDescendo;
+        case focus::Phase::WaitingFocus:
+        case focus::Phase::Focus:
+        case focus::Phase::PausedFocus: return som::SomId::SobeQuatro;
+        default: return som::SomId::Bip;
+        }
+    }
+} // namespace
+
 void App::begin() {
     {   // ADR-009: acordou do deep sleep pelo timer = boot "de lembrete"; qualquer outro boot zera a memoria RTC
         auto& rtc = Board::DeepSleep::rtc();
@@ -184,9 +205,48 @@ void App::contarFocoLeitor(uint32_t nowMs) {
     }
 }
 
+som::Config App::configSom() const {
+    const auto& cfg = settingsStore_.settings().interface;
+    som::Config c;
+    c.volume = static_cast<som::Volume>(static_cast<uint8_t>(cfg.soundVolume));
+    c.sonsJogo = cfg.gameSounds;
+    c.silencioAtivo = cfg.quietHours;
+    c.silencioInicioMin = cfg.quietStartMinute;
+    c.silencioFimMin = cfg.quietEndMinute;
+    return c;
+}
+
+void App::tocarSom(som::SomId id, uint32_t nowMs) {
+    const auto agora = tempo::agora(nowMs);
+    const auto decisao = som::decidir(id, configSom(), agora.valida ? agora.minutoDoDia : -1);
+    if (!decisao.tocar) {
+        ESP_LOGI("som", "%s suprimido (%s)", som::nome(id),
+                 decisao.motivo == som::Motivo::Silencio ? "horario de silencio" : "sons de jogo desligados");
+        return;
+    }
+    Board::Audio::play({id, decisao.ganho, som::classeDe(id)});
+}
+
+void App::acumularSom(som::SomId id) {
+    if (!somDoQuadro_ || som::valorDoEvento(id) > som::valorDoEvento(*somDoQuadro_)) somDoQuadro_ = id;
+}
+
+void App::liberarSom(uint32_t nowMs) {
+    if (!somDoQuadro_) return;
+    const som::SomId id = *somDoQuadro_;
+    somDoQuadro_.reset();
+    tocarSom(id, nowMs);
+}
+
 void App::update(uint32_t nowMs) {
+    // Sons dos eventos do quadro anterior (Tempo/Habitos/foco do leitor): um so por quadro
+    for (som::SomId id; tempoScreen_.pegarSom(id);) acumularSom(id);
+    const bool focoAtivo = focusScreen_.session().phase() != focus::Phase::Complete;
+    if (focoAtivo && !focoAtivoAntes_) acumularSom(som::SomId::SobeQuatro);   // comecou um foco do leitor
+    focoAtivoAntes_ = focoAtivo;
+    liberarSom(nowMs);
     if (focusScreen_.active()) {
-        if (focusScreen_.update(nowMs)) Board::Audio::beep();
+        if (focusScreen_.update(nowMs)) acumularSom(somDoFimDeFase(focusScreen_.session().phase()));
         if (focusScreen_.breakVisible()) {
             if (!backgroundJobActive() && readerScreen_.session.playing)
                 readerScreen_.pauseImmediately(prefs_, nowMs);
@@ -304,10 +364,9 @@ void App::update(uint32_t nowMs) {
         readerScreen_.update(prefs_, nowMs);
     if (screen_ == screens::Screen::FocusSession && !focusScreen_.manual()) {
         if (focusScreen_.update(nowMs))
-            Board::Audio::beep();
+            acumularSom(somDoFimDeFase(focusScreen_.session().phase()));
     }
-    if (tempoScreen_.tick(nowMs, storage_.mounted() ? &Board::Storage::filesystem() : nullptr))
-        Board::Audio::beep();
+    tempoScreen_.tick(nowMs, storage_.mounted() ? &Board::Storage::filesystem() : nullptr);   // sons: pegarSom()
     ReadingProgress::save(readerScreen_.session, prefs_, false, nowMs);
 
     renderScreen(nowMs);
@@ -542,6 +601,15 @@ void App::renderScreen(uint32_t nowMs) {
             readerScreen_
                 .applyTheme(interfaceScreen_.themes.resolve(settingsStore_.settings().interface.selectedThemeId));
         }
+        break;
+    }
+    case screens::Screen::SonsSettings: {
+        immediateUi_.beginFrame(static_cast<uint8_t>(screen_));
+        bool testar = false;
+        if (screens::sonsSettings(immediateUi_, settingsStore_.settings().interface, screen_, testar))
+            settingsStore_.acceptChanges();
+        if (testar)   // "Ouvir": sempre toca, no volume escolhido
+            Board::Audio::play({som::SomId::SobeTres, som::ganhoDoVolume(configSom().volume), som::Classe::Jogo});
         break;
     }
     case screens::Screen::PacingSettings: {
@@ -949,6 +1017,7 @@ void App::handleInput(Input::ActionMask actions, uint32_t nowMs) {
                     networkScreen_.closeWifi();
                 screen_ = screens::Screen::NetworkSettings;
             } else if (screen_ == screens::Screen::ReadingSettings || screen_ == screens::Screen::InterfaceSettings
+                       || screen_ == screens::Screen::SonsSettings
                        || screen_ == screens::Screen::PacingSettings || screen_ == screens::Screen::ReaderAppearance
                        || screen_ == screens::Screen::NetworkSettings) {
                 screen_ = screen_ == screens::Screen::NetworkSettings && immediateUi_.modernPresentation()
@@ -1450,12 +1519,12 @@ bool App::tickHabitos(uint32_t nowMs) {
     if (screen_ == screens::Screen::Habitos) {   // ja esta olhando: bipe so no aviso inicial, sem aviso no topo
         if (aviso->tipo == tempo::TipoHabito::Medicacao)
             Board::DeepSleep::rtc().ultimoAvisoMedicacaoEpoch = tempo::epochAgora(nowMs);
-        if (!aviso->repeticao || lembreteBoot_) Board::Audio::beep();
+        if (!aviso->repeticao || lembreteBoot_) tocarSom(somDoLembrete(aviso->tipo), nowMs);
         return false;
     }
     if (aviso->tipo == tempo::TipoHabito::Medicacao)
         Board::DeepSleep::rtc().ultimoAvisoMedicacaoEpoch = tempo::epochAgora(nowMs);   // base da insistencia no deep sleep
-    Board::Audio::beep();
+    tocarSom(somDoLembrete(aviso->tipo), nowMs);   // comum: DoisBipes (respeita o silencio); medicacao: AlertaLongo (sempre)
     if (avisoPermitido()) {
         avisoHabito_ = *aviso;
         avisoAtivo_ = true;
@@ -1842,6 +1911,7 @@ void App::powerOff(uint32_t nowMs, bool automatic) {
         delay(250);
     }
     settingsStore_.flush();
+    Board::Audio::waitOrStop(1500);   // deixa o som em curso acabar (ou para) antes de desligar o codec/dormir
     Board::Display::sleep();
     readerScreen_.store.close();
     storage_.end();
