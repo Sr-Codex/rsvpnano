@@ -172,7 +172,10 @@ namespace tempo::ticktick {
             primeiro = false;
             caminho += h.id;
         }
-        caminho += "&from=" + std::to_string(stamp) + "&to=" + std::to_string(stamp);
+        // A API trata `to` como EXCLUSIVO (medido na conta real, 2026-11-11: from=to=hoje -> [] ;
+        // from=hoje&to=amanhã -> os check-ins de hoje). Sem isto a placa nunca via o que foi marcado no celular.
+        const int amanha = stampDe(dataDeSerial(diaSerial(dataDeStamp(stamp)) + 1));
+        caminho += "&from=" + std::to_string(stamp) + "&to=" + std::to_string(amanha);
         return caminho;
     }
 

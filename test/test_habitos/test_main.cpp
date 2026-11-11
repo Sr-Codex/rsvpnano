@@ -731,8 +731,13 @@ namespace {
         TEST_ASSERT_EQUAL_STRING("ticktick", l.fonte.c_str());
         TEST_ASSERT_FALSE(ticktick::montarHabitos("{\"errorCode\":\"x\"}", "").has_value());
         // caminho do GET de check-ins
-        TEST_ASSERT_EQUAL_STRING("/habit/checkins?habitIds=h2,h3,h4&from=20261110&to=20261110",
+        // `to` é exclusivo na API: pede até o dia seguinte (inclusive virada de mês e de ano)
+        TEST_ASSERT_EQUAL_STRING("/habit/checkins?habitIds=h2,h3,h4&from=20261110&to=20261111",
                                  ticktick::caminhoCheckins(l, 20261110).c_str());
+        TEST_ASSERT_EQUAL_STRING("/habit/checkins?habitIds=h2,h3,h4&from=20261130&to=20261201",
+                                 ticktick::caminhoCheckins(l, 20261130).c_str());
+        TEST_ASSERT_EQUAL_STRING("/habit/checkins?habitIds=h2,h3,h4&from=20261231&to=20270101",
+                                 ticktick::caminhoCheckins(l, 20261231).c_str());
         TEST_ASSERT_EQUAL_STRING("", ticktick::caminhoCheckins(ListaHabitos{}, 20261110).c_str());
     }
 
