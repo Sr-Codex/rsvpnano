@@ -97,6 +97,8 @@ namespace screens {
         // "Feito agora" na ocorrencia `indice` de estado().dia.ocorrencias: paga, grava o log e enfileira o check-in
         // (enviado ao TickTick na proxima sync com Wi-Fi). Devolve false se ja estava feita ou sem SD.
         bool marcarHabito(uint32_t nowMs, fs::FS* filesystem, size_t indice);
+        // true uma vez depois de um check-in novo entrar na fila (o App dispara a sync do TickTick).
+        bool pegarCheckinNovo() { const bool v = checkinNovo_; checkinNovo_ = false; return v; }
         // "Pular": sem cr/XP, nao entra na fila, nao conta como esquecido (tempo::pularOcorrencia). Devolve false se ja resolvida/sem SD.
         bool pularHabito(uint32_t nowMs, fs::FS* filesystem, size_t indice);
         // "Ainda nao" (medicacao): o lembrete volta em 15 min (nao grava nada: so a agenda de lembretes em RAM).
@@ -150,6 +152,7 @@ namespace screens {
         Action drawBatalha(ui::Context& ui, uint32_t nowMs, Screen& screen);
         Action drawVitoria(ui::Context& ui, uint32_t nowMs, Screen& screen);
 
+        bool checkinNovo_ = false;
         bool carregado_ = false;
         uint32_t ultimoDesenhoMs_ = 0;
         fs::FS* fs_ = nullptr;

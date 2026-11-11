@@ -204,6 +204,7 @@ private:
     bool onboardingJobWasMounted_=false,onboardingStorageNeedsRecovery_=false,onboardingReloadUiPending_=false;
     // Sincronizacao TickTick -> /tempo/projetos.json (segundo plano; ver updateTickTickSync)
     bool tickTickWasLauncher_ = false;
+    bool tickTickCheckinPendente_ = false;   // "Feito" num habito: sincronizar logo (lume.12)
     bool tickTickTried_ = false;
     uint32_t tickTickLastMs_ = 0;
 };

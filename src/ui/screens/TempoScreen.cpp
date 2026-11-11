@@ -409,6 +409,7 @@ namespace screens {
         const auto r = tempo::marcarMeditacaoPorTimer(estado_, fila);
         if (!r.registrado) return;
         for (const auto& item : fila) TempoStorage::enqueueCheckin(*filesystem, item);
+        if (!fila.empty()) checkinNovo_ = true;   // lume.12: o App sincroniza logo ("Feito" envia na hora)
         gravarEventoHabito(filesystem, r, "timer");
     }
 

@@ -66,13 +66,6 @@ namespace net::ticktick {
             return ESP_OK;
         }
 
-        struct Client {
-            esp_http_client_handle_t value;
-            ~Client() {
-                if (value) esp_http_client_cleanup(value);
-            }
-        };
-
         std::string statusError(int status) {
             if (status == 401 || status == 403) return "401: token inválido ou expirado";
             if (status == 429) return "429: limite da API do TickTick; tente mais tarde";
@@ -85,92 +78,131 @@ namespace net::ticktick {
             std::string error;     // so quando status == 0 (falha local)
         };
 
-        // GET (corpo vazio) ou POST JSON. Devolve o status HTTP e o corpo, qualquer que seja o status.
-        Reply request(esp_http_client_method_t method, const std::string& path, const std::string& token,
+        // Uma conexão HTTPS (keep-alive) reaproveitada pela sync inteira (lume.12). Antes cada chamada abria e fechava
+        // um TLS (~40 KB contíguos de SRAM interna); depois de 3–4 seguidas o maior bloco livre caía para ~24 KB e o
+        // check-in falhava com ESP_ERR_HTTP_CONNECT (medido na placa, lume.11). Agora o TLS é alocado uma vez, no
+        // começo, com a memória inteira. Destruir a Sessao ANTES de desligar o Wi-Fi (ordem de declaração em run()).
+        struct Sessao {
+            esp_http_client_handle_t handle = nullptr;
+            Body body;
+            ~Sessao() { fechar(); }
+            void fechar() {
+                if (handle) {
+                    esp_http_client_cleanup(handle);
+                    handle = nullptr;
+                }
+            }
+        };
+
+        std::string erroTransporte(esp_err_t result) {
+            // Diagnóstico (lume.11): inclui o erro do ESP-IDF e a memória interna livre, p/ distinguir Wi-Fi, TLS,
+            // tempo esgotado e falta de memória.
+            return std::string{"Falha HTTPS ("} + esp_err_to_name(result) + ", maior bloco livre "
+                   + std::to_string(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024U)
+                   + " KB, Wi-Fi " + (WiFi.status() == WL_CONNECTED ? "ok" : "caiu") + ")";
+        }
+
+        // GET (corpo vazio) ou POST JSON pela sessão. Devolve o status HTTP e o corpo, qualquer que seja o status.
+        // Conexão reaproveitada que falhar (servidor fechou o keep-alive) = 1 nova tentativa com conexão nova.
+        Reply request(Sessao& sessao, esp_http_client_method_t method, const std::string& path, const std::string& token,
                       const std::string& json) {
             const std::string url = std::string{kApi} + path;
             const std::string bearer = "Bearer " + token;
-            Body body;
-            esp_http_client_config_t config{};
-            config.url = url.c_str();
-            config.method = method;
-            config.crt_bundle_attach = esp_crt_bundle_attach;  // mesmo bundle de certificados do OTA/downloads
-            config.timeout_ms = kHttpTimeoutMs;
-            config.buffer_size = 2048;
-            config.buffer_size_tx = 1024;
-            config.disable_auto_redirect = true;
-            config.event_handler = onEvent;
-            config.user_data = &body;
-            config.user_agent = "RSVP-Nano/0.2";
-            Client client{esp_http_client_init(&config)};
             Reply reply;
-            if (!client.value) {
-                reply.error = "Sem memória para a conexão";
+            for (int tentativa = 0; tentativa < 2; ++tentativa) {
+                const bool reaproveitada = sessao.handle != nullptr;
+                if (!reaproveitada) {
+                    esp_http_client_config_t config{};
+                    config.url = url.c_str();
+                    config.method = method;
+                    config.crt_bundle_attach = esp_crt_bundle_attach;  // mesmo bundle de certificados do OTA/downloads
+                    config.timeout_ms = kHttpTimeoutMs;
+                    config.buffer_size = 2048;
+                    config.buffer_size_tx = 1024;
+                    config.disable_auto_redirect = true;
+                    config.keep_alive_enable = true;
+                    config.event_handler = onEvent;
+                    config.user_data = &sessao.body;
+                    config.user_agent = "RSVP-Nano/0.2";
+                    sessao.handle = esp_http_client_init(&config);
+                    if (!sessao.handle) {
+                        reply.error = "Sem memória para a conexão";
+                        return reply;
+                    }
+                } else {
+                    esp_http_client_set_url(sessao.handle, url.c_str());
+                    esp_http_client_set_method(sessao.handle, method);
+                }
+                sessao.body = {};
+                esp_http_client_set_header(sessao.handle, "Authorization", bearer.c_str());
+                esp_http_client_set_header(sessao.handle, "Accept-Encoding", "identity");
+                if (method == HTTP_METHOD_POST) {
+                    esp_http_client_set_header(sessao.handle, "Content-Type", "application/json");
+                    esp_http_client_set_post_field(sessao.handle, json.c_str(), static_cast<int>(json.size()));
+                } else {
+                    esp_http_client_delete_header(sessao.handle, "Content-Type");
+                    esp_http_client_set_post_field(sessao.handle, nullptr, 0);
+                }
+                const esp_err_t result = esp_http_client_perform(sessao.handle);
+                if (sessao.body.overflow) {
+                    sessao.fechar();   // resposta cortada no meio: a conexão fica em estado indefinido
+                    reply.error = "Resposta do TickTick grande demais";
+                    return reply;
+                }
+                if (result != ESP_OK) {
+                    sessao.fechar();
+                    reply.error = erroTransporte(result);
+                    ESP_LOGW(kTag, "%s %s%s: %s", method == HTTP_METHOD_POST ? "POST" : "GET", path.c_str(),
+                             reaproveitada ? " (conexão reaproveitada)" : "", reply.error.c_str());
+                    if (reaproveitada) continue;   // keep-alive caiu: tenta 1x com conexão nova
+                    return reply;
+                }
+                reply.status = esp_http_client_get_status_code(sessao.handle);
+                reply.body = std::move(sessao.body.data);
                 return reply;
             }
-            esp_http_client_set_header(client.value, "Authorization", bearer.c_str());
-            esp_http_client_set_header(client.value, "Accept-Encoding", "identity");
-            if (method == HTTP_METHOD_POST) {
-                esp_http_client_set_header(client.value, "Content-Type", "application/json");
-                esp_http_client_set_post_field(client.value, json.c_str(), static_cast<int>(json.size()));
-            }
-            const esp_err_t result = esp_http_client_perform(client.value);
-            if (body.overflow) {
-                reply.error = "Resposta do TickTick grande demais";
-                return reply;
-            }
-            if (result != ESP_OK) {
-                // Diagnóstico (lume.11): "sem rede" enganava — inclui o erro do ESP-IDF e a memória interna livre
-                // (cada HTTPS precisa de ~40 KB contíguos), p/ distinguir Wi-Fi, TLS, tempo esgotado e falta de memória.
-                reply.error = std::string{"Falha HTTPS ("} + esp_err_to_name(result) + ", maior bloco livre "
-                              + std::to_string(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024U)
-                              + " KB, Wi-Fi " + (WiFi.status() == WL_CONNECTED ? "ok" : "caiu") + ")";
-                ESP_LOGW(kTag, "%s %s: %s", method == HTTP_METHOD_POST ? "POST" : "GET", path.c_str(), reply.error.c_str());
-                return reply;
-            }
-            reply.status = esp_http_client_get_status_code(client.value);
-            reply.body = std::move(body.data);
             return reply;
         }
 
         // GET (corpo vazio) ou POST JSON. So devolve o corpo quando o status e 200.
-        std::expected<std::string, std::string> call(esp_http_client_method_t method, const std::string& path,
-                                                     const std::string& token, const std::string& json) {
-            Reply reply = request(method, path, token, json);
+        std::expected<std::string, std::string> call(Sessao& sessao, esp_http_client_method_t method,
+                                                     const std::string& path, const std::string& token,
+                                                     const std::string& json) {
+            Reply reply = request(sessao, method, path, token, json);
             if (reply.status == 0) return std::unexpected(std::move(reply.error));
             if (reply.status != 200) return std::unexpected(statusError(reply.status));
             return std::move(reply.body);
         }
 
         // Falha de transporte (status 0) nos hábitos: 1 nova tentativa após uma pausa curta (lume.11).
-        Reply requestComRetry(esp_http_client_method_t method, const std::string& path, const std::string& token,
-                              const std::string& json) {
-            Reply reply = request(method, path, token, json);
+        Reply requestComRetry(Sessao& sessao, esp_http_client_method_t method, const std::string& path,
+                              const std::string& token, const std::string& json) {
+            Reply reply = request(sessao, method, path, token, json);
             if (reply.status == 0) {
                 delay(800);
-                reply = request(method, path, token, json);
+                reply = request(sessao, method, path, token, json);
             }
             return reply;
         }
 
-        std::expected<std::string, std::string> callComRetry(esp_http_client_method_t method, const std::string& path,
-                                                             const std::string& token, const std::string& json) {
-            Reply reply = requestComRetry(method, path, token, json);
+        std::expected<std::string, std::string> callComRetry(Sessao& sessao, esp_http_client_method_t method,
+                                                             const std::string& path, const std::string& token,
+                                                             const std::string& json) {
+            Reply reply = requestComRetry(sessao, method, path, token, json);
             if (reply.status == 0) return std::unexpected(std::move(reply.error));
             if (reply.status != 200) return std::unexpected(statusError(reply.status));
             return std::move(reply.body);
         }
 
-        // Hábitos (app Hábitos): envia a fila de check-ins, baixa os hábitos ativos e os check-ins de hoje.
-        // Melhor esforço: devolve "" se tudo deu certo, senão o erro; nunca derruba a sync dos projetos.
-        std::string syncHabits(const settings::DeviceSecrets& secrets, fs::FS& filesystem, const std::string& agora) {
+        // Hábitos, passo 1 (lume.12: roda ANTES dos projetos — o "Feito" do usuário é o que mais importa chegar):
+        // fila persistente -> POST /habit/{id}/checkin (escopo tasks:write). Devolve "" ou o erro.
+        std::string enviarFilaHabitos(Sessao& sessao, const settings::DeviceSecrets& secrets, fs::FS& filesystem) {
             std::string error;
-            // 1. fila persistente -> POST /habit/{id}/checkin (escopo tasks:write)
             const auto queue = TempoStorage::loadQueue(filesystem);
             std::vector<std::pair<tempo::ItemFila, int>> results;
             for (const auto& item : queue) {
                 if (!tempo::devePreEnviar(item)) continue;
-                const Reply reply = requestComRetry(HTTP_METHOD_POST, tempo::ticktick::caminhoPostCheckin(item),
+                const Reply reply = requestComRetry(sessao, HTTP_METHOD_POST, tempo::ticktick::caminhoPostCheckin(item),
                                                     secrets.ticktickToken, tempo::ticktick::corpoCheckin(item));
                 results.emplace_back(item, reply.status);
                 if (reply.status == 0) {   // sem rede: guarda e para
@@ -183,28 +215,31 @@ namespace net::ticktick {
                 }
             }
             if (!results.empty()) TempoStorage::applyQueueResults(filesystem, results);
+            return error;
+        }
 
-            // 2. hábitos ativos
-            auto habits = callComRetry(HTTP_METHOD_GET, "/habit", secrets.ticktickToken, {});
-            if (!habits) return error.empty() ? "lista de hábitos: " + habits.error() : error;
+        // Hábitos, passo 2: baixa os hábitos ativos e os check-ins de hoje (feitos no celular).
+        // Melhor esforço: devolve "" se tudo deu certo, senão o erro; nunca derruba a sync dos projetos.
+        std::string baixarHabitos(Sessao& sessao, const settings::DeviceSecrets& secrets, fs::FS& filesystem,
+                                  const std::string& agora) {
+            auto habits = callComRetry(sessao, HTTP_METHOD_GET, "/habit", secrets.ticktickToken, {});
+            if (!habits) return "lista de hábitos: " + habits.error();
             const auto json = tempo::ticktick::montarHabitos(*habits, agora);
-            if (!json || !TempoStorage::saveHabits(filesystem, *json))
-                return error.empty() ? std::string{"Não foi possível gravar habitos.json"} : error;
+            if (!json || !TempoStorage::saveHabits(filesystem, *json)) return "Não foi possível gravar habitos.json";
             tempo::ListaHabitos list;
             tempo::lerHabitos(*json, list);
 
-            // 3. check-ins de hoje (feitos no celular)
             const auto today = tempo::deEpoch(static_cast<int64_t>(time(nullptr)));
             const std::string path =
                 today.valida ? tempo::ticktick::caminhoCheckins(list, tempo::stampDe(today.data)) : std::string{};
             if (!path.empty()) {
-                auto checkins = callComRetry(HTTP_METHOD_GET, path, secrets.ticktickToken, {});
-                if (!checkins) return error.empty() ? "check-ins de hoje: " + checkins.error() : error;
+                auto checkins = callComRetry(sessao, HTTP_METHOD_GET, path, secrets.ticktickToken, {});
+                if (!checkins) return "check-ins de hoje: " + checkins.error();
                 const auto file = tempo::ticktick::montarCheckins(*checkins, tempo::stampDe(today.data), agora);
                 if (!file || !TempoStorage::saveHabitCheckins(filesystem, *file))
-                    return error.empty() ? std::string{"Não foi possível gravar habitos-checkins.json"} : error;
+                    return "Não foi possível gravar habitos-checkins.json";
             }
-            return error;
+            return {};
         }
 
         std::expected<size_t, std::string> run(const settings::NetworkSettings& network,
@@ -223,12 +258,16 @@ namespace net::ticktick {
                 }
             }
 
-            auto listas = call(HTTP_METHOD_GET, "/project", secrets.ticktickToken, {});
+            Sessao sessao;   // declarada DEPOIS do WifiScope: é destruída (TLS fechado) antes do Wi-Fi desligar
+            const std::string erroFila = enviarFilaHabitos(sessao, secrets, filesystem);
+            if (!erroFila.empty()) recordHabits(erroFila);   // registra já; se os projetos falharem, o erro fica visível
+
+            auto listas = call(sessao, HTTP_METHOD_GET, "/project", secrets.ticktickToken, {});
             if (!listas) return std::unexpected(listas.error());
 
             std::string tarefas;
             for (const auto& variante : tempo::ticktick::variantesTag(tag)) {
-                auto resposta = call(HTTP_METHOD_POST, "/task/filter", secrets.ticktickToken,
+                auto resposta = call(sessao, HTTP_METHOD_POST, "/task/filter", secrets.ticktickToken,
                                      tempo::ticktick::corpoFiltro(variante));
                 if (!resposta) return std::unexpected(resposta.error());
                 const int quantas = tempo::ticktick::contarTarefas(*resposta);
@@ -243,7 +282,8 @@ namespace net::ticktick {
             if (!TempoStorage::saveProjects(filesystem, *json)) return std::unexpected("Falha ao gravar no cartão SD");
             tempo::ListaProjetos gravada;
             tempo::lerProjetos(*json, gravada);
-            recordHabits(syncHabits(secrets, filesystem, agora));   // não derruba a sync dos projetos
+            const std::string erroBaixar = baixarHabitos(sessao, secrets, filesystem, agora);
+            recordHabits(!erroFila.empty() ? erroFila : erroBaixar);   // não derruba a sync dos projetos
             return gravada.projetos.size();
         }
 

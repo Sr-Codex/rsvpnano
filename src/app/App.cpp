@@ -46,6 +46,7 @@ namespace {
     constexpr uint32_t kJobStackBytes = 12288;
     constexpr uint32_t kTickTickPeriodMs = 30UL * 60UL * 1000UL;  // sync periodica do TickTick
     constexpr uint32_t kTickTickReopenMinMs = 2UL * 60UL * 1000UL; // reabrir launcher/Tempo nao sincroniza de novo antes disso
+    constexpr uint32_t kTickTickCheckinMinMs = 15UL * 1000UL;      // "Feito" envia na hora, no maximo 1 sync a cada 15 s
     constexpr UBaseType_t kJobPriority = 1;
 
     template<size_t Size>
@@ -1469,15 +1470,18 @@ void App::updateTickTickSync(uint32_t nowMs) {
     const bool launcher = screen_ == screens::Screen::Home || screen_ == screens::Screen::Habitos || screens::TempoScreen::owns(screen_);
     const bool entered = launcher && !tickTickWasLauncher_;
     tickTickWasLauncher_ = launcher;
+    if (tempoScreen_.pegarCheckinNovo()) tickTickCheckinPendente_ = true;   // guarda ate a sync poder rodar
     if (!launcher || backgroundJobActive() || !storage_.mounted() || companionApi_.active() || usbTransfer_.active()
         || tempoScreen_.battleActive() || settingsStore_.secrets().ticktickToken.empty())
         return;
     const uint32_t sinceMs = nowMs - tickTickLastMs_;
-    const bool due = !tickTickTried_ || sinceMs >= kTickTickPeriodMs || (entered && sinceMs >= kTickTickReopenMinMs);
+    const bool due = !tickTickTried_ || sinceMs >= kTickTickPeriodMs || (entered && sinceMs >= kTickTickReopenMinMs)
+                     || (tickTickCheckinPendente_ && sinceMs >= kTickTickCheckinMinMs);
     if (!due)
         return;
     tickTickTried_ = true;
     tickTickLastMs_ = nowMs;
+    tickTickCheckinPendente_ = false;
     if (!startBackgroundJob(JobKind::TickTick))
         ESP_LOGW("ticktick", "sync job could not start");
 }
