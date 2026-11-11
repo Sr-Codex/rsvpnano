@@ -25,6 +25,9 @@ namespace ui {
         TouchTap = 1U << 3,
         TouchHold = 1U << 4,
         TouchCancel = 1U << 5,
+        // Soltou depois do limite do toque curto (600 ms) mas ainda dentro do limite de "toque firme" e sem arrastar:
+        // so vale para alvos que declaram aceitar toque firme (Context::firmTap); o TouchTap classico nao muda.
+        TouchFirmTap = 1U << 6,
     };
 
     struct Touch {
@@ -66,6 +69,8 @@ namespace ui {
         uint16_t tapMoveTolerancePx = 20;
         uint16_t tapMaxDurationMs = 600;
         uint16_t holdMs = 600;
+        uint16_t firmTapMaxDurationMs = 2000;   // toque firme/demorado ainda conta (alvos sem gesto de segurar/arrasto)
+        uint16_t firmTapSlipPx = 6;             // escorregao tolerado ao soltar fora da borda do alvo
     };
 
     enum class TouchSampleResult : uint8_t {

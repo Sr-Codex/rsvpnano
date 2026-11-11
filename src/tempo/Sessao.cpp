@@ -1,5 +1,11 @@
 #include "tempo/Sessao.h"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+
+#include "tempo/Parametros.h"
+
 namespace tempo {
 
     Ciclo iniciarCiclo() {
@@ -61,6 +67,62 @@ namespace tempo {
 
     std::string nomeFocoLivre(Categoria c) {
         return std::string{"Foco livre · "} + nomeCategoria(c);
+    }
+
+    Categoria categoriaDoFoco(bool temProjeto, Categoria livre) {
+        return temProjeto ? Categoria::Projetos : categoriaLivreValida(static_cast<int>(livre));
+    }
+
+    Categoria categoriaLivreValida(int bruto) {
+        if (bruto < 0 || bruto >= int(kNumCategorias)) return Categoria::Trabalho;
+        const auto c = static_cast<Categoria>(bruto);
+        return c == Categoria::Projetos ? Categoria::Trabalho : c;
+    }
+
+    double crPorMinuto(Categoria c) { return param::kTaxas[static_cast<size_t>(c)].crPorMin; }
+
+    std::string textoTaxa(Categoria c) {
+        char t[24];
+        std::snprintf(t, sizeof t, "%.2f cr/min", crPorMinuto(c));
+        for (char* p = t; *p; ++p)
+            if (*p == '.') *p = ',';
+        return t;
+    }
+
+    void registrarProjetoRecente(std::vector<std::string>& recentes, const std::string& id) {
+        if (id.empty()) return;
+        recentes.erase(std::remove(recentes.begin(), recentes.end(), id), recentes.end());
+        recentes.insert(recentes.begin(), id);
+        if (recentes.size() > kMaxRecentes) recentes.resize(kMaxRecentes);
+    }
+
+    std::vector<int> projetosDaPrimeiraPagina(const std::vector<std::string>& recentes, const std::vector<std::string>& ids) {
+        std::vector<int> saida;
+        const auto ja = [&](int i) { return std::find(saida.begin(), saida.end(), i) != saida.end(); };
+        for (const auto& id : recentes) {
+            if (saida.size() >= kProjetosPagina1) break;
+            for (size_t i = 0; i < ids.size(); ++i)
+                if (ids[i] == id && !ja(int(i))) { saida.push_back(int(i)); break; }
+        }
+        for (size_t i = 0; i < ids.size() && saida.size() < std::min(kProjetosPagina1, ids.size()); ++i)
+            if (!ja(int(i))) saida.push_back(int(i));
+        return saida;
+    }
+
+    size_t paginasDoSeletor(size_t numProjetos) {
+        if (numProjetos <= kProjetosPagina1) return 1;
+        return 1 + (numProjetos - kProjetosPagina1 + kProjetosPorPagina - 1) / kProjetosPorPagina;
+    }
+
+    std::vector<int> projetosDaPagina(size_t pagina, const std::vector<int>& primeira, size_t numProjetos) {
+        if (pagina == 0) return primeira;
+        std::vector<int> resto;
+        for (size_t i = 0; i < numProjetos; ++i)
+            if (std::find(primeira.begin(), primeira.end(), int(i)) == primeira.end()) resto.push_back(int(i));
+        std::vector<int> saida;
+        const size_t ini = (pagina - 1) * kProjetosPorPagina;
+        for (size_t i = ini; i < resto.size() && i < ini + kProjetosPorPagina; ++i) saida.push_back(resto[i]);
+        return saida;
     }
 
 } // namespace tempo

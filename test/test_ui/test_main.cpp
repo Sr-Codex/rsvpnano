@@ -418,6 +418,152 @@ void test_slow_press_remains_tap_until_hold_threshold() {
     context.endFrame();
 }
 
+// ---- toque firme (Tempo v3): alvos sem gesto de segurar/arrasto aceitam soltar dentro depois de 600 ms ----
+void test_firm_tap_accepts_release_after_600ms_inside_target() {
+    Arduino_GFX gfx;
+    ui::Context context(gfx);
+    enableTouch(context);
+    constexpr ui::Rect alvo{100, 40, 80, 56};
+    gContact = {true, 140, 60};
+    TEST_ASSERT_TRUE(context.pollTouch(1));
+    context.beginFrame(1);
+    TEST_ASSERT_FALSE(context.firmTap(alvo));
+    context.endFrame();
+    TEST_ASSERT_TRUE(context.pollTouch(790));   // 790 ms depois: hold ja emitido
+    TEST_ASSERT_TRUE(ui::hasTouch(*context.touch(), ui::TouchHold));
+    gContact = {};
+    TEST_ASSERT_TRUE(context.pollTouch(801));   // soltou com 800 ms
+    TEST_ASSERT_FALSE(ui::hasTouch(*context.touch(), ui::TouchTap));   // regra classica continua igual
+    TEST_ASSERT_TRUE(ui::hasTouch(*context.touch(), ui::TouchFirmTap));
+    context.beginFrame(1);
+    TEST_ASSERT_TRUE(context.firmTap(alvo));
+    context.endFrame();
+}
+
+void test_plain_tap_still_rejects_release_after_600ms() {
+    Arduino_GFX gfx;
+    ui::Context context(gfx);
+    enableTouch(context);
+    constexpr ui::Rect alvo{100, 40, 80, 56};
+    gContact = {true, 140, 60};
+    TEST_ASSERT_TRUE(context.pollTouch(1));
+    context.beginFrame(1);
+    TEST_ASSERT_FALSE(context.tap(alvo));
+    context.endFrame();
+    gContact = {};
+    TEST_ASSERT_TRUE(context.pollTouch(801));
+    context.beginFrame(1);
+    TEST_ASSERT_FALSE(context.tap(alvo));   // quem usa Hold/arrasto nao muda
+    context.endFrame();
+}
+
+void test_firm_tap_tolerates_small_slip_but_not_leaving_the_target() {
+    Arduino_GFX gfx;
+    ui::Context context(gfx);
+    enableTouch(context);
+    constexpr ui::Rect alvo{100, 40, 80, 56};   // x 100..179
+    // escorregou 5 px para fora da borda direita (x = 184): vale
+    gContact = {true, 170, 60};
+    TEST_ASSERT_TRUE(context.pollTouch(1));
+    context.beginFrame(1);
+    TEST_ASSERT_FALSE(context.firmTap(alvo));
+    context.endFrame();
+    gContact = {true, 184, 60};
+    TEST_ASSERT_TRUE(context.pollTouch(100));
+    gContact = {};
+    TEST_ASSERT_TRUE(context.pollTouch(300));
+    context.beginFrame(1);
+    TEST_ASSERT_TRUE(context.firmTap(alvo));
+    context.endFrame();
+    // soltou 12 px fora (alem da folga de 6 px): nao vale
+    gContact = {true, 170, 60};
+    TEST_ASSERT_TRUE(context.pollTouch(1000));
+    context.beginFrame(1);
+    TEST_ASSERT_FALSE(context.firmTap(alvo));
+    context.endFrame();
+    gContact = {true, 192, 60};
+    TEST_ASSERT_TRUE(context.pollTouch(1100));
+    gContact = {};
+    TEST_ASSERT_TRUE(context.pollTouch(1200));
+    context.beginFrame(1);
+    TEST_ASSERT_FALSE(context.firmTap(alvo));
+    context.endFrame();
+}
+
+void test_firm_tap_rejects_drag_and_very_long_press() {
+    Arduino_GFX gfx;
+    ui::Context context(gfx);
+    enableTouch(context);
+    constexpr ui::Rect largo{0, 0, 300, 100};
+    // arrasto de 60 px (> 20 px de tolerancia): nao e toque
+    gContact = {true, 100, 50};
+    TEST_ASSERT_TRUE(context.pollTouch(1));
+    context.beginFrame(1);
+    TEST_ASSERT_FALSE(context.firmTap(largo));
+    context.endFrame();
+    gContact = {true, 160, 50};
+    TEST_ASSERT_TRUE(context.pollTouch(50));
+    gContact = {true, 162, 50};
+    TEST_ASSERT_TRUE(context.pollTouch(80));
+    gContact = {};
+    TEST_ASSERT_TRUE(context.pollTouch(120));
+    context.beginFrame(1);
+    TEST_ASSERT_FALSE(context.firmTap(largo));
+    context.endFrame();
+    // 2,5 s parado: passou do limite do toque firme
+    gContact = {true, 100, 50};
+    TEST_ASSERT_TRUE(context.pollTouch(1000));
+    context.beginFrame(1);
+    TEST_ASSERT_FALSE(context.firmTap(largo));
+    context.endFrame();
+    gContact = {};
+    TEST_ASSERT_TRUE(context.pollTouch(3600));
+    context.beginFrame(1);
+    TEST_ASSERT_FALSE(context.firmTap(largo));
+    context.endFrame();
+}
+
+void test_pressed_state_follows_finger_on_the_target() {
+    Arduino_GFX gfx;
+    ui::Context context(gfx);
+    enableTouch(context);
+    constexpr ui::Rect alvo{100, 40, 80, 56};
+    TEST_ASSERT_FALSE(context.pressed(alvo));
+    gContact = {true, 140, 60};
+    TEST_ASSERT_TRUE(context.pollTouch(1));
+    context.beginFrame(1);
+    context.firmTap(alvo);
+    context.endFrame();
+    TEST_ASSERT_TRUE(context.pressed(alvo));
+    TEST_ASSERT_FALSE(context.pressed({0, 0, 50, 50}));   // outro alvo nao fica apertado
+    gContact = {true, 220, 60};   // dedo saiu do alvo (alem da folga)
+    TEST_ASSERT_TRUE(context.pollTouch(100));
+    TEST_ASSERT_FALSE(context.pressed(alvo));
+    gContact = {true, 140, 60};   // voltou
+    TEST_ASSERT_TRUE(context.pollTouch(150));
+    TEST_ASSERT_TRUE(context.pressed(alvo));
+    gContact = {};
+    TEST_ASSERT_TRUE(context.pollTouch(200));
+    TEST_ASSERT_FALSE(context.pressed(alvo));
+}
+
+void test_stock_button_accepts_firm_tap_and_draws_pressed() {
+    Arduino_GFX gfx;
+    ui::Context context(gfx);
+    enableTouch(context);
+    constexpr ui::Rect botao{0, 0, 80, 24};
+    gContact = {true, 40, 12};
+    TEST_ASSERT_TRUE(context.pollTouch(1));
+    context.beginFrame(1);
+    TEST_ASSERT_FALSE(context.button(botao, "Ok"));
+    context.endFrame();
+    gContact = {};
+    TEST_ASSERT_TRUE(context.pollTouch(900));
+    context.beginFrame(1);
+    TEST_ASSERT_TRUE(context.button(botao, "Ok"));   // antes: descartado em silencio
+    context.endFrame();
+}
+
 void test_missing_sample_does_not_interrupt_active_touch() {
     Arduino_GFX gfx;
     ui::Context context(gfx);
@@ -1732,6 +1878,12 @@ void test_page_browse_scrolls_without_changing_saved_reader_position() {
 
 int main(int, char**) {
     UNITY_BEGIN();
+    RUN_TEST(test_firm_tap_accepts_release_after_600ms_inside_target);
+    RUN_TEST(test_plain_tap_still_rejects_release_after_600ms);
+    RUN_TEST(test_firm_tap_tolerates_small_slip_but_not_leaving_the_target);
+    RUN_TEST(test_firm_tap_rejects_drag_and_very_long_press);
+    RUN_TEST(test_pressed_state_follows_finger_on_the_target);
+    RUN_TEST(test_stock_button_accepts_firm_tap_and_draws_pressed);
     RUN_TEST(test_page_browse_scrolls_without_changing_saved_reader_position);
     RUN_TEST(test_unchanged_widget_does_not_draw_or_flush);
     RUN_TEST(test_reader_font_resolves_opentype_glyph_ids);

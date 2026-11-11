@@ -10,6 +10,9 @@
 #include "storage/tempo/TempoStorage.h"
 #include "som/Regras.h"
 #include "tempo/Parametros.h"
+#include "tempo/Sessao.h"
+#include "ui/SansFont.h"
+#include "ui/screens/HabitosIcones.h"
 #include "tempo/Progressao.h"
 #include "tempo/Relogio.h"
 
@@ -21,9 +24,7 @@ namespace screens {
         using ui::modern::button;
         using namespace ui::themes;
 
-        constexpr int kLinhasVisiveis = 4;
-        constexpr int kAlturaLinha = 27;
-
+        
         // ------------------------------------------------------------ formatacao
         std::string fmtRelogio(int64_t totalSeg) {
             totalSeg = std::max<int64_t>(0, totalSeg);
@@ -96,6 +97,15 @@ namespace screens {
             });
         }
 
+        // Mistura RGB565: t = 0 -> a, t = 1 -> b.
+        uint16_t misturar565(uint16_t a, uint16_t b, double t) {
+            const auto canal = [&](int sh, int mx) {
+                const int ca = (a >> sh) & mx, cb = (b >> sh) & mx;
+                return int(std::lround(ca + (cb - ca) * t));
+            };
+            return uint16_t((canal(11, 31) << 11) | (canal(5, 63) << 5) | canal(0, 31));
+        }
+
         // Bloco (cartao ou linha) com texto proprio sobre fundo uniforme.
         struct Bloco {
             ui::Context& ui;
@@ -108,6 +118,8 @@ namespace screens {
                 uint16_t cor;
             };
             std::vector<Item> itens;
+            int32_t corFixa = -1;    // >= 0: fundo RGB565 proprio (ex.: linha selecionada) no lugar do papel
+            bool apertado = false;   // dedo em cima (estado "apertado"): fundo mais claro + contorno
 
             Bloco(ui::Context& u, Rect a, ColorRole f, int r, uint32_t semente = 0)
                 : ui(u), area(a), fundo(f), raio(r), sig(ui::Context::combine(semente, static_cast<uint32_t>(f))) {}
@@ -122,15 +134,30 @@ namespace screens {
                 itens.push_back({ui.prepareText(r, s, tamanho, alinhamento, 1), cor});
             }
             void marca(uint32_t valor) { sig = ui::Context::combine(sig, valor); }
+            // Texto de 1 linha centrado verticalmente em `yc` (tamanho = altura de fonte da familia sans).
+            void linha(int x, int yc, int w, std::string_view s, uint8_t tamanho, uint16_t cor, TextAlign alinhamento = TextAlign::Start) {
+                const int h = ui::sans::font(tamanho).height;
+                textoCor(Rect{int16_t(x), int16_t(yc - h / 2), int16_t(w), int16_t(h)}, s, tamanho, cor, alinhamento);
+            }
 
             void desenhar(const Desenho& extra = {}) {
+                if (apertado) sig = ui::Context::combine(sig, 0xA9E5ADU);
+                sig = ui::Context::combine(sig, uint32_t(corFixa + 1));
                 if (!ui.redraw(area, sig, true)) return;
-                const uint16_t cor = ui.color(fundo);
+                const uint16_t base = corFixa >= 0 ? uint16_t(corFixa) : ui.color(fundo);
+                const uint16_t cor = apertado ? misturar565(base, 0xFFFF, 0.16) : base;
                 ui.paint(area, [&](Arduino_GFX& g, Rect alvo) {
                     g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, ui.color(Background));
                     if (raio > 0) g.fillRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, raio, cor);
                     else g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, cor);
-                    if (extra) extra(g, alvo.x - area.x, alvo.y - area.y);
+                    if (apertado && raio > 0) {
+                        g.drawRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, raio, 0xFFFF);
+                        g.drawRoundRect(alvo.x + 1, alvo.y + 1, alvo.w - 2, alvo.h - 2, raio - 1, 0xFFFF);
+                    }
+                    if (extra) {
+                        icones::Origem origem(alvo.x - area.x, alvo.y - area.y);
+                        extra(g, alvo.x - area.x, alvo.y - area.y);
+                    }
                     for (const auto& item : itens)
                         ui.drawText(g, item.layout, item.cor, alvo.x - area.x, alvo.y - area.y, cor);
                 });
@@ -149,8 +176,11 @@ namespace screens {
         constexpr Cor kVerde{25, 158, 112};
         constexpr Cor kPreto{0, 0, 0};
         constexpr Cor kCorCat[tempo::kNumChips] = {{255, 140, 60}, {150, 120, 235}, {60, 190, 170}, {90, 200, 255}, {255, 196, 80}};
-        constexpr int kCx = 86, kCy = 86;      // centro dos aneis
-        constexpr int kRaioFora = 70, kRaioDentro = 48, kEspessura = 18;
+        constexpr int kCx = 80, kCy = 88;      // centro dos aneis da batalha
+        constexpr int kRaioFora = 70, kRaioDentro = 50, kEspessura = 15;
+        constexpr int kIniCx = 80, kIniCy = 106, kIniRaio = 56, kIniLarg = 12;   // anel unico do Inicio (v3)
+        constexpr Cor kTonal{34, 36, 35}, kSelFundo{44, 28, 16}, kClaro{228, 228, 220};
+        constexpr Cor kCinzaA{120, 122, 116}, kCinzaB{165, 166, 158}, kVinhoApagado{120, 56, 72}, kVinhoApagado2{150, 70, 92};
         constexpr int kAutoSalvarSeg = 60;
 
         uint16_t c565(Cor c) { return rgb565(uint8_t(c.r), uint8_t(c.g), uint8_t(c.b)); }
@@ -167,7 +197,7 @@ namespace screens {
         // (segmentos de 4 graus), comecando no topo no sentido horario, pontas redondas; frac > 1 = 2a volta por
         // cima com sombra sob a ponta. (ox, oy) = origem da regiao no alvo de pintura.
         void anel(Arduino_GFX& g, int ox, int oy, int cx, int cy, int raio, int larg, double frac, Cor c0, Cor c1,
-                  Cor fundo, Cor baseTrilho) {
+                  Cor fundo, Cor baseTrilho, const Cor* volta1a0 = nullptr, const Cor* volta1a1 = nullptr) {
             const int X = ox + cx, Y = oy + cy;
             const double ro = raio + larg / 2.0, ri = raio - larg / 2.0;
             g.fillCircle(X, Y, int(ro), c565(mistura(fundo, baseTrilho, 0.22)));
@@ -178,18 +208,19 @@ namespace screens {
                 px = X + int(std::lround(r * std::cos(ang * kRad)));
                 py = Y + int(std::lround(r * std::sin(ang * kRad)));
             };
-            const auto seg = [&](double a0, double a1, double k0, double k1) {
+            const auto segCor = [&](double a0, double a1, double k0, double k1, Cor d0, Cor d1) {
                 const int n = std::max(2, int(std::ceil((a1 - a0) / 4.0)));
                 for (int i = 0; i < n; ++i) {
                     const double aa = a0 + (a1 - a0) * i / n;
                     const double bb = a0 + (a1 - a0) * (i + 1) / n + 0.8;
-                    const uint16_t cor = c565(mistura(c0, c1, k0 + (k1 - k0) * (i + 0.5) / n));
+                    const uint16_t cor = c565(mistura(d0, d1, k0 + (k1 - k0) * (i + 0.5) / n));
                     int x1, y1, x2, y2, x3, y3, x4, y4;
                     ponto(aa, ro, x1, y1); ponto(bb, ro, x2, y2); ponto(bb, ri, x3, y3); ponto(aa, ri, x4, y4);
                     g.fillTriangle(x1, y1, x2, y2, x3, y3, cor);
                     g.fillTriangle(x1, y1, x3, y3, x4, y4, cor);
                 }
             };
+            const auto seg = [&](double a0, double a1, double k0, double k1) { segCor(a0, a1, k0, k1, c0, c1); };
             const auto capa = [&](double ang, Cor c) {
                 int px, py;
                 ponto(ang, raio, px, py);
@@ -201,6 +232,10 @@ namespace screens {
             if (frac <= 1.0) {
                 capa(-90 + 360 * volta1, mistura(c0, c1, volta1));
                 return;
+            }
+            if (volta1a0 != nullptr && volta1a1 != nullptr) {   // 1a volta completa nas cores de base (overtime: laranja)
+                capa(-90, *volta1a0);
+                segCor(-90, 269.9, 0, 1, *volta1a0, *volta1a1);
             }
             const double fim = -90 + 360 * std::min(frac - 1.0, 0.999);
             int px, py;
@@ -229,6 +264,193 @@ namespace screens {
                 });
             }
             return ui.tap(r, habilitado);
+        }
+
+        // ---- botao v3: icone Phosphor + texto (+ subtexto), estado "apertado", contorno de selecao e contorno que enche
+        // (Fim · segure). Toque FIRME: soltar dentro do alvo conta mesmo depois de 600 ms (Context::firmTap).
+        using IconeId = icons::phosphor::Id;
+        struct Btn {
+            std::string texto;
+            std::string sub;              // 2a linha (15 px) abaixo do texto
+            bool comIcone = false;
+            IconeId icone = IconeId::Star;
+            uint16_t fundo = 0, tinta = 0;
+            uint8_t tam = 17;
+            bool habilitado = true;
+            bool selecionado = false;     // contorno de 2 px na cor da tinta
+            int progresso64 = -1;         // >= 0: contorno laranja enchendo (0..64)
+            bool empilhado = false;       // icone em cima, texto embaixo (blocos pequenos)
+            std::string sub2;             // empilhado: linha extra (13 px, apagada)
+            uint16_t tintaSub = 0;        // 0 = mesma da tinta
+            uint16_t corContorno = 0;     // 0 = mesma da tinta
+            uint16_t tintaIcone = 0;      // 0 = mesma da tinta
+            bool check = false;           // selecionado: check-circle laranja no canto
+        };
+
+        // Contorno de retangulo arredondado enchendo no sentido horario a partir do meio do topo (frac 0..1).
+        void contornoQueEnche(Arduino_GFX& g, int x, int y, int w, int h, int r, double frac, uint16_t cor) {
+            struct Pt { double x, y; };
+            std::vector<Pt> pts;
+            constexpr double kRad = 3.14159265358979 / 180.0;
+            pts.push_back({x + w / 2.0, double(y)});
+            pts.push_back({x + w - r + 0.0, double(y)});
+            const double cantos[4][3] = {{double(x + w - r), double(y + r), -90.0}, {double(x + w - r), double(y + h - r), 0.0},
+                                         {double(x + r), double(y + h - r), 90.0}, {double(x + r), double(y + r), 180.0}};
+            for (const auto& c : cantos)
+                for (int k = 0; k <= 8; ++k) {
+                    const double a = (c[2] + 90.0 * k / 8) * kRad;
+                    pts.push_back({c[0] + r * std::cos(a), c[1] + r * std::sin(a)});
+                }
+            pts.push_back({x + w / 2.0, double(y)});
+            double total = 0;
+            for (size_t i = 0; i + 1 < pts.size(); ++i) total += std::hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
+            double alvo = total * std::clamp(frac, 0.0, 1.0), acc = 0;
+            for (size_t i = 0; i + 1 < pts.size() && acc < alvo; ++i) {
+                const double seg = std::hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
+                const int passos = std::max(1, int(std::ceil(seg / 1.5)));
+                for (int k = 0; k <= passos; ++k) {
+                    const double d = seg * k / passos;
+                    if (acc + d > alvo) break;
+                    const double t = seg > 0 ? d / seg : 0;
+                    g.fillCircle(int(std::lround(pts[i].x + (pts[i + 1].x - pts[i].x) * t)),
+                                 int(std::lround(pts[i].y + (pts[i + 1].y - pts[i].y) * t)), 1, cor);
+                }
+                acc += seg;
+            }
+        }
+
+        bool botao3(ui::Context& ui, Rect r, const Btn& b) {
+            const bool apertado = b.habilitado && ui.pressed(r);
+            const uint32_t sig = ui::Context::signature(
+                b.texto + "|" + b.sub + "|" + b.sub2,
+                ui::Context::combine(ui::Context::combine(b.fundo, b.tinta),
+                                     (b.habilitado ? 1U : 0U) + (apertado ? 2U : 0U) + (b.selecionado ? 4U : 0U)
+                                         + (b.comIcone ? 8U : 0U) + (b.empilhado ? 16U : 0U) + (b.check ? 8388608U : 0U) + uint32_t(b.corContorno) * 3U + uint32_t(b.tintaIcone) * 5U + uint32_t(b.tam) * 32U
+                                         + uint32_t(int(b.icone)) * 8192U + uint32_t(b.progresso64 + 1) * 262144U));
+            if (ui.redraw(r, sig, true)) {
+                const uint16_t fundo = apertado ? misturar565(b.fundo, 0xFFFF, 0.22) : b.fundo;
+                const uint16_t tinta = b.tinta;
+                const auto fonte = ui::sans::font(b.tam);
+                const int larguraTexto = ui::sans::width(b.texto, fonte);
+                const int lado = b.empilhado ? 22 : b.tam + 3;
+                Rect rt{r.x, r.y, r.w, r.h};
+                ui::TextLayout t1, t2, t3;
+                int cx = r.x + r.w / 2, cyTexto = r.y + r.h / 2, xIcone = 0, yIcone = 0;
+                if (b.empilhado) {
+                    const int y0 = b.sub2.empty() ? r.y + 22 : r.y + 20;
+                    yIcone = y0 - 2;
+                    xIcone = cx;
+                    const int yTexto = b.sub2.empty() ? r.y + r.h - 20 : r.y + 45;
+                    t1 = ui.prepareText({r.x, int16_t(yTexto - 9), r.w, 18}, b.texto, b.tam, TextAlign::Center, 1);
+                    if (!b.sub2.empty()) t2 = ui.prepareText({r.x, int16_t(r.y + 54), r.w, 16}, b.sub2, 13, TextAlign::Center, 1);
+                } else {
+                    const int folga = b.texto.empty() ? 0 : 8;
+                    const int bloco = larguraTexto + (b.comIcone ? lado + folga : 0);
+                    int xIni = cx - bloco / 2;
+                    if (!b.sub.empty()) cyTexto = r.y + r.h / 2 - 9;
+                    if (b.comIcone) { xIcone = xIni + lado / 2; yIcone = cyTexto; xIni += lado + folga; }
+                    t1 = ui.prepareText({int16_t(xIni), int16_t(cyTexto - fonte.height / 2), int16_t(larguraTexto + 4), int16_t(fonte.height)},
+                                        b.texto, b.tam, TextAlign::Start, 1);
+                    if (!b.sub.empty())
+                        t2 = ui.prepareText({r.x, int16_t(r.y + r.h - 28), r.w, 18}, b.sub, 15, TextAlign::Center, 1);
+                }
+                ui.paint(r, [&](Arduino_GFX& g, Rect alvo) {
+                    const int dx = alvo.x - r.x, dy = alvo.y - r.y;
+                    g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, ui.color(Background));
+                    g.fillRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, 16, fundo);
+                    if (b.selecionado || apertado) {
+                        const uint16_t cc = b.selecionado ? (b.corContorno != 0 ? b.corContorno : tinta) : uint16_t(0xFFFF);   // apertado = contorno branco
+                        g.drawRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, 16, cc);
+                        g.drawRoundRect(alvo.x + 1, alvo.y + 1, alvo.w - 2, alvo.h - 2, 15, cc);
+                    }
+                    if (b.progresso64 >= 0)
+                        contornoQueEnche(g, alvo.x, alvo.y, alvo.w, alvo.h, 16, b.progresso64 / 64.0, c565(kLaranja));
+                    if (b.comIcone) {
+                        icones::Origem o(dx, dy);
+                        icones::phosphor(g, b.icone, xIcone, yIcone, lado, b.tintaIcone != 0 ? b.tintaIcone : tinta, fundo);
+                    }
+                    if (b.check) {
+                        icones::Origem o(dx, dy);
+                        icones::phosphor(g, IconeId::CheckCircle, r.x + r.w - 16, r.y + 16, 16, c565(kLaranja), fundo);
+                    }
+                    ui.drawText(g, t1, tinta, dx, dy, fundo);
+                    ui.drawText(g, t2, b.tintaSub != 0 ? b.tintaSub : tinta, dx, dy, fundo);
+                });
+            }
+            return ui.firmTap(r, b.habilitado);
+        }
+
+        // Quebra em ate `maxLinhas` linhas de largura `larg`; tenta o tamanho A e depois o B; no ultimo recurso corta com "...".
+        struct Quebra {
+            std::vector<std::string> linhas;
+            uint8_t tam = 17;
+            bool coube = true;
+        };
+        Quebra quebrar(const std::string& texto, int larg, uint8_t tamA, uint8_t tamB, int maxLinhas = 2) {
+            Quebra q;
+            for (uint8_t tam : {tamA, tamB}) {
+                const auto& fonte = ui::sans::font(tam);
+                std::vector<std::string> linhas;
+                std::string atual;
+                bool ok = true;
+                size_t i = 0;
+                while (i < texto.size()) {
+                    size_t j = texto.find(' ', i);
+                    if (j == std::string::npos) j = texto.size();
+                    const std::string palavra = texto.substr(i, j - i);
+                    i = j + 1;
+                    if (palavra.empty()) continue;
+                    const std::string tent = atual.empty() ? palavra : atual + " " + palavra;
+                    if (ui::sans::width(tent, fonte) <= larg) { atual = tent; continue; }
+                    if (atual.empty()) { ok = false; break; }   // palavra maior que a linha
+                    linhas.push_back(atual);
+                    atual = palavra;
+                    if (ui::sans::width(atual, fonte) > larg) { ok = false; break; }
+                }
+                if (!atual.empty()) linhas.push_back(atual);
+                if (ok && int(linhas.size()) <= maxLinhas) {
+                    q.linhas = linhas;
+                    q.tam = tam;
+                    q.coube = true;
+                    return q;
+                }
+            }
+            // sem caber: tamanho B, ultima linha cortada com reticencias
+            const auto& fonte = ui::sans::font(tamB);
+            q.tam = tamB;
+            q.coube = false;
+            std::string resto = texto;
+            for (int n = 0; n < maxLinhas && !resto.empty(); ++n) {
+                std::string linha;
+                size_t pos = 0;
+                while (pos < resto.size()) {
+                    size_t fim = resto.find(' ', pos);
+                    if (fim == std::string::npos) fim = resto.size();
+                    const std::string tent = resto.substr(0, fim);
+                    if (ui::sans::width(tent, fonte) > larg) break;
+                    linha = tent;
+                    pos = fim + 1;
+                }
+                if (linha.empty()) linha = resto.substr(0, 1);
+                const bool ultima = n + 1 == maxLinhas;
+                resto = resto.size() > linha.size() ? resto.substr(std::min(resto.size(), linha.size() + 1)) : std::string{};
+                if (ultima && !resto.empty()) {
+                    while (!linha.empty() && ui::sans::width(linha + "...", fonte) > larg) linha.pop_back();
+                    linha += "...";
+                }
+                q.linhas.push_back(linha);
+            }
+            return q;
+        }
+
+        IconeId iconeDaCategoria(tempo::Categoria c) {
+            switch (c) {
+            case tempo::Categoria::Trabalho: return IconeId::Briefcase;
+            case tempo::Categoria::Estudo: return IconeId::GraduationCap;
+            case tempo::Categoria::Leitura: return IconeId::BookOpen;
+            case tempo::Categoria::Meditacao: return IconeId::FlowerLotus;
+            default: return IconeId::Kanban;
+            }
         }
 
         // Rosto (humor 0..4) com circulos/arcos: a fonte nao tem emoji.
@@ -306,7 +528,7 @@ namespace screens {
             r.projeto = nomeBatalha_;
             const int64_t plano = std::max<int64_t>(1, int64_t(planejadoMin_) * 60000);
             r.inimigoPct = r.descanso ? 0 : pontosDeVida();
-            r.vocePct = r.descanso ? 100 : int(std::min<int64_t>(100, int64_t(focadoMs_) * 100 / plano));
+            r.vocePct = r.descanso ? 100 : int(std::min<int64_t>(100, int64_t(cron_.focadoMs) * 100 / plano));
             if (r.descanso) r.centro = "pausa";
             else r.centro = r.bonus ? "+" + fmtRelogio(overtimeMs() / 1000) : fmtRelogio((restanteMs() + 999) / 1000);
         } else {
@@ -379,16 +601,12 @@ namespace screens {
     }
 
     void TempoScreen::escolher(int indice) {
-        if (indice >= 0 && size_t(indice) < lista_.projetos.size()) {
-            escolha_ = indice;
-            categoria_ = tempo::Categoria::Projetos;   // com projeto, a categoria vai para Projetos
-        } else {
-            escolha_ = -1;
-        }
+        // Com projeto a categoria e UNICA (Projetos, vem de tempo::categoriaDoFoco); categoria_ guarda so a do Foco livre.
+        escolha_ = indice >= 0 && size_t(indice) < lista_.projetos.size() ? indice : -1;
     }
 
     void TempoScreen::salvarPreferencias() {
-        estado_.ultimaCategoria = static_cast<int>(categoria_);
+        estado_.ultimaCategoria = static_cast<int>(tempo::categoriaLivreValida(static_cast<int>(categoria_)));
         estado_.ultimaDuracaoMin = duracaoMin_;
         estado_.ciclopomodoro = pomodoro_;
         salvar(fs_);
@@ -593,8 +811,7 @@ namespace screens {
             }
             garantirDia(nowMs);
             carregado_ = true;
-            categoria_ = estado_.ultimaCategoria >= 0 && estado_.ultimaCategoria < int(tempo::kNumCategorias)
-                             ? static_cast<tempo::Categoria>(estado_.ultimaCategoria) : tempo::Categoria::Trabalho;
+            categoria_ = tempo::categoriaLivreValida(estado_.ultimaCategoria);   // salvo "Projetos" (versoes antigas) vira Trabalho
             duracaoMin_ = std::clamp(estado_.ultimaDuracaoMin / 5 * 5, 5, 60);
             pomodoro_ = estado_.ciclopomodoro;
             salvar(filesystem);
@@ -607,7 +824,7 @@ namespace screens {
             if (filesystem != nullptr) TempoStorage::loadProjects(*filesystem, lista_);
             for (const auto& projeto : lista_.projetos) titulos_.push_back(tempo::limparTitulo(projeto.titulo));
         }
-        primeiro_ = 0;
+        pagina_ = 0;
         if (escolha_ >= int(titulos_.size())) escolha_ = -1;
     }
 
@@ -620,59 +837,29 @@ namespace screens {
         const uint64_t agora = tempo::ms(nowMs);
         const uint64_t delta = agora > ultimoMs_ ? agora - ultimoMs_ : 0;
         ultimoMs_ = agora;
-        if (fase_ != Fase::Lutando) return;
-        if (distraido_) {
-            distraidoMs_ += delta;
-            distracaoAtualMs_ += delta;
-        } else {
-            focadoMs_ += delta;
-            comboMs_ += delta;
-        }
+        cron_.avancar(delta, fase_ == Fase::Lutando);   // pausado/descanso: nada muda (o inimigo nao se cura)
     }
 
-    int64_t TempoScreen::restanteMs() const {
-        const int64_t plano = int64_t(planejadoMin_) * 60000;
-        const int64_t cura = std::min<int64_t>(int64_t(distraidoMs_), plano);
-        return std::max<int64_t>(0, plano + cura - int64_t(focadoMs_));
-    }
-
-    int64_t TempoScreen::overtimeMs() const {
-        const int64_t plano = int64_t(planejadoMin_) * 60000;
-        const int64_t cura = std::min<int64_t>(int64_t(distraidoMs_), plano);
-        return std::max<int64_t>(0, int64_t(focadoMs_) - (plano + cura));
-    }
-
-    int TempoScreen::pontosDeVida() const {
-        const int64_t plano = int64_t(planejadoMin_) * 60000;
-        return static_cast<int>(std::min<int64_t>(100, restanteMs() * 100 / std::max<int64_t>(1, plano)));
-    }
+    int64_t TempoScreen::restanteMs() const { return cron_.restanteMs(); }
+    int64_t TempoScreen::overtimeMs() const { return cron_.overtimeMs(); }
+    int TempoScreen::pontosDeVida() const { return cron_.pontosDeVida(); }
 
     // Estimativa do motor: foco = "ao terminar" (zera o inimigo no plano + cura); overtime = "ate agora".
     tempo::LiquidacaoBatalha TempoScreen::estimar() const {
-        tempo::EntradaBatalha e;
-        e.categoria = categoriaBatalha_;
-        e.minutosPlanejados = planejadoMin_;
-        e.minutosDistraidos = static_cast<int>(distraidoMs_ / 60000);
-        e.numDistracoes = numDistracoes_;
-        e.maiorDistracaoMin = std::max(maiorDistracaoMin_, static_cast<int>(distracaoAtualMs_ / 60000));
-        if (overtime_) {
-            e.minutosFocados = static_cast<int>(focadoMs_ / 60000);
-        } else {
-            e.minutosFocados = planejadoMin_ + std::min(e.minutosDistraidos, planejadoMin_);
-        }
-        return tempo::liquidarBatalha(estado_, e);
+        return tempo::liquidarBatalha(estado_, cron_.entrada(categoriaBatalha_, overtime_));
     }
 
     // Comeca a batalha (ou o ciclo pomodoro) com a escolha do Inicio.
     void TempoScreen::comecarSessao(uint32_t nowMs) {
         if (battleActive() || fase_ == Fase::Reflexao) return;
-        if (escolha_ >= 0 && size_t(escolha_) < titulos_.size()) {
+        const bool comProjeto = escolha_ >= 0 && size_t(escolha_) < titulos_.size();
+        categoriaBatalha_ = tempo::categoriaDoFoco(comProjeto, categoria_);   // categoria unica do projeto
+        if (comProjeto) {
             projeto_ = escolha_;
-            categoriaBatalha_ = categoria_;
             nomeBatalha_ = titulos_[escolha_].empty() ? std::string{"Projeto"} : titulos_[escolha_];
+            tempo::registrarProjetoRecente(estado_.projetosRecentes, lista_.projetos[escolha_].id);
         } else {
             projeto_ = -1;
-            categoriaBatalha_ = categoria_;
             nomeBatalha_ = tempo::nomeFocoLivre(categoriaBatalha_);
         }
         ciclo_ = pomodoro_ ? tempo::iniciarCiclo() : tempo::Ciclo{};
@@ -682,38 +869,35 @@ namespace screens {
     }
 
     void TempoScreen::ligarBatalha(uint32_t nowMs) {
-        focadoMs_ = distraidoMs_ = distracaoAtualMs_ = comboMs_ = 0;
-        distraido_ = false;
+        cron_.zerar(planejadoMin_);
         overtime_ = false;
         arrastando_ = false;
-        numDistracoes_ = maiorDistracaoMin_ = 0;
-        ultimoBipeFocoMin_ = 0;
-        avisoFimDado_ = false;
+        fimApertado_ = false;
+        fimDicaAteMs_ = 0;
         ultimoMs_ = tempo::ms(nowMs);
         fase_ = Fase::Lutando;
         pedirSom(som::SomId::SobeQuatro);   // comecar batalha/foco (inclui a proxima rodada do ciclo)
     }
 
+    // Pausar (decisao 19): interrupcao legitima. O relogio para e o inimigo NAO se cura (acumular so conta em Lutando).
     void TempoScreen::pausarOuRetomar(uint32_t nowMs) {
         acumular(nowMs);
         if (fase_ == Fase::Lutando) {
             fase_ = Fase::Pausada;
+            pausaInicioMs_ = tempo::ms(nowMs);
             pedirSom(som::SomId::DesceAlerta);
         } else if (fase_ == Fase::Pausada) { fase_ = Fase::Lutando; ultimoMs_ = tempo::ms(nowMs); }
     }
 
+    // Distrai (desvio): o relogio segue como distracao e o inimigo se cura enquanto durar.
     void TempoScreen::alternarDistracao(uint32_t nowMs) {
         if (fase_ != Fase::Lutando || overtime_) return;
         acumular(nowMs);
-        if (!distraido_) {
-            distraido_ = true;
+        if (!cron_.distraido) {
+            cron_.distrair();
             pedirSom(som::SomId::DesceAlerta);
-            distracaoAtualMs_ = 0;
-            comboMs_ = 0;
-            ++numDistracoes_;
         } else {
-            distraido_ = false;
-            maiorDistracaoMin_ = std::max(maiorDistracaoMin_, static_cast<int>(distracaoAtualMs_ / 60000));
+            cron_.voltar();
         }
     }
 
@@ -744,20 +928,11 @@ namespace screens {
 
     void TempoScreen::finalizar(uint32_t nowMs, bool abandonou, fs::FS* filesystem, bool tocarDesfecho) {
         acumular(nowMs);
-        if (distraido_) {
-            distraido_ = false;
-            maiorDistracaoMin_ = std::max(maiorDistracaoMin_, static_cast<int>(distracaoAtualMs_ / 60000));
-        }
+        cron_.voltar();   // fecha uma distracao em aberto
         garantirDia(nowMs);
         const int nivelAntes = tempo::nivelDeXp(estado_.xpTotal);
         const int streakAntes = estado_.streak;
-        tempo::EntradaBatalha entrada;
-        entrada.categoria = categoriaBatalha_;
-        entrada.minutosPlanejados = planejadoMin_;
-        entrada.minutosFocados = static_cast<int>(focadoMs_ / 60000);
-        entrada.minutosDistraidos = static_cast<int>(distraidoMs_ / 60000);
-        entrada.numDistracoes = numDistracoes_;
-        entrada.maiorDistracaoMin = maiorDistracaoMin_;
+        tempo::EntradaBatalha entrada = cron_.entrada(categoriaBatalha_, true);
         entrada.abandonou = abandonou;
         const auto liquidacao = tempo::aplicarBatalha(estado_, entrada);
         // Meditacao vencida marca a proxima ocorrencia pendente do habito de Meditacao (no horario) e enfileira o check-in.
@@ -783,7 +958,7 @@ namespace screens {
         evento.planejadoMin = planejadoMin_;
         evento.focadoMin = entrada.minutosFocados;
         evento.distraidoMin = entrada.minutosDistraidos;
-        evento.distracoes = numDistracoes_;
+        evento.distracoes = cron_.numDistracoes;
         evento.overtimeMin = liquidacao.minutosOvertime;
         evento.cr = liquidacao.cr;
         evento.xp = liquidacao.xp;
@@ -887,8 +1062,8 @@ namespace screens {
             return true;
         }
         bool bipe = false;
-        if (!overtime_ && !distraido_) {
-            const int minutosFoco = static_cast<int>(focadoMs_ / 60000);
+        if (!overtime_ && !cron_.distraido) {
+            const int minutosFoco = static_cast<int>(cron_.focadoMs / 60000);
             if (minutosFoco >= ultimoBipeFocoMin_ + 10) {   // "presenca" a cada 10 min de foco
                 ultimoBipeFocoMin_ = minutosFoco - minutosFoco % 10;
                 bipe = true;
@@ -954,20 +1129,23 @@ namespace screens {
         return drawVitoria(ui, nowMs, screen);
     }
 
-    // ====================================================================== Inicio (estilo Session)
-    // Layout 640x172: aneis a esquerda (0..172), foco/categoria/botoes no meio (x = 182), painel HOJE a direita.
+    // ====================================================================== Inicio v3
+    // Layout 640x172 (mockup tempo3-foco, quadros 1-2): anel de minutos + -5/+5 a esquerda, cartao unico "FOCO EM" no meio
+    // (toque abre o seletor), Comecar grande + ciclo a direita. Com projeto NAO existe seletor de categoria (e unica).
     Action TempoScreen::drawInicio(ui::Context& ui, uint32_t nowMs, Screen& screen) {
         if (fase_ == Fase::Reflexao) { screen = Screen::TempoVitoria; return Action::None; }
         garantirDia(nowMs);
         const bool emBatalha = battleActive();
         const bool ciclo = pomodoro_;
+        const bool comProjeto = escolha_ >= 0 && size_t(escolha_) < titulos_.size();
+        const tempo::Categoria cat = tempo::categoriaDoFoco(comProjeto, categoria_);
 
-        // ---- arrastar o dedo em volta do anel externo ajusta 5..60 min em passos de 5 (so sem batalha e sem ciclo)
+        // ---- arrastar o dedo em volta do anel ajusta 5..60 min em passos de 5 (so sem batalha e sem ciclo)
         if (!emBatalha && !ciclo) {
             if (const auto* t = ui.touch()) {
-                const double dx = double(t->x) - kCx, dy = double(t->y) - kCy;
+                const double dx = double(t->x) - kIniCx, dy = double(t->y) - kIniCy;
                 const double dist = std::sqrt(dx * dx + dy * dy);
-                if (hasTouch(*t, ui::TouchStart)) arrastando_ = dist >= 36 && dist <= 94;
+                if (hasTouch(*t, ui::TouchStart)) arrastando_ = dist >= 34 && dist <= 70;
                 if (arrastando_ && (hasTouch(*t, ui::TouchStart) || hasTouch(*t, ui::TouchMove) || hasTouch(*t, ui::TouchRelease))
                     && dist > 4) {
                     double f = std::atan2(dx, -dy) / (2 * 3.14159265358979);
@@ -982,254 +1160,347 @@ namespace screens {
             arrastando_ = false;
         }
         const int minutos = ciclo ? tempo::kCicloFocoMin : duracaoMin_;
+        const uint16_t cMudo = ui.color(Muted), cTexto = ui.color(Foreground), cBg = ui.color(Background);
+        const uint16_t cLaranja = c565(kLaranja), cPainel = ui.color(SurfaceMuted), cTonal = c565(kTonal);
+        const bool podeEditar = !emBatalha;
 
-        // ---- aneis + minutos no centro
+        // ---- "‹ Início"
         {
-            Bloco aneis(ui, {0, 0, 172, 172}, Background, 0, 20);
-            aneis.textoCor(Rect{int16_t(kCx - 40), int16_t(kCy - 18), 80, 28}, std::to_string(minutos), 22, ui.color(Foreground),
-                           TextAlign::Center);
-            aneis.textoCor(Rect{int16_t(kCx - 40), int16_t(kCy + 6), 80, 16}, "min", 9, ui.color(Muted), TextAlign::Center);
+            const Rect area{0, 0, 120, 38};
+            Bloco voltar(ui, area, Background, 0, 90);
+            voltar.apertado = ui.pressed(area);
+            voltar.linha(10, 14, 100, "‹ Início", 13, cMudo);
+            voltar.desenhar();
+            if (ui.firmTap(area)) {
+                salvarPreferencias();
+                screen = Screen::Home;
+                return Action::None;
+            }
+        }
+
+        // ---- anel + minutos no centro
+        {
+            Bloco aneis(ui, {0, 40, 172, 132}, Background, 0, 20);
+            aneis.linha(kIniCx - 40, 100, 80, std::to_string(minutos), 28, cTexto, TextAlign::Center);
+            aneis.linha(kIniCx - 40, 124, 80, "min", 15, cMudo, TextAlign::Center);
             aneis.marca(static_cast<uint32_t>(minutos));
             const Cor fundo = deRole(ui, Background);
             aneis.desenhar([&](Arduino_GFX& g, int dx, int dy) {
-                anel(g, dx, dy, kCx, kCy, kRaioFora, kEspessura, minutos / 60.0, kLaranja, kAmbar, fundo, kLaranja);
-                anel(g, dx, dy, kCx, kCy, kRaioDentro, kEspessura, 1.0, kCarmim, kVinho, fundo, kCarmim);
+                anel(g, dx, dy, kIniCx, kIniCy, kIniRaio, kIniLarg, minutos / 60.0, kLaranja, kAmbar, fundo, kLaranja);
             });
         }
 
-        const uint16_t cMudo = ui.color(Muted), cTexto = ui.color(Foreground), cBg = ui.color(Background);
-        const uint16_t cLaranja = c565(kLaranja), cPainel = ui.color(SurfaceMuted);
-        const bool livre = escolha_ < 0 || size_t(escolha_) >= titulos_.size();
-
-        // ---- "QUAL E O SEU FOCO?" + caixa
-        {
-            Bloco rotulo(ui, {182, 6, 288, 18}, Background, 0, 41);
-            rotulo.textoCor({182, 6, 288, 18}, "QUAL É O SEU FOCO?", 10, cMudo);
-            rotulo.desenhar();
-
-            const Rect caixa{182, 26, 288, 30};
-            Bloco bloco(ui, caixa, SurfaceMuted, 10, 42);
-            const std::string nome = livre ? std::string{"Foco livre"} : titulos_[escolha_].empty() ? std::string{"(sem título)"} : titulos_[escolha_];
-            bloco.textoCor({194, 26, int16_t(livre ? 150 : 192), 30}, nome, 14, cTexto);
-            bloco.textoCor(livre ? Rect{350, 26, 108, 30} : Rect{392, 26, 66, 30}, livre ? "escolher projeto ›" : "trocar ›", 10, livre ? cLaranja : cMudo, TextAlign::Right);
-            bloco.desenhar();
-            if (ui.tap(caixa, !emBatalha)) { seletor_ = true; primeiro_ = 0; return Action::None; }
+        // ---- -5 / +5
+        for (int k = 0; k < 2; ++k) {
+            Btn b;
+            b.texto = k == 0 ? "+5" : "−5";
+            b.tam = 21;
+            b.fundo = cTonal;
+            b.tinta = ciclo || emBatalha ? rgb565(90, 92, 90) : cTexto;
+            b.habilitado = !ciclo && !emBatalha;
+            if (botao3(ui, Rect{150, int16_t(k == 0 ? 42 : 106), 56, 56}, b))
+                duracaoMin_ = std::clamp(duracaoMin_ + (k == 0 ? 5 : -5), 5, 60);
         }
 
-        // ---- categoria arrastavel: trilho com 5 paradas + puxador ("garra") que encaixa na parada mais proxima
+        // ---- cartao "FOCO EM": nome real do projeto (ate 2 linhas), etiqueta de categoria + cr/min, rodadas e fim
         {
-            constexpr int kTx0 = 198, kTx1 = 454, kTy = 88, kRaioPux = 13;
-            const int n = int(tempo::kNumChips);
-            const Rect areaTrilho{182, 70, 288, 36};
-            const auto xParada = [&](int i) { return kTx0 + (kTx1 - kTx0) * i / (n - 1); };
-            const auto paradaMaisPerto = [&](int x) {
-                int melhor = 0;
-                for (int i = 1; i < n; ++i)
-                    if (std::abs(x - xParada(i)) < std::abs(x - xParada(melhor))) melhor = i;
-                return melhor;
-            };
-            if (!emBatalha) {
-                if (const auto* t = ui.touch()) {
-                    if (hasTouch(*t, ui::TouchStart)) {
-                        puxando_ = t->x >= areaTrilho.x && t->x < areaTrilho.x + areaTrilho.w && t->y >= areaTrilho.y
-                                   && t->y < areaTrilho.y + areaTrilho.h;
-                    }
-                    if (puxando_ && (hasTouch(*t, ui::TouchStart) || hasTouch(*t, ui::TouchMove) || hasTouch(*t, ui::TouchRelease))) {
-                        puxadorX_ = std::clamp(int(t->x), kTx0, kTx1);
-                        categoria_ = tempo::categoriaDoChip(paradaMaisPerto(puxadorX_));
-                    }
-                    if (hasTouch(*t, ui::TouchRelease) || hasTouch(*t, ui::TouchCancel)) puxando_ = false;   // encaixa
-                }
+            const Rect cartao{216, 8, 252, 156};
+            const std::string nome = comProjeto ? (titulos_[escolha_].empty() ? std::string{"(sem título)"} : titulos_[escolha_])
+                                                : tempo::nomeFocoLivre(cat);
+            const auto q = quebrar(nome, 222, 21, 17);
+            const int rodadas = ciclo ? tempo::kCicloRodadas : 1;
+            std::string fim = std::to_string(rodadas) + (rodadas == 1 ? " rodada" : " rodadas");
+            if (const auto agora = tempo::agora(nowMs); agora.valida) {
+                const int total = rodadas * minutos + (rodadas - 1) * tempo::kCicloPausaMin;
+                fim += " · termina " + fmtHoraRelogio(agora.minutoDoDia + total);
+            }
+            const char* nomeCat = tempo::nomeCategoria(cat);
+            const int larguraCat = ui::sans::width(nomeCat, ui::sans::font(15));
+            Bloco card(ui, cartao, SurfaceMuted, 16, 42 + comProjeto);
+            card.apertado = podeEditar && ui.pressed(cartao);
+            card.linha(232, 24, 120, "FOCO EM", 15, cMudo);
+            if (podeEditar) card.linha(332, 24, 120, "Trocar ›", 17, cLaranja, TextAlign::Right);
+            const int passo = q.tam == 21 ? 25 : 21;
+            for (size_t i = 0; i < q.linhas.size(); ++i) card.linha(232, 52 + int(i) * passo, 222, q.linhas[i], q.tam, cTexto);
+            if (!comProjeto && q.linhas.size() == 1) card.linha(232, 80, 222, "sem projeto", 15, cMudo);
+            card.linha(262, 114, larguraCat + 8, nomeCat, 15, cTexto);
+            card.linha(232 + 24 + larguraCat + 26, 114, 120, tempo::textoTaxa(cat), 15, cMudo);
+            card.linha(232, 148, 226, fim, 15, cMudo);
+            card.marca(uint32_t(cat));
+            card.desenhar([&](Arduino_GFX& g, int dx, int dy) {
+                g.fillRoundRect(232 + dx, 100 + dy, 24 + larguraCat + 14, 28, 10, cTonal);
+                icones::phosphor(g, iconeDaCategoria(cat), 248, 114, 16, cLaranja, cTonal);
+            });
+            if (ui.firmTap(cartao, podeEditar)) {
+                seletor_ = true;
+                pagina_ = 0;
+                return Action::None;
+            }
+        }
+
+        // ---- Comecar (ou voltar a batalha em curso) + ciclo
+        {
+            Btn b;
+            b.fundo = cLaranja;
+            b.tinta = cBg;
+            if (emBatalha) {
+                b.texto = "Voltar à batalha";
+                b.tam = 17;
+                if (botao3(ui, Rect{476, 8, 156, 92}, b)) screen = Screen::TempoBatalha;
             } else {
-                puxando_ = false;
-            }
-            const int sel = tempo::chipDaCategoria(categoria_);
-            const int hx = puxando_ ? puxadorX_ : xParada(sel);
-            const Cor corSel = kCorCat[sel];
-            const char* nomeSel = tempo::nomeCategoria(categoria_);
-
-            Bloco cab(ui, {182, 50, 288, 20}, Background, 0, 45);
-            cab.textoCor({182, 52, 70, 16}, "CATEGORIA", 10, cMudo);
-            cab.textoCor({250, 49, 120, 22}, nomeSel, 16, c565(corSel));
-            cab.textoCor({372, 52, 66, 16}, "ciclo 4×", 10, ciclo ? cLaranja : cMudo, TextAlign::Right);
-            cab.marca(uint32_t(sel) * 4U + ciclo * 2U);
-            cab.desenhar([&](Arduino_GFX& g, int dx, int dy) {
-                const int x = 444 + dx, y = 51 + dy;
-                g.fillRoundRect(x, y, 22, 12, 6, ciclo ? cLaranja : rgb565(50, 52, 50));
-                g.fillCircle(x + (ciclo ? 16 : 6), y + 6, 4, cTexto);
-            });
-            if (ui.tap({372, 48, 98, 22}, !emBatalha)) pomodoro_ = !pomodoro_;
-
-            Bloco trilho(ui, areaTrilho, Background, 0, 46);
-            trilho.marca(uint32_t(sel) * 1024U + uint32_t(hx) * 2U + puxando_ + (emBatalha ? 8192U : 0U));
-            const uint16_t cLinha = rgb565(50, 52, 50);
-            trilho.desenhar([&](Arduino_GFX& g, int dx, int dy) {
-                const int y = kTy + dy;
-                g.fillRoundRect(kTx0 + dx, y - 3, kTx1 - kTx0, 6, 3, cLinha);
-                g.fillRoundRect(kTx0 + dx, y - 3, std::max(6, hx - kTx0), 6, 3, c565(corSel));
-                for (int i = 0; i < n; ++i)
-                    g.fillCircle(xParada(i) + dx, y, 4, xParada(i) <= hx ? c565(kCorCat[i]) : cMudo);
-                const int r = puxando_ ? kRaioPux + 2 : kRaioPux;
-                g.fillCircle(hx + dx, y, r + 2, cBg);
-                g.fillCircle(hx + dx, y, r, c565(corSel));
-                for (int k = -4; k <= 4; k += 4) g.fillRect(hx + dx + k - 1, y - 6, 2, 13, cBg);   // "garras"
-            });
-
-            Bloco dica(ui, {182, 106, 288, 16}, Background, 0, 43);
-            dica.textoCor({182, 106, 288, 16}, ciclo ? "ciclo 4×: 25 foco · 5 pausa · 15 longa" : "anel: 5–60 min · arraste o puxador", 10, cMudo);
-            dica.marca(ciclo);
-            dica.desenhar();
-        }
-
-        // ---- botoes
-        if (emBatalha) {
-            if (botao(ui, {182, 124, 288, 36}, "Voltar à batalha", cLaranja, cBg, 14)) screen = Screen::TempoBatalha;
-        } else {
-            if (botao(ui, {182, 124, 178, 36}, "Começar", cLaranja, cBg, 14)) {
-                comecarSessao(nowMs);
-                screen = Screen::TempoBatalha;
-                return Action::None;
-            }
-            if (botao(ui, {370, 124, 100, 36}, "Pausa", cPainel, cMudo, 12)) {
-                ciclo_ = tempo::Ciclo{};
-                descansoMs_ = int64_t(tempo::kCicloPausaMin) * 60000;
-                iniciarDescanso(nowMs, false);
-                screen = Screen::TempoBatalha;
-                return Action::None;
-            }
-        }
-
-        // ---- painel HOJE
-        {
-            int sessoes = 0;
-            for (const auto& ev : estado_.dia.eventos) sessoes += ev.tipo == tempo::TipoEvento::Batalha;
-            const Rect area{488, 10, 142, 152};
-            Bloco painel(ui, area, SurfaceMuted, 10, 44);
-            const std::string foco = fmtHoraMin(estado_.dia.fochoPagoMin);
-            painel.textoCor({502, 18, 100, 16}, "HOJE", 10, cMudo);
-            painel.textoCor({502, 34, 66, 28}, foco, 18, cTexto);
-            painel.textoCor({566, 42, 60, 16}, "de foco", 10, cMudo);
-            painel.textoCor({502, 84, 124, 16}, sessoes <= 6 ? std::to_string(sessoes) + " de 6 sessões" : std::to_string(sessoes) + " sessões",
-                            10, cMudo);
-            painel.textoCor({502, 106, 124, 20}, fmtNum(estado_.saldo) + " cr", 14, cLaranja);
-            painel.textoCor({502, 128, 124, 16}, "‹ Início", 10, cMudo);
-            painel.marca(static_cast<uint32_t>(std::min(sessoes, 6)));
-            painel.desenhar([&](Arduino_GFX& g, int dx, int dy) {
-                for (int i = 0; i < 6; ++i) {
-                    const int cx = 506 + i * 11 + dx, cy = 74 + dy;
-                    if (i < sessoes) g.fillCircle(cx, cy, 4, cLaranja);
-                    else g.drawCircle(cx, cy, 4, cMudo);
+                b.texto = "Começar";
+                b.sub = std::to_string(minutos) + " min";
+                b.tam = 21;
+                b.comIcone = true;
+                b.icone = IconeId::Play;
+                if (botao3(ui, Rect{476, 8, 156, 92}, b)) {
+                    comecarSessao(nowMs);
+                    screen = Screen::TempoBatalha;
+                    return Action::None;
                 }
-            });
-            if (ui.tap({488, 118, 142, 44})) {
-                salvarPreferencias();
-                screen = Screen::Home;
             }
+            Btn c;
+            c.texto = ciclo ? "ciclo 4×" : "ciclo";
+            c.tam = 17;
+            c.comIcone = true;
+            c.icone = IconeId::ArrowsClockwise;
+            c.fundo = ciclo ? c565(kSelFundo) : cTonal;
+            c.tinta = ciclo ? cLaranja : cMudo;
+            c.selecionado = ciclo;
+            c.corContorno = cLaranja;
+            c.habilitado = !emBatalha;
+            if (botao3(ui, Rect{476, 108, 156, 56}, c)) pomodoro_ = !pomodoro_;
         }
+        (void)cPainel;
         return Action::None;
     }
 
-    // Seletor de foco: "Foco livre" primeiro, depois os projetos do TickTick. Escolher volta ao Inicio.
+    // ====================================================================== Seletor (opcao B)
+    // Pagina 1: uma linha com os 4 blocos de categoria do Foco livre + os 2 projetos usados por ultimo; demais paginas: 3 projetos
+    // por pagina. Voltar separado de ▲ ▼ (sem rolagem por arrasto). Escolher volta ao Inicio ja preenchido.
     Action TempoScreen::drawSeletor(ui::Context& ui, uint32_t nowMs, Screen& screen) {
-        (void)nowMs;
         (void)screen;
-        if (button(ui, {8, 0, 100, 30}, "‹ Voltar", Style::Plain, true, {}, 12)) { seletor_ = false; return Action::None; }
-        ui.label({120, 6, 340, 18}, "ESCOLHA O FOCO (opcional)", 10, Muted);
-
-        const size_t total = 1 + titulos_.size();
-        constexpr int kLinhas = 4;
-        constexpr int kPasso = 34;
-        primeiro_ = std::min(primeiro_, total > size_t(kLinhas) ? total - kLinhas : 0);
-        const int giro = swipe_.update(ui, {12, 28, 458, 136});
-        if (giro > 0 && primeiro_ + kLinhas < total) primeiro_ += 1;
-        if (giro < 0 && primeiro_ > 0) primeiro_ -= 1;
+        const size_t nProj = lista_.projetos.size();
+        std::vector<std::string> ids;
+        ids.reserve(nProj);
+        for (const auto& p : lista_.projetos) ids.push_back(p.id);
+        const auto primeira = tempo::projetosDaPrimeiraPagina(estado_.projetosRecentes, ids);
+        const size_t paginas = tempo::paginasDoSeletor(nProj);
+        pagina_ = std::min(pagina_, paginas - 1);
+        const auto doProjeto = tempo::projetosDaPagina(pagina_, primeira, nProj);
 
         const uint16_t cMudo = ui.color(Muted), cTexto = ui.color(Foreground), cLaranja = c565(kLaranja);
-        for (int i = 0; i < kLinhas && primeiro_ + i < total; ++i) {
-            const size_t linha = primeiro_ + i;               // 0 = Foco livre; n = projeto n-1
-            const int y = 28 + i * kPasso;
-            const Rect rect{12, static_cast<int16_t>(y), 458, 30};
-            const bool sel = int(linha) - 1 == escolha_;
-            std::string titulo, sub;
-            if (linha == 0) {
-                titulo = "Foco livre";
-                sub = "sem projeto · você escolhe a categoria";
-            } else {
-                const auto& projeto = lista_.projetos[linha - 1];
-                titulo = titulos_[linha - 1].empty() ? std::string{"(sem título)"} : titulos_[linha - 1];
-                sub = "PROJETOS · ";
-                if (projeto.vence && projeto.vence->size() >= 10)
-                    sub += "vence " + projeto.vence->substr(8, 2) + "/" + projeto.vence->substr(5, 2);
-                else sub += "TickTick";
+        const uint16_t cPainel = ui.color(SurfaceMuted), cTonal = c565(kTonal), cSel = c565(kSelFundo);
+        int y = 1;
+
+        // ---- linha das 4 categorias do Foco livre (so na pagina 1)
+        if (pagina_ == 0) {
+            static constexpr tempo::Categoria kCats[4] = {tempo::Categoria::Trabalho, tempo::Categoria::Estudo,
+                                                          tempo::Categoria::Leitura, tempo::Categoria::Meditacao};
+            for (int i = 0; i < 4; ++i) {
+                const bool sel = escolha_ < 0 && categoria_ == kCats[i];
+                Btn b;
+                b.texto = tempo::nomeCategoria(kCats[i]);
+                b.tam = 15;
+                b.comIcone = true;
+                b.empilhado = true;
+                b.icone = iconeDaCategoria(kCats[i]);
+                b.fundo = sel ? cSel : cPainel;
+                b.tinta = cTexto;
+                b.tintaIcone = sel ? cLaranja : cMudo;
+                b.selecionado = sel;
+                b.corContorno = cLaranja;
+                b.check = sel;
+                if (botao3(ui, Rect{int16_t(6 + i * 128), int16_t(y), 121, 56}, b)) {
+                    escolha_ = -1;
+                    categoria_ = kCats[i];
+                    seletor_ = false;
+                    return Action::None;
+                }
             }
-            Bloco item(ui, rect, SurfaceMuted, 8, 50 + sel);
-            item.textoCor({26, int16_t(y), 430, 18}, titulo, 12, cTexto);
-            item.textoCor({26, int16_t(y + 16), 430, 13}, sub, 10, cMudo);
-            item.desenhar([&](Arduino_GFX& g, int dx, int dy) {
-                if (!sel) return;
-                g.drawRoundRect(rect.x + dx, rect.y + dy, rect.w, rect.h, 8, cLaranja);
-                g.drawRoundRect(rect.x + dx + 1, rect.y + dy + 1, rect.w - 2, rect.h - 2, 7, cLaranja);
+            y = 58;
+        }
+
+        // ---- projetos da pagina
+        for (int idx : doProjeto) {
+            const auto& projeto = lista_.projetos[idx];
+            const Rect rect{6, int16_t(y), 504, 56};
+            const bool sel = escolha_ == idx;
+            const std::string titulo = titulos_[idx].empty() ? std::string{"(sem título)"} : titulos_[idx];
+            std::string info;
+            if (projeto.vence && projeto.vence->size() >= 10)
+                info = "vence " + projeto.vence->substr(8, 2) + "/" + projeto.vence->substr(5, 2);
+            const int larguraInfo = info.empty() ? 0 : ui::sans::width(info, ui::sans::font(15)) + 12;
+            const int maxw = 504 - 56 - 14 - larguraInfo - (sel ? 40 : 0);
+            const auto q = quebrar(titulo, maxw, 21, 17);
+            Bloco linha(ui, rect, SurfaceMuted, 14, 100 + sel);
+            linha.corFixa = sel ? int32_t(cSel) : -1;
+            linha.apertado = ui.pressed(rect);
+            const int passo = q.tam == 21 ? 25 : 21;
+            const int y0 = q.linhas.size() == 1 ? y + 28 : y + 28 - passo / 2;
+            for (size_t i = 0; i < q.linhas.size(); ++i) linha.linha(62, y0 + int(i) * passo, maxw, q.linhas[i], q.tam, cTexto);
+            const int xInfo = 510 - 14 - (sel ? 36 : 0);
+            if (!info.empty()) linha.linha(xInfo - larguraInfo, y + 28, larguraInfo, info, 15, cMudo, TextAlign::Right);
+            linha.desenhar([&](Arduino_GFX& g, int dx, int dy) {
+                if (sel) {
+                    g.drawRoundRect(rect.x + dx, rect.y + dy, rect.w, rect.h, 14, cLaranja);
+                    g.drawRoundRect(rect.x + dx + 1, rect.y + dy + 1, rect.w - 2, rect.h - 2, 13, cLaranja);
+                    icones::phosphor(g, IconeId::CheckCircle, 510 - 24, y + 28, 24, cLaranja, cSel);
+                }
+                icones::phosphor(g, IconeId::Kanban, 34, y + 28, 24, sel ? cLaranja : c565(Cor{120, 160, 255}), sel ? cSel : cPainel);
             });
-            if (ui.tap(rect)) {
-                escolher(int(linha) - 1);
+            if (ui.firmTap(rect)) {
+                escolher(idx);
                 seletor_ = false;
                 return Action::None;
             }
+            y += 57;
         }
-        if (total > size_t(kLinhas))
-            ui.label({300, 160, 170, 12},
-                     std::to_string(primeiro_ + 1) + "–" + std::to_string(std::min<size_t>(total, primeiro_ + kLinhas)) + " de "
-                         + std::to_string(total) + " · arraste",
-                     10, Muted, TextAlign::Right);
 
-        Bloco dica(ui, {488, 10, 142, 152}, SurfaceMuted, 10, 55);
-        dica.textoCor({502, 18, 100, 16}, "DICA", 10, cMudo);
-        dica.textoCor({502, 38, 124, 18}, "Sem projeto =", 11, cTexto);
-        dica.textoCor({502, 54, 124, 18}, "Foco livre.", 11, cTexto);
-        dica.textoCor({502, 80, 124, 16}, "Projetos vêm do", 10, cMudo);
-        dica.textoCor({502, 94, 124, 16}, "TickTick (tag", 10, cMudo);
-        dica.textoCor({502, 108, 124, 16}, "Projeto).", 10, cMudo);
-        dica.desenhar();
+        // ---- sem projetos do TickTick (na pagina 1, abaixo das categorias)
+        if (nProj == 0 && pagina_ == 0) {
+            const Rect painel{6, 58, 504, 113};
+            std::string ultima = "última sincronização: nunca";
+            if (lista_.gerado_em.size() >= 16)
+                ultima = "última sincronização: " + lista_.gerado_em.substr(8, 2) + "/" + lista_.gerado_em.substr(5, 2) + " "
+                         + lista_.gerado_em.substr(11, 5);
+            const bool sincronizando = sincPedidaMs_ != 0 && nowMs - sincPedidaMs_ < 8000;
+            Bloco vazio(ui, painel, SurfaceMuted, 14, 110 + sincronizando);
+            vazio.linha(64, 82, 270, "Sem projetos do TickTick", 17, cTexto);
+            vazio.linha(64, 110, 270, "Marque tarefas com a tag Projeto no", 13, cMudo);
+            vazio.linha(64, 128, 270, "TickTick e sincronize pelo Wi-Fi.", 13, cMudo);
+            vazio.linha(64, 152, 270, ultima, 13, c565(Cor{110, 112, 110}));
+            vazio.desenhar([&](Arduino_GFX& g, int, int) {
+                icones::phosphor(g, IconeId::CloudSlash, 36, 88, 32, cMudo, cPainel);
+            });
+            Btn b;
+            b.texto = sincronizando ? "Sincronizando…" : "Sincronizar";
+            b.tam = 17;
+            b.comIcone = true;
+            b.icone = IconeId::ArrowsClockwise;
+            b.fundo = cLaranja;
+            b.tinta = ui.color(Background);
+            b.habilitado = !sincronizando;
+            if (botao3(ui, Rect{338, 96, 164, 56}, b)) {
+                pedidoSync_ = true;
+                sincPedidaMs_ = nowMs ? nowMs : 1;
+            }
+        }
+
+        // ---- coluna da direita: Voltar | pagina | ▲ ▼
+        {
+            Btn v;
+            v.texto = "‹ Voltar";
+            v.tam = 17;
+            v.fundo = cTonal;
+            v.tinta = cTexto;
+            if (botao3(ui, Rect{518, 1, 116, 56}, v)) {
+                seletor_ = false;
+                return Action::None;
+            }
+            Bloco contador(ui, {518, 66, 116, 30}, Background, 0, 120);
+            contador.linha(518, 81, 116, "pág. " + std::to_string(pagina_ + 1) + " de " + std::to_string(paginas), 15, cMudo,
+                           TextAlign::Center);
+            contador.desenhar();
+            for (int k = 0; k < 2; ++k) {
+                const bool sobe = k == 0;
+                const bool ativo = sobe ? pagina_ > 0 : pagina_ + 1 < paginas;
+                Btn b;
+                b.comIcone = true;
+                b.icone = sobe ? IconeId::CaretUp : IconeId::CaretDown;
+                b.fundo = ativo ? cTonal : rgb565(18, 19, 18);
+                b.tinta = ativo ? cTexto : rgb565(70, 72, 70);
+                b.habilitado = ativo;
+                b.tam = 28;
+                if (botao3(ui, Rect{int16_t(sobe ? 518 : 578), 100, 56, 70}, b)) {
+                    if (sobe) --pagina_;
+                    else ++pagina_;
+                    return Action::None;
+                }
+            }
+        }
         return Action::None;
     }
 
-    // Batalha "C3": foco, distraido, overtime e pausa. Layout 640x172: aneis a esquerda (0..172),
-    // texto e botoes no meio (x = 182), painel a direita (488..630).
+    // "Fim · segure": o dedo apoiado enche o contorno em ~1 s; soltar antes mostra "segure para encerrar" por 3 s.
+    double TempoScreen::progressoFim(bool apertado, uint32_t nowMs) {
+        if (apertado) {
+            if (!fimApertado_) {
+                fimApertado_ = true;
+                fimInicioMs_ = nowMs;
+            }
+            return std::min(1.0, double(nowMs - fimInicioMs_) / 1000.0);
+        }
+        if (fimApertado_) {
+            fimApertado_ = false;
+            fimDicaAteMs_ = nowMs + 3000;
+        }
+        return -1.0;
+    }
+
+    void TempoScreen::encerrarPeloFim(uint32_t nowMs, Screen& screen) {
+        fimApertado_ = false;
+        fimDicaAteMs_ = 0;
+        acumular(nowMs);
+        if (cron_.focadoMs < 60000) {   // menos de 1 min de foco: cancela sem log nem recompensa
+            fase_ = Fase::Nenhuma;
+            ciclo_ = tempo::Ciclo{};
+            screen = Screen::TempoHoje;
+        } else {
+            ciclo_ = tempo::Ciclo{};   // encerrar no meio abandona o ciclo
+            finalizar(nowMs, !overtime_, fs_);   // em overtime o inimigo ja caiu: nao e fuga
+            screen = Screen::TempoVitoria;
+        }
+    }
+
+    namespace {
+        std::string fmtMS(int64_t totalSeg) {
+            totalSeg = std::max<int64_t>(0, totalSeg);
+            char t[16];
+            std::snprintf(t, sizeof t, "%d:%02d", int(totalSeg / 60), int(totalSeg % 60));
+            return t;
+        }
+    } // namespace
+
+    // ====================================================================== Batalha v3
+    // Layout 640x172: aneis a esquerda (0..172), texto no meio (176..468), botoes a direita (472..632).
+    // Estados: normal, "Fim · segure" apertado, distraido, pausado, overtime (e a pausa do ciclo).
     Action TempoScreen::drawBatalha(ui::Context& ui, uint32_t nowMs, Screen& screen) {
         if (fase_ == Fase::Reflexao) { screen = Screen::TempoVitoria; return Action::None; }
         if (fase_ == Fase::Nenhuma) { screen = Screen::TempoHoje; return Action::None; }
         const bool descanso = fase_ == Fase::Descanso;
         const bool pausada = fase_ == Fase::Pausada;
         const bool bonus = overtime_ && !descanso;
-        const bool distr = distraido_;
+        const bool distr = cron_.distraido && !pausada;
         const std::string nome = nomeBatalha_.empty() ? std::string{"Foco livre"} : nomeBatalha_;
         const int64_t planoMs = int64_t(planejadoMin_) * 60000;
+        const auto agora = tempo::agora(nowMs);
+
+        const uint16_t cLaranja = c565(kLaranja), cAmbar = c565(kAmbar), cAgua = c565(kAgua);
+        const uint16_t cMudo = ui.color(Muted), cTexto = ui.color(Foreground), cBg = ui.color(Background);
+        const uint16_t cTonal = c565(kTonal), cClaro = c565(kClaro), cVerde = c565(Cor{60, 200, 110});
+        const uint16_t cAzulClaro = c565(Cor{150, 205, 255}), cAgua2 = c565(Cor{140, 232, 222});
 
         // ---- numeros dos aneis
         double voce = 0.0, inimigo = 1.0;
-        Cor corVoce0 = kLaranja, corVoce1 = kAmbar;
         std::string centro, rotulo;
-        Cor corCentro = deRole(ui, Foreground);
         int64_t restDescanso = 0;
         if (descanso) {
             restDescanso = std::max<int64_t>(0, descansoMs_ - (int64_t(tempo::ms(nowMs)) - int64_t(descansoInicioMs_)));
             voce = 1.0 - double(restDescanso) / double(descansoMs_);
             inimigo = 0.0;
-            corVoce0 = kAgua; corVoce1 = kAgua2;
             centro = fmtRelogio((restDescanso + 999) / 1000);
             rotulo = "pausa";
         } else if (bonus) {
             voce = 1.0 + std::min(1.0, double(overtimeMs()) / double(planoMs));
             inimigo = 0.0;
-            corVoce0 = kAzul; corVoce1 = kAzul2;
-            centro = "+" + fmtRelogio(overtimeMs() / 1000);
-            rotulo = "bônus";
-            corCentro = kAzul;
+            centro = "+" + fmtMS(overtimeMs() / 1000);
+            rotulo = "extra";
         } else {
-            voce = std::min(1.0, double(focadoMs_) / double(planoMs));
+            voce = std::min(1.0, double(cron_.focadoMs) / double(planoMs));
             inimigo = std::min(1.0, double(restanteMs()) / double(planoMs));
             centro = fmtRelogio((restanteMs() + 999) / 1000);
-            rotulo = pausada ? "pausada" : "faltam";
+            rotulo = pausada ? "parado" : "faltam";
         }
         voce = std::floor(voce * 720) / 720;      // quantiza: anel so e redesenhado quando o valor muda
         inimigo = std::floor(inimigo * 720) / 720;
@@ -1237,114 +1508,239 @@ namespace screens {
         // ---- aneis + centro
         {
             Bloco aneis(ui, {0, 0, 172, 172}, Background, 0, 20 + surface());
-            const bool grande = false;
-            aneis.textoCor(Rect{int16_t(kCx - 40), int16_t(kCy - (grande ? 18 : 15)), 80, int16_t(grande ? 28 : 24)}, centro, grande ? 22 : bonus ? 14 : 17,
-                           c565(corCentro), TextAlign::Center);
-            aneis.textoCor(Rect{int16_t(kCx - 40), int16_t(kCy + (grande ? 6 : 5)), 80, 16}, rotulo, 9, ui.color(Muted), TextAlign::Center);
+            aneis.linha(kCx - 40, 82, 80, centro, bonus ? 21 : 26, bonus ? cAzulClaro : cTexto, TextAlign::Center);
+            aneis.linha(kCx - 40, 106, 80, rotulo, 13, cMudo, TextAlign::Center);
             aneis.marca(static_cast<uint32_t>(voce * 720) * 1031U + static_cast<uint32_t>(inimigo * 720));
             const Cor fundo = deRole(ui, Background);
+            const double escuro = pausada ? 0.35 : 0.0;
             aneis.desenhar([&](Arduino_GFX& g, int dx, int dy) {
-                const int ox = dx, oy = dy;
-                anel(g, ox, oy, kCx, kCy, kRaioFora, kEspessura, voce, corVoce0, corVoce1, fundo, corVoce0);
-                anel(g, ox, oy, kCx, kCy, kRaioDentro, kEspessura, descanso ? 0.0 : inimigo, kCarmim, kVinho, fundo, kCarmim);
+                const auto esc = [&](Cor c) { return mistura(c, kPreto, escuro); };
+                if (descanso) {
+                    anel(g, dx, dy, kCx, kCy, kRaioFora, kEspessura, voce, kAgua, kAgua2, fundo, kAgua);
+                    anel(g, dx, dy, kCx, kCy, kRaioDentro, kEspessura, 0.0, kCarmim, kVinho, fundo, kCarmim);
+                } else if (bonus) {
+                    const Cor b0 = esc(kLaranja), b1 = esc(kAmbar);
+                    anel(g, dx, dy, kCx, kCy, kRaioFora, kEspessura, voce, esc(kAzul2), esc(kAzul), fundo, kAzul, &b0, &b1);
+                    anel(g, dx, dy, kCx, kCy, kRaioDentro, kEspessura, 0.0, kCarmim, kVinho, fundo, kCarmim);
+                } else if (distr) {   // neutro: o foco "esta fora"
+                    anel(g, dx, dy, kCx, kCy, kRaioFora, kEspessura, voce, kCinzaA, kCinzaB, fundo, kCinzaA);
+                    anel(g, dx, dy, kCx, kCy, kRaioDentro, kEspessura, inimigo, kVinhoApagado, kVinhoApagado2, fundo, kVinhoApagado);
+                } else {
+                    anel(g, dx, dy, kCx, kCy, kRaioFora, kEspessura, voce, esc(kLaranja), esc(kAmbar), fundo, kLaranja);
+                    anel(g, dx, dy, kCx, kCy, kRaioDentro, kEspessura, inimigo, esc(kCarmim), esc(kVinho), fundo, kCarmim);
+                }
             });
         }
 
+        // ---- "Fim · segure": estado do dedo (calculado antes de pintar o texto)
+        const Rect rectFimLargo{472, 108, 160, 56}, rectFimMini{556, 96, 76, 72};
+        const bool fimMini = !descanso && !bonus && !pausada && !distr;
+        const Rect rectFim = fimMini ? rectFimMini : rectFimLargo;
+        const bool temFim = !descanso && !bonus;
+        double progFim = -1.0;
+        if (temFim) progFim = progressoFim(ui.pressed(rectFim), nowMs);
+        const bool segurando = progFim >= 0.0;
+        const bool dicaFim = segurando || (fimDicaAteMs_ != 0 && int32_t(fimDicaAteMs_ - nowMs) > 0);
+
         // ---- texto central
-        const auto estimativa = estimar();
-        Bloco texto(ui, {176, 4, 308, 118}, Background, 0, 40 + surface());
-        const uint16_t cLaranja = c565(kLaranja), cAzul = c565(kAzul), cCarmim = c565(kCarmim), cAgua = c565(kAgua);
-        const uint16_t cMudo = ui.color(Muted), cTexto = ui.color(Foreground);
-        const auto agora = tempo::agora(nowMs);
-        const std::string rodadaTxt = ciclo_.ativo ? "rodada " + std::to_string(ciclo_.rodada) + " de " + std::to_string(tempo::kCicloRodadas)
-                                                   : std::string{};
+        const auto est = estimar();
+        const std::string cr = fmtSinal(est.cr) + " cr", xp = fmtSinal(est.xp) + " XP";
+        const bool curto = rotulo.empty();
+        (void)curto;
+        Bloco texto(ui, {176, 4, 292, 164}, Background, 0, 40 + surface());
+        std::vector<std::function<void(Arduino_GFX&)>> icones;   // icones (logicos) pintados no desenho extra
+        const auto icone = [&](IconeId id, int cx, int cy, int lado, uint16_t cor) {
+            icones.push_back([=](Arduino_GFX& g) { icones::phosphor(g, id, cx, cy, lado, cor, cBg); });
+        };
+        const int rodada = ciclo_.ativo ? ciclo_.rodada : 1, rodadas = ciclo_.ativo ? tempo::kCicloRodadas : 1;
+        const std::string rodadaTxt = "RODADA " + std::to_string(rodada) + " DE " + std::to_string(rodadas);
+        std::string termina;
+        if (agora.valida && !pausada && !descanso) {
+            const int extra = ciclo_.ativo ? (tempo::kCicloRodadas - ciclo_.rodada) * (tempo::kCicloFocoMin + tempo::kCicloPausaMin) : 0;
+            termina = " · TERMINA " + fmtHoraRelogio(agora.minutoDoDia + int((restanteMs() + 59999) / 60000) + extra);
+        }
+        const auto nomeLinhas = [&](int y0, uint8_t tamA, uint8_t tamB, uint16_t cor) {
+            const auto q = quebrar(nome, 282, tamA, tamB);
+            const int passo = q.tam >= 21 ? 25 : 20;
+            for (size_t i = 0; i < q.linhas.size(); ++i) texto.linha(176, y0 + int(i) * passo, 292, q.linhas[i], q.tam, cor);
+        };
+        const auto linhaBonus = [&](int yc) {
+            switch (cron_.bonus()) {
+            case tempo::BonusPerfeito::Disponivel:
+                icone(IconeId::Fire, 184, yc, 16, cAmbar);
+                texto.linha(198, yc, 270, "sem distrações · bônus +25%", 15, cAmbar);
+                break;
+            case tempo::BonusPerfeito::Mantido:
+                icone(IconeId::Fire, 184, yc, 16, cAmbar);
+                texto.linha(198, yc, 270, "distração curta · bônus mantido", 15, cAmbar);
+                break;
+            case tempo::BonusPerfeito::Perdido:
+                icone(IconeId::Fire, 184, yc, 16, rgb565(110, 112, 110));
+                texto.linha(198, yc, 270, "bônus perfeito perdido", 15, cMudo);
+                break;
+            default: break;
+            }
+        };
+
         if (descanso) {
             const int pausaMin = int(descansoMs_ / 60000);
             const bool longa = ciclo_.ativo && ciclo_.passo == tempo::PassoCiclo::PausaLonga;
-            texto.textoCor({182, 8, 300, 18}, ciclo_.ativo ? "PAUSA · " + rodadaTxt : std::string{"PAUSA"}, 10, cAgua);
-            texto.textoCor({182, 24, 300, 28}, std::string{longa ? "Pausa longa de " : "Pausa de "} + std::to_string(pausaMin) + " minutos", 18, cTexto);
-            texto.textoCor({182, 53, 300, 20}, "respire; um bipe avisa quando acabar", 11, cMudo);
-            texto.textoCor({182, 71, 300, 20},
-                           ciclo_.ativo ? (longa ? std::string{"depois o ciclo termina"}
-                                                 : "depois: rodada " + std::to_string(ciclo_.rodada + 1) + " de " + std::to_string(tempo::kCicloRodadas))
-                                        : descansoVolta_ ? "depois você volta ao bônus" : "depois você volta ao Início", 11, cMudo);
-        } else if (bonus) {
-            texto.textoCor({182, 8, 300, 18}, pausada ? "PAUSADO · INIMIGO DERROTADO" : "INIMIGO DERROTADO · CONTINUANDO", 10, cAzul);
-            texto.textoCor({182, 24, 300, 28}, nome, 18, cTexto);
-            texto.textoCor({182, 53, 300, 20}, "seu anel passou de 100% e dá a 2ª volta", 11, cMudo);
-            texto.textoCor({182, 71, 300, 20}, "o trabalho não acabou? siga — conta até +" + std::to_string(planejadoMin_) + " min", 11, cMudo);
-        } else {
-            texto.textoCor({182, 8, 300, 18},
-                           pausada ? std::string{"PAUSADA"}
-                           : distr ? std::string{"DISTRAÍDO · o inimigo se cura"}
-                                   : "COMBO " + std::to_string(int(comboMs_ / 60000)) + " min sem distração",
-                           10, pausada ? cMudo : distr ? cAzul : cLaranja);
-            texto.textoCor({182, 24, 300, 28}, nome, 18, cTexto);
-            texto.textoCor({182, 53, 110, 20}, "você " + std::to_string(int(std::min<uint64_t>(100, focadoMs_ * 100 / uint64_t(planoMs))) ) + "%", 13, cLaranja);
-            texto.textoCor({292, 53, 150, 20}, "inimigo " + std::to_string(pontosDeVida()) + "%", 13, cCarmim);
-            std::string linha;
-            if (distr) linha = "volte ao foco e o anel vermelho volta a esvaziar";
-            else {
-                linha = (ciclo_.ativo ? rodadaTxt + " · " : std::string{"rodada de "}) + std::to_string(planejadoMin_) + " min";
-                if (agora.valida && !pausada)
-                    linha += " · termina " + fmtHoraRelogio(agora.minutoDoDia + int((restanteMs() + 59999) / 60000));
+            icone(IconeId::PauseCircle, 184, 16, 16, cAgua);
+            texto.linha(198, 16, 270, ciclo_.ativo ? "PAUSA · RODADA " + std::to_string(ciclo_.rodada) + " DE " + std::to_string(tempo::kCicloRodadas)
+                                                   : std::string{"PAUSA"}, 15, cAgua);
+            texto.linha(176, 46, 292, std::string{longa ? "Pausa longa de " : "Pausa de "} + std::to_string(pausaMin) + " min", 21, cTexto);
+            texto.linha(176, 84, 292, "respire; um bipe avisa quando acabar", 15, cMudo);
+            texto.linha(176, 108, 292,
+                        ciclo_.ativo ? (longa ? std::string{"depois o ciclo termina"}
+                                              : "depois: rodada " + std::to_string(ciclo_.rodada + 1) + " de " + std::to_string(tempo::kCicloRodadas))
+                                     : "depois você volta ao Início", 15, cMudo);
+            texto.linha(176, 148, 292, "hoje: " + fmtHoraMin(estado_.dia.fochoPagoMin) + " de foco", 15, cMudo);
+        } else if (pausada) {
+            icone(IconeId::PauseCircle, 184, 16, 18, cAgua);
+            texto.linha(198, 16, 270, "PAUSADO · " + fmtMS((int64_t(tempo::ms(nowMs)) - int64_t(pausaInicioMs_)) / 1000), 15, cAgua);
+            nomeLinhas(44, 21, 17, cTexto);
+            texto.linha(176, 110, 292, "o inimigo não se cura", 17, cAgua2);
+            texto.linha(176, 136, 292, "o relógio parou · sem perda de bônus", 15, cMudo);
+            if (dicaFim) {
+                icone(IconeId::FlagCheckered, 186, 158, 16, cLaranja);
+                texto.linha(202, 158, 266, "segure para encerrar", 15, cTexto);
             }
-            texto.textoCor({182, 77, 300, 18}, linha, 10, cMudo);
-        }
-        texto.desenhar();
-
-        // ---- painel direito
-        Bloco painel(ui, {488, 10, 142, 152}, SurfaceMuted, 10, 60 + surface());
-        const uint16_t cVerde = c565(kVerde);
-        if (descanso) {
-            painel.textoCor({502, 18, 120, 16}, "PAUSA", 10, cMudo);
-            painel.textoCor({502, 36, 120, 24}, fmtRelogio((restDescanso + 999) / 1000), 18, cAgua);
-            painel.textoCor({502, 62, 122, 18}, "restantes", 12, cTexto);
-            painel.textoCor({502, 90, 120, 16}, "Hoje", 10, cMudo);
-            painel.textoCor({502, 108, 124, 18}, fmtHoraMin(estado_.dia.fochoPagoMin) + " de foco", 11, cTexto);
         } else if (bonus) {
-            painel.textoCor({502, 18, 120, 16}, "ATÉ AGORA", 10, cMudo);
-            painel.textoCor({502, 36, 120, 24}, "+" + fmtNum(estimativa.cr) + " cr", 18, cLaranja);
-            painel.textoCor({502, 62, 122, 18}, "+" + fmtNum(estimativa.xp) + " XP", 12, cTexto);
-            painel.textoCor({502, 92, 124, 18}, std::to_string(int(focadoMs_ / 60000)) + " min de foco", 11, cTexto);
+            icone(IconeId::StarFour, 184, 16, 16, cAzulClaro);
+            texto.linha(198, 16, 270, "TEMPO EXTRA · INIMIGO DERROTADO", 15, cAzulClaro);
+            nomeLinhas(44, 21, 17, cTexto);
+            icone(IconeId::CheckCircle, 186, 112, 20, cVerde);
+            texto.linha(202, 112, 266, cr + " · " + xp + " já garantidos", 15, cVerde);
+            texto.linha(176, 140, 292, "cada minuto extra conta · até +" + std::to_string(planejadoMin_) + " min", 15, cMudo);
+        } else if (distr) {
+            icone(IconeId::HandPalm, 184, 16, 16, cClaro);
+            texto.linha(198, 16, 270, rodadaTxt + " · FORA DO FOCO", 15, cClaro);
+            texto.linha(176, 46, 292, "distraído há " + fmtMS(int64_t(cron_.distracaoAtualMs / 1000)), 26, cTexto);
+            nomeLinhas(80, 17, 17, cMudo);
+            texto.linha(176, 128, 292, "o inimigo se cura enquanto durar", 15, cMudo);
+            switch (cron_.bonus()) {
+            case tempo::BonusPerfeito::EmRisco: texto.linha(176, 150, 292, "até 1 min não perde o bônus perfeito", 15, cMudo); break;
+            case tempo::BonusPerfeito::Perdido: texto.linha(176, 150, 292, "bônus perfeito perdido", 15, cMudo); break;
+            default: texto.linha(176, 150, 292, "volte ao foco e o anel vermelho esvazia", 15, cMudo); break;
+            }
         } else {
-            painel.textoCor({502, 18, 120, 16}, "AO TERMINAR", 10, cMudo);
-            painel.textoCor({502, 36, 120, 24}, "+" + fmtNum(estimativa.cr) + " cr", 18, cLaranja);
-            painel.textoCor({502, 62, 122, 18}, "+" + fmtNum(estimativa.xp) + " XP", 12, cTexto);
-            painel.textoCor({502, 90, 120, 16}, "Distrações", 10, cMudo);
-            painel.textoCor({502, 108, 60, 22}, std::to_string(numDistracoes_), 16,
-                            numDistracoes_ > tempo::param::kMaxDistracoes ? cCarmim : cVerde);
+            texto.linha(176, 16, 292, rodadaTxt + termina, 15, cMudo);
+            nomeLinhas(40, 21, 17, cTexto);
+            linhaBonus(112);
+            if (dicaFim) {
+                icone(IconeId::FlagCheckered, 186, 140, 20, cLaranja);
+                texto.linha(202, 140, 266, "segure para encerrar", 17, cTexto);
+            } else {
+                texto.linha(176, 140, 292, "ao vencer: " + cr + " · " + xp, 15, cMudo);
+            }
         }
-        painel.desenhar();
+        texto.marca(dicaFim * 4U + segurando * 2U + uint32_t(cron_.bonus()) * 8U);
+        texto.desenhar([&](Arduino_GFX& g, int, int) {
+            for (const auto& f : icones) f(g);
+        });
 
         // ---- botoes
-        const uint16_t cFundoBtn = ui.color(SurfaceMuted), cBg = ui.color(Background);
+        const uint16_t cFundoApagado = c565(Cor{70, 42, 26}), cTintaApagada = c565(Cor{150, 100, 70});
+        const auto botaoFim = [&](const Rect& r, bool mini) {
+            Btn b;
+            b.fundo = cTonal;
+            b.tinta = cTexto;
+            b.comIcone = true;
+            b.icone = IconeId::FlagCheckered;
+            b.progresso64 = segurando ? int(progFim * 64) : -1;
+            if (mini) {
+                b.texto = "Fim";
+                b.tam = 15;
+                b.empilhado = true;
+                b.sub2 = "segure";
+                b.tintaSub = cMudo;
+            } else {
+                b.texto = "Fim · segure";
+                b.tam = 17;
+            }
+            botao3(ui, r, b);   // so captura o toque (apertado); o fim acontece pelo tempo segurado
+        };
+        const auto verificarFim = [&]() {
+            if (segurando && progFim >= 1.0) {
+                ui.cancelTouchUntilRelease();
+                encerrarPeloFim(nowMs, screen);
+                return true;
+            }
+            return false;
+        };
+
         if (descanso) {
-            if (botao(ui, {182, 124, 168, 36}, "Encerrar pausa", c565(kAgua), cBg, 13)) encerrarDescanso(nowMs);
+            Btn b;
+            b.texto = "Encerrar pausa";
+            b.tam = 17;
+            b.fundo = cAgua;
+            b.tinta = cBg;
+            if (botao3(ui, Rect{472, 8, 160, 92}, b)) encerrarDescanso(nowMs);
         } else if (bonus) {
-            if (botao(ui, {182, 124, 138, 36}, "Concluir", cLaranja, cBg, 13)) {
+            Btn c;
+            c.texto = "Concluir";
+            c.tam = 21;
+            c.comIcone = true;
+            c.icone = IconeId::Check;
+            c.fundo = cLaranja;
+            c.tinta = cBg;
+            if (botao3(ui, Rect{472, 8, 160, 92}, c)) {
                 finalizar(nowMs, false, fs_);
                 screen = Screen::TempoVitoria;
-            } else if (botao(ui, {330, 124, 140, 36}, pausada ? "Retomar" : "Pausa de 5 min", cFundoBtn, cTexto, 12)) {
-                if (pausada) pausarOuRetomar(nowMs);
-                else iniciarDescanso(nowMs, true);
+                return Action::None;
             }
+            Btn p;
+            p.texto = "Pausar";
+            p.tam = 17;
+            p.comIcone = true;
+            p.icone = IconeId::Pause;
+            p.fundo = cTonal;
+            p.tinta = cTexto;
+            if (botao3(ui, Rect{472, 108, 160, 56}, p)) pausarOuRetomar(nowMs);
+        } else if (pausada) {
+            Btn c;
+            c.texto = "Continuar";
+            c.tam = 21;
+            c.comIcone = true;
+            c.icone = IconeId::Play;
+            c.fundo = cLaranja;
+            c.tinta = cBg;
+            if (botao3(ui, Rect{472, 8, 160, 92}, c)) pausarOuRetomar(nowMs);
+            botaoFim(rectFimLargo, false);
+            if (verificarFim()) return Action::None;
+        } else if (distr) {
+            Btn c;
+            c.texto = "Voltei";
+            c.tam = 21;
+            c.comIcone = true;
+            c.icone = IconeId::Check;
+            c.fundo = cClaro;
+            c.tinta = cBg;
+            if (botao3(ui, Rect{472, 8, 160, 92}, c)) alternarDistracao(nowMs);
+            botaoFim(rectFimLargo, false);
+            if (verificarFim()) return Action::None;
         } else {
-            if (botao(ui, {182, 124, 88, 36}, pausada ? "Retomar" : "Pausar", cLaranja, cBg, 13)) pausarOuRetomar(nowMs);
-            if (botao(ui, {280, 124, 110, 36}, distr ? "Voltei" : "Me distraí", distr ? cAzul : cFundoBtn, distr ? cBg : cTexto, 13, !pausada))
-                alternarDistracao(nowMs);
-            if (botao(ui, {400, 124, 70, 36}, "Fim", cFundoBtn, cMudo, 13)) {
-                acumular(nowMs);
-                if (focadoMs_ < 60000) {   // menos de 1 min de foco: cancela sem log nem recompensa
-                    fase_ = Fase::Nenhuma;
-                    ciclo_ = tempo::Ciclo{};
-                    screen = Screen::TempoHoje;
-                } else {
-                    ciclo_ = tempo::Ciclo{};   // encerrar no meio abandona o ciclo
-                    finalizar(nowMs, true, fs_);
-                    screen = Screen::TempoVitoria;
-                }
-            }
+            Btn p;
+            p.texto = "Pausar";
+            p.tam = 21;
+            p.comIcone = true;
+            p.icone = IconeId::Pause;
+            p.fundo = segurando ? cFundoApagado : cLaranja;
+            p.tinta = segurando ? cTintaApagada : cBg;
+            p.habilitado = !segurando;
+            if (botao3(ui, Rect{472, 8, 160, 80}, p)) pausarOuRetomar(nowMs);
+            Btn d;
+            d.texto = "Distraí";
+            d.tam = 15;
+            d.comIcone = true;
+            d.empilhado = true;
+            d.icone = IconeId::HandPalm;
+            d.fundo = cTonal;
+            d.tinta = segurando ? rgb565(110, 112, 110) : cTexto;
+            d.habilitado = !segurando;
+            if (botao3(ui, Rect{472, 96, 76, 72}, d)) alternarDistracao(nowMs);
+            botaoFim(rectFimMini, true);
+            if (verificarFim()) return Action::None;
         }
         return Action::None;
     }

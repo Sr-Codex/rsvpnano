@@ -479,12 +479,20 @@ namespace ui {
         return tapped(slot, rect, enabled);
     }
 
+    bool Context::firmTap(Rect rect, bool enabled) {
+        rect = paintBounds(rect);
+        const size_t slot = nextSlot_;
+        claim(Kind::Touch, rect, enabled);
+        return tapped(slot, rect, enabled, true);
+    }
+
     bool Context::button(Rect rect, std::string_view text, bool enabled, Icon icon, uint8_t textLines,
                          std::string_view detailLeft, std::string_view detailRight) {
         rect = paintBounds(rect);
         const size_t slot = nextSlot_;
-        const bool activated = tapped(slot, rect, enabled);
-        uint32_t state = combine(signature(text), enabled);
+        const bool down = enabled && pressed(rect);   // estado "apertado"
+        const bool activated = tapped(slot, rect, enabled, true);
+        uint32_t state = combine(signature(text), enabled + 2U * down);
         state = combine(state, static_cast<uint8_t>(icon));
         state = combine(state, textLines);
         state = signature(detailLeft, state);
@@ -513,8 +521,9 @@ namespace ui {
                 }
             }
             paint(rect, [&](Arduino_GFX& output, Rect rect) {
-                const uint16_t surface = color(ui::themes::ColorRole::SurfaceMuted);
+                const uint16_t surface = color(down ? ui::themes::ColorRole::SurfaceActive : ui::themes::ColorRole::SurfaceMuted);
                 output.fillRoundRect(rect.x, rect.y, rect.w, rect.h, 5, surface);
+                if (down) output.drawRoundRect(rect.x, rect.y, rect.w, rect.h, 5, color(ui::themes::ColorRole::Accent));
                 if (!modernPresentation_) output.drawRoundRect(rect.x, rect.y, rect.w, rect.h, 5,
                                      color(enabled ? ui::themes::ColorRole::Outline
                                                    : ui::themes::ColorRole::ProgressTrack));
@@ -535,14 +544,16 @@ namespace ui {
     bool Context::iconButton(Rect rect, Icon icon) {
         rect = paintBounds(rect);
         const size_t slot = nextSlot_;
-        const bool activated = tapped(slot, rect);
-        const uint32_t state = static_cast<uint8_t>(icon);
+        const bool down = pressed(rect);
+        const bool activated = tapped(slot, rect, true, true);
+        const uint32_t state = static_cast<uint8_t>(icon) + 256U * down;
         const Claim widget = claim(Kind::Button, rect, state);
         if (widget.changed) {
             paint(rect, [&](Arduino_GFX& output, Rect rect) {
                 const uint16_t surface = color(ui::themes::ColorRole::SurfaceMuted);
                 output.fillRoundRect(rect.x, rect.y, rect.w, rect.h, 7, surface);
-                output.drawRoundRect(rect.x, rect.y, rect.w, rect.h, 7, color(ui::themes::ColorRole::Outline));
+                output.drawRoundRect(rect.x, rect.y, rect.w, rect.h, 7,
+                                     color(down ? ui::themes::ColorRole::Accent : ui::themes::ColorRole::Outline));
                 drawIcon(output, rect, icon, color(ui::themes::ColorRole::Muted), surface);
             });
         }
@@ -1609,7 +1620,23 @@ namespace ui {
         return rect;
     }
 
-    bool Context::tapped(size_t slot, Rect rect, bool enabled) {
+    Rect Context::withSlip(Rect rect) const {
+        const int16_t slip = static_cast<int16_t>(touchSource_.timing.firmTapSlipPx);
+        rect.x = static_cast<int16_t>(rect.x - slip);
+        rect.y = static_cast<int16_t>(rect.y - slip);
+        rect.w = static_cast<int16_t>(rect.w + 2 * slip);
+        rect.h = static_cast<int16_t>(rect.h + 2 * slip);
+        return rect;
+    }
+
+    bool Context::pressed(Rect rect) const {
+        rect = paintBounds(rect);
+        return touchActive_ && capturedSlot_ != kSlotCapacity && capturedRect_.x == rect.x && capturedRect_.y == rect.y
+            && capturedRect_.w == rect.w && capturedRect_.h == rect.h
+            && contains(withSlip(touchBounds(rect)), touchLastX_, touchLastY_);
+    }
+
+    bool Context::tapped(size_t slot, Rect rect, bool enabled, bool firm) {
         if (!enabled) {
             if (capturedSlot_ == slot)
                 capturedSlot_ = kSlotCapacity;
@@ -1619,11 +1646,19 @@ namespace ui {
         if (event == nullptr || slot >= kSlotCapacity)
             return false;
         if (hasTouch(*event, TouchStart) && contains(touchBounds(rect), event->x, event->y))
+        {
             capturedSlot_ = slot;
+            capturedRect_ = rect;
+        }
         if (!hasTouch(*event, TouchRelease) || capturedSlot_ != slot)
             return false;
         capturedSlot_ = kSlotCapacity;
-        return hasTouch(*event, TouchTap);
+        if (!firm)
+            return hasTouch(*event, TouchTap);
+        // Toque firme: soltar DENTRO do alvo (com pequena folga) conta mesmo depois de 600 ms, ate o limite firme.
+        if (hasTouch(*event, TouchCancel) || !(hasTouch(*event, TouchTap) || hasTouch(*event, TouchFirmTap)))
+            return false;
+        return contains(withSlip(touchBounds(rect)), event->x, event->y);
     }
 
     void Context::resetTouchGesture() {
@@ -1663,9 +1698,12 @@ namespace ui {
                 return false;
             const bool tapped = !touchHoldEmitted_ && nowMs - touchStartedAtMs_ <= touchSource_.timing.tapMaxDurationMs
                              && touchOutsideSamples_ < kTapCancelOutsideSamples;
+            const bool firm = nowMs - touchStartedAtMs_ <= touchSource_.timing.firmTapMaxDurationMs
+                           && touchOutsideSamples_ < kTapCancelOutsideSamples;
             touchActive_ = false;
-            touchEvent_ = {static_cast<uint8_t>(TouchRelease | (tapped ? TouchTap : TouchNone)), touchLastX_,
-                           touchLastY_};
+            touchEvent_ = {static_cast<uint8_t>(TouchRelease | (tapped ? TouchTap : TouchNone)
+                                                 | (firm ? TouchFirmTap : TouchNone)),
+                           touchLastX_, touchLastY_};
             return touchPending_ = true;
         }
 

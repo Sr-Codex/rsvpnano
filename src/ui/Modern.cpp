@@ -40,9 +40,12 @@ namespace ui::modern {
         state = Context::combine(state, enabled);
         state = Context::combine(state, size);
         state = Context::combine(state, static_cast<uint8_t>(align));
+        const bool down = enabled && ui.pressed(rect);   // estado "apertado": fundo mais claro + contorno
+        state = Context::combine(state, down);
         if (ui.redraw(rect, state)) {
             const bool primary = style == Style::Primary && enabled;
-            const auto surface = ui.color(primary ? themes::AccentBar
+            const auto surface = ui.color(down ? themes::SurfaceActive
+                                          : primary ? themes::AccentBar
                                           : style == Style::Secondary ? themes::SurfaceMuted : themes::Background);
             const auto ink = ui.color(!enabled ? themes::Muted : primary ? themes::OnAccent
                                      : style == Style::Accent ? themes::Accent : themes::Foreground);
@@ -59,17 +62,21 @@ namespace ui::modern {
                 detail, 11);
             ui.paint(rect, [&](Arduino_GFX& gfx, Rect target) {
                 gfx.fillRoundRect(target.x, target.y, target.w, target.h, 3, surface);
+                if (down) gfx.drawRoundRect(target.x, target.y, target.w, target.h, 3, ui.color(themes::Accent));
                 ui.drawText(gfx, titleLayout, ink, target.x - rect.x, target.y - rect.y, surface);
                 ui.drawText(gfx, detailLayout, ui.color(themes::Muted), target.x - rect.x, target.y - rect.y, surface);
             });
         }
-        return ui.tap(rect, enabled);
+        return ui.firmTap(rect, enabled);
     }
 
     bool arrow(Context& ui, Rect rect, Direction direction, bool enabled) {
-        if (ui.redraw(rect, Context::combine(static_cast<uint8_t>(direction), enabled))) {
+        const bool down = enabled && ui.pressed(rect);
+        if (ui.redraw(rect, Context::combine(static_cast<uint8_t>(direction), enabled + 2U * down))) {
             ui.paint(rect, [&](Arduino_GFX& gfx, Rect target) {
-                gfx.fillRoundRect(target.x, target.y, target.w, target.h, 3, ui.color(themes::SurfaceMuted));
+                gfx.fillRoundRect(target.x, target.y, target.w, target.h, 3,
+                                  ui.color(down ? themes::SurfaceActive : themes::SurfaceMuted));
+                if (down) gfx.drawRoundRect(target.x, target.y, target.w, target.h, 3, ui.color(themes::Accent));
                 const int x = target.x + target.w / 2, y = target.y + target.h / 2;
                 const auto ink = ui.color(enabled ? themes::Accent : themes::Subtle);
                 // A 3-pixel stroke stays clear on the actual small panel.
@@ -85,7 +92,7 @@ namespace ui::modern {
                 }
             });
         }
-        return ui.tap(rect, enabled);
+        return ui.firmTap(rect, enabled);
     }
 
     void rule(Context& ui, Rect rect) {

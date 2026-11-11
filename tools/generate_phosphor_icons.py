@@ -38,6 +38,11 @@ ICONES = [
     ("BookOpen", "book-open"), ("Brain", "brain"), ("CalendarCheck", "calendar-check"), ("Prohibit", "prohibit"),
     ("Sun", "sun"), ("CheckCircle", "check-circle"), ("Fire", "fire"), ("Check", "check"),
     ("SkipForward", "skip-forward"), ("ArrowCounterClockwise", "arrow-counter-clockwise"), ("Star", "star"),
+    # Tempo v3 (Inicio/Seletor/Batalha)
+    ("Play", "play"), ("Pause", "pause"), ("HandPalm", "hand-palm"), ("FlagCheckered", "flag-checkered"),
+    ("Kanban", "kanban"), ("GraduationCap", "graduation-cap"), ("Briefcase", "briefcase"), ("CaretUp", "caret-up"),
+    ("CaretDown", "caret-down"), ("ArrowsClockwise", "arrows-clockwise"), ("CloudSlash", "cloud-slash"),
+    ("PauseCircle", "pause-circle"), ("StarFour", "star-four"),
 ]
 
 

@@ -300,6 +300,11 @@ namespace ui {
                      SettingLayout layout = SettingLayout::Stacked);
         bool toggle(Rect rect, std::string_view label, bool& enabled);
         bool tap(Rect rect, bool enabled = true);
+        // Toque que ACEITA toque firme: soltar dentro do alvo (folga de firmTapSlipPx) vale ate firmTapMaxDurationMs, sem
+        // o corte de 600 ms. So para alvos sem gesto de segurar nem arrasto (o alvo declara usando esta chamada).
+        bool firmTap(Rect rect, bool enabled = true);
+        // true enquanto o dedo, que comecou neste alvo, continua nele (estado "apertado" do botao). Chamar antes de pintar.
+        bool pressed(Rect rect) const;
         bool button(Rect rect, std::string_view text, bool enabled = true, Icon icon = Icon::None,
                     uint8_t textLines = 1, std::string_view detailLeft = {}, std::string_view detailRight = {});
         bool iconButton(Rect rect, Icon icon);
@@ -460,7 +465,8 @@ namespace ui {
                              uint16_t surface);
         int valueAt(Rect rect, uint16_t x, int minimum, int maximum, int step) const;
         Rect touchBounds(Rect rect) const;
-        bool tapped(size_t slot, Rect rect, bool enabled = true);
+        bool tapped(size_t slot, Rect rect, bool enabled = true, bool firm = false);
+        Rect withSlip(Rect rect) const;
         bool sliderValue(Rect rect, std::string_view label, int& value, int minimum, int maximum, int step,
                          std::string_view suffix, ui::themes::ColorRole activeRole);
         bool filledSliderValue(Rect rect, std::string_view label, int& value, int minimum, int maximum, int step,
@@ -510,6 +516,7 @@ namespace ui {
         size_t slotCount_ = 0;
         size_t nextSlot_ = 0;
         size_t capturedSlot_ = kSlotCapacity;
+        Rect capturedRect_{};
         int capturedScalarValue_ = 0;
         int capturedScalarInitialValue_ = 0;
         int8_t capturedStepperDirection_ = 0;

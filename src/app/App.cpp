@@ -1531,6 +1531,7 @@ void App::updateTickTickSync(uint32_t nowMs) {
     const bool entered = launcher && !tickTickWasLauncher_;
     tickTickWasLauncher_ = launcher;
     if (tempoScreen_.pegarCheckinNovo(nowMs)) tickTickCheckinPendente_ = true;   // guarda ate a sync poder rodar
+    if (tempoScreen_.pegarPedidoSync()) tickTickTried_ = false;                    // "Sincronizar" do seletor vazio: sync ja (so se nada o impede)
 #if defined(LUME_SIM)
     // Simulador: LUME_SIM_SYNC_MS=N finge uma sync de N ms (sem token) para capturar o indicador de sync.
     const bool semToken = settingsStore_.secrets().ticktickToken.empty() && std::getenv("LUME_SIM_SYNC_MS") == nullptr;

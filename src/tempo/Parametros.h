@@ -21,6 +21,7 @@ namespace tempo::param {
     // Batalha
     constexpr double kBonusPerfeita = 0.25;
     constexpr int kDuracaoMinBonusPerfeita = 15;
+    constexpr int kDistracaoToleradaSeg = 60;     // 1 distracao de ate 1 min nao tira o bonus perfeito (decisao 18)
     constexpr int kDistracaoPerdidoMin = 2;       // distraidos > 2 min viram Perdido
     constexpr int kMaxDistracoes = 3;             // > 3 => fuga
     constexpr int kDistracaoLongaMin = 10;        // 1 distracao > 10 min => fuga

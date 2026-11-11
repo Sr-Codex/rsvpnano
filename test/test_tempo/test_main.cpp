@@ -7,6 +7,7 @@
 #include <string>
 
 #include "tempo/Codec.h"
+#include "tempo/Cronometro.h"
 #include "tempo/FocoLeitor.h"
 #include "tempo/Motor.h"
 #include "tempo/Parametros.h"
@@ -1446,6 +1447,166 @@ void test_leitor_resumo_conta_leitura_como_foco_livre() {
 }
 
 
+// ============================================================ Tempo v3: decisoes 18/19, categoria unica, seletor B
+namespace {
+    EntradaBatalha comSegundos(int distSeg, int numDist, int plan = 25) {
+        EntradaBatalha b = batalha(Categoria::Projetos, plan, plan + std::min(distSeg / 60, plan), distSeg / 60, numDist);
+        b.segundosDistraidos = distSeg;
+        return b;
+    }
+}
+
+void test_v3_decisao18_uma_distracao_de_ate_1_min_mantem_o_bonus_perfeito() {
+    const Estado e = novoEstado();
+    TEST_ASSERT_TRUE(liquidarBatalha(e, comSegundos(0, 0)).perfeita);
+    const auto curta = liquidarBatalha(e, comSegundos(45, 1));
+    TEST_ASSERT_TRUE(curta.vitoria);
+    TEST_ASSERT_TRUE(curta.perfeita);
+    NEAR(0.25, curta.bonusCrPct);
+    TEST_ASSERT_TRUE(liquidarBatalha(e, comSegundos(60, 1)).perfeita);       // exatamente 1 min ainda vale
+}
+
+void test_v3_decisao18_segunda_distracao_ou_mais_de_1_min_perde_o_bonus() {
+    const Estado e = novoEstado();
+    const auto longa = liquidarBatalha(e, comSegundos(61, 1));
+    TEST_ASSERT_TRUE(longa.vitoria);
+    TEST_ASSERT_FALSE(longa.perfeita);
+    TEST_ASSERT_FALSE(liquidarBatalha(e, comSegundos(40, 2)).perfeita);      // 2 distracoes curtas
+    TEST_ASSERT_FALSE(liquidarBatalha(e, comSegundos(30, 1, 10)).perfeita);  // plano < 15 min nunca tem bonus
+    // quem nao informa os segundos (ex.: foco do leitor) segue a regra antiga: qualquer distracao tira o bonus
+    EntradaBatalha antiga = batalha(Categoria::Leitura, 25, 25, 0, 1);
+    TEST_ASSERT_FALSE(liquidarBatalha(e, antiga).perfeita);
+}
+
+void test_v3_cronometro_pausar_para_o_relogio_e_o_inimigo_nao_se_cura() {
+    Cronometro c;
+    c.zerar(25);
+    c.avancar(10 * 60000, true);
+    TEST_ASSERT_EQUAL_INT64(15 * 60000, c.restanteMs());
+    c.avancar(5 * 60000, false);                     // pausado 5 min
+    TEST_ASSERT_EQUAL_INT64(15 * 60000, c.restanteMs());
+    TEST_ASSERT_EQUAL_UINT64(10 * 60000, c.focadoMs);
+    TEST_ASSERT_EQUAL_UINT64(0, c.distraidoMs);
+    // pausa DURANTE uma distracao: tambem congela (nao cura nem conta distracao)
+    c.distrair();
+    c.avancar(30000, true);
+    const int64_t antes = c.restanteMs();
+    c.avancar(5 * 60000, false);
+    TEST_ASSERT_EQUAL_INT64(antes, c.restanteMs());
+    TEST_ASSERT_EQUAL_UINT64(30000, c.distraidoMs);
+}
+
+void test_v3_cronometro_distrai_cura_o_inimigo() {
+    Cronometro c;
+    c.zerar(25);
+    c.avancar(10 * 60000, true);
+    c.distrair();
+    c.avancar(2 * 60000, true);
+    TEST_ASSERT_EQUAL_INT64(17 * 60000, c.restanteMs());   // 15 min + 2 min de cura
+    c.voltar();
+    c.avancar(60000, true);
+    TEST_ASSERT_EQUAL_INT64(16 * 60000, c.restanteMs());
+    TEST_ASSERT_EQUAL_INT(1, c.numDistracoes);
+}
+
+void test_v3_cronometro_estados_do_bonus() {
+    Cronometro c;
+    c.zerar(25);
+    TEST_ASSERT_TRUE(c.bonus() == BonusPerfeito::Disponivel);
+    c.avancar(60000, true);
+    c.distrair();
+    c.avancar(30000, true);
+    TEST_ASSERT_TRUE(c.bonus() == BonusPerfeito::EmRisco);
+    c.voltar();
+    TEST_ASSERT_TRUE(c.bonus() == BonusPerfeito::Mantido);
+    const auto liq = liquidarBatalha(novoEstado(), c.entrada(Categoria::Projetos, false));
+    TEST_ASSERT_TRUE(liq.perfeita);                    // a estimativa da tela ja conta o bonus mantido
+    c.distrair();                                      // 2a distracao
+    TEST_ASSERT_TRUE(c.bonus() == BonusPerfeito::Perdido);
+    c.voltar();
+    Cronometro longo;
+    longo.zerar(25);
+    longo.distrair();
+    longo.avancar(61000, true);
+    TEST_ASSERT_TRUE(longo.bonus() == BonusPerfeito::Perdido);
+    Cronometro curto;
+    curto.zerar(10);
+    TEST_ASSERT_TRUE(curto.bonus() == BonusPerfeito::Indisponivel);
+}
+
+void test_v3_categoria_unica_com_projeto_e_livre_sem_projeto() {
+    for (int c = 0; c < int(kNumCategorias); ++c) {
+        const auto livre = static_cast<Categoria>(c);
+        TEST_ASSERT_TRUE(categoriaDoFoco(true, livre) == Categoria::Projetos);     // projeto: sempre Projetos
+    }
+    TEST_ASSERT_TRUE(categoriaDoFoco(false, Categoria::Meditacao) == Categoria::Meditacao);
+    TEST_ASSERT_TRUE(categoriaDoFoco(false, Categoria::Leitura) == Categoria::Leitura);
+    TEST_ASSERT_TRUE(categoriaDoFoco(false, Categoria::Projetos) == Categoria::Trabalho);   // livre nunca e "Projetos"
+    TEST_ASSERT_TRUE(categoriaLivreValida(-3) == Categoria::Trabalho);
+    TEST_ASSERT_TRUE(categoriaLivreValida(99) == Categoria::Trabalho);
+    TEST_ASSERT_TRUE(categoriaLivreValida(int(Categoria::Projetos)) == Categoria::Trabalho);
+    TEST_ASSERT_EQUAL_STRING("0,40 cr/min", textoTaxa(Categoria::Projetos).c_str());
+    TEST_ASSERT_EQUAL_STRING("0,20 cr/min", textoTaxa(Categoria::Leitura).c_str());
+}
+
+void test_v3_projetos_recentes_e_paginas_do_seletor() {
+    std::vector<std::string> rec;
+    registrarProjetoRecente(rec, "c");
+    registrarProjetoRecente(rec, "a");
+    registrarProjetoRecente(rec, "c");   // repetido: sobe, sem duplicar
+    registrarProjetoRecente(rec, "");    // vazio ignorado
+    TEST_ASSERT_EQUAL(2, int(rec.size()));
+    TEST_ASSERT_EQUAL_STRING("c", rec[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("a", rec[1].c_str());
+    registrarProjetoRecente(rec, "b");
+    TEST_ASSERT_EQUAL(2, int(rec.size()));   // so os 2 ultimos
+    TEST_ASSERT_EQUAL_STRING("b", rec[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("c", rec[1].c_str());
+
+    const std::vector<std::string> ids = {"a", "b", "c", "d", "e", "f", "g"};
+    auto p1 = projetosDaPrimeiraPagina(rec, ids);
+    TEST_ASSERT_EQUAL(2, int(p1.size()));
+    TEST_ASSERT_EQUAL(1, p1[0]);   // b
+    TEST_ASSERT_EQUAL(2, p1[1]);   // c
+    // recentes que sumiram da lista: completa com os primeiros
+    const std::vector<std::string> sumidos = {"x", "y"};
+    p1 = projetosDaPrimeiraPagina(sumidos, ids);
+    TEST_ASSERT_EQUAL(2, int(p1.size()));
+    TEST_ASSERT_EQUAL(0, p1[0]);
+    TEST_ASSERT_EQUAL(1, p1[1]);
+    p1 = projetosDaPrimeiraPagina(rec, ids);
+    // 7 projetos: pagina 1 (2) + 5 restantes em 2 paginas de 3
+    TEST_ASSERT_EQUAL(3, int(paginasDoSeletor(7)));
+    const auto p2 = projetosDaPagina(1, p1, 7);
+    TEST_ASSERT_EQUAL(3, int(p2.size()));
+    TEST_ASSERT_EQUAL(0, p2[0]);   // a
+    TEST_ASSERT_EQUAL(3, p2[1]);   // d (b e c ja estao na pagina 1)
+    TEST_ASSERT_EQUAL(4, p2[2]);
+    const auto p3 = projetosDaPagina(2, p1, 7);
+    TEST_ASSERT_EQUAL(2, int(p3.size()));
+    TEST_ASSERT_EQUAL(5, p3[0]);
+    TEST_ASSERT_EQUAL(6, p3[1]);
+    TEST_ASSERT_EQUAL(1, int(paginasDoSeletor(0)));
+    TEST_ASSERT_EQUAL(1, int(paginasDoSeletor(2)));
+    TEST_ASSERT_EQUAL(2, int(paginasDoSeletor(3)));
+    TEST_ASSERT_EQUAL(2, int(paginasDoSeletor(5)));
+    TEST_ASSERT_EQUAL(3, int(paginasDoSeletor(6)));
+    TEST_ASSERT_EQUAL(0, int(projetosDaPrimeiraPagina({}, {}).size()));
+}
+
+void test_v3_estado_guarda_projetos_recentes_no_json() {
+    Estado e = novoEstado();
+    e.projetosRecentes = {"p2", "p1"};
+    Estado lido;
+    TEST_ASSERT_TRUE(lerEstado(serializarEstado(e), lido));
+    TEST_ASSERT_EQUAL(2, int(lido.projetosRecentes.size()));
+    TEST_ASSERT_EQUAL_STRING("p2", lido.projetosRecentes[0].c_str());
+    // estado antigo (sem o campo) continua legivel
+    Estado antigo;
+    TEST_ASSERT_TRUE(lerEstado("{\"saldo\":3.0}", antigo));
+    TEST_ASSERT_TRUE(antigo.projetosRecentes.empty());
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_datas);
@@ -1522,6 +1683,14 @@ int main(int, char**) {
     RUN_TEST(test_leitor_intervalo_nao_abre_rodada_e_cada_rodada_liquida_separado);
     RUN_TEST(test_leitor_conclusao_com_foco_ainda_ativo_fecha_e_reabre);
     RUN_TEST(test_leitor_anti_dupla_contagem_com_batalha_do_tempo_ativa);
+    RUN_TEST(test_v3_decisao18_uma_distracao_de_ate_1_min_mantem_o_bonus_perfeito);
+    RUN_TEST(test_v3_decisao18_segunda_distracao_ou_mais_de_1_min_perde_o_bonus);
+    RUN_TEST(test_v3_cronometro_pausar_para_o_relogio_e_o_inimigo_nao_se_cura);
+    RUN_TEST(test_v3_cronometro_distrai_cura_o_inimigo);
+    RUN_TEST(test_v3_cronometro_estados_do_bonus);
+    RUN_TEST(test_v3_categoria_unica_com_projeto_e_livre_sem_projeto);
+    RUN_TEST(test_v3_projetos_recentes_e_paginas_do_seletor);
+    RUN_TEST(test_v3_estado_guarda_projetos_recentes_no_json);
     RUN_TEST(test_leitor_leitura_da_creditos_e_nunca_por_prazer);
     RUN_TEST(test_leitor_titulo_vazio_e_longo);
     RUN_TEST(test_leitor_evento_ida_e_volta_no_log_e_logs_antigos_continuam_legiveis);

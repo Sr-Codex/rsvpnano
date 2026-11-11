@@ -110,6 +110,7 @@ namespace tempo {
         int minutosPlanejados = 0;   // HP do inimigo
         int minutosFocados = 0;      // minutos de foco efetivos (inclui overtime e minutos curados)
         int minutosDistraidos = 0;   // tempo fora do foco (cada minuto cura 1 HP)
+        int segundosDistraidos = -1; // tempo fora do foco em segundos; >= 0 liga a tolerancia de 1 distracao curta (decisao 18)
         int numDistracoes = 0;
         int maiorDistracaoMin = 0;
         bool abandonou = false;
@@ -243,6 +244,7 @@ namespace tempo {
         int ultimaCategoria = 0;       // Categoria (enum) da ultima sessao
         int ultimaDuracaoMin = 25;     // 5..60
         bool ciclopomodoro = false;    // interruptor "ciclo pomodoro 4x"
+        std::vector<std::string> projetosRecentes;   // ids do TickTick dos projetos usados por ultimo (mais novo primeiro, ate 2)
         int metaSemanalMin = 900;      // meta de foco da semana no Perfil (padrao 15 h; editavel no estado.json)
     };
 

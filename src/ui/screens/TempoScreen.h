@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "tempo/Codec.h"
+#include "tempo/Cronometro.h"
 #include "tempo/FocoLeitor.h"
 #include "tempo/Habitos.h"
 #include "tempo/Lembretes.h"
@@ -80,6 +81,8 @@ namespace screens {
         // composto: vitoria+moeda+nivel+conquista viram UM som, o de maior valor) e o App drena 1x por quadro.
         // Devolve false quando nao ha mais nenhum.
         bool pegarSom(som::SomId& id);
+        // "Sincronizar" (seletor sem projetos): true uma vez depois do toque; o App dispara a sync silenciosa do TickTick.
+        bool pegarPedidoSync() { const bool v = pedidoSync_; pedidoSync_ = false; return v; }
 
         // Avanca a batalha (acumula tempo), entra em overtime quando o inimigo zera, conclui no teto de +100 %,
         // cuida da pausa de 5 min e do auto-salvar da reflexao. Devolve true quando o app deve dar um bipe
@@ -143,8 +146,8 @@ namespace screens {
         bool estadoCarregado() const { return carregado_; }
         bool battleActive() const { return fase_ == Fase::Lutando || fase_ == Fase::Pausada || fase_ == Fase::Descanso; }
         uint8_t surface() const {
-            return static_cast<uint8_t>(static_cast<uint8_t>(fase_) * 4 + (distraido_ ? 1 : 0) + (overtime_ ? 2 : 0)
-                                        + (seletor_ ? 32 : 0));
+            return static_cast<uint8_t>(static_cast<uint8_t>(fase_) * 4 + (cron_.distraido ? 1 : 0) + (overtime_ ? 2 : 0)
+                                        + (seletor_ ? 32 + (pagina_ & 1U) * 64 : 0));
         }
 
     private:
@@ -155,7 +158,7 @@ namespace screens {
         void ligarBatalha(uint32_t nowMs);                     // zera contadores e entra em Lutando
         void concluirRodada(uint32_t nowMs, fs::FS* filesystem);   // ciclo: liquida a rodada e entra na pausa
         void salvarPreferencias();
-        void escolher(int indice);                              // -1 = Foco livre
+        void escolher(int indice);                              // -1 = Foco livre (a categoria livre fica em categoria_)
         void pausarOuRetomar(uint32_t nowMs);
         void alternarDistracao(uint32_t nowMs);
         void acumular(uint32_t nowMs);
@@ -174,6 +177,8 @@ namespace screens {
         int64_t overtimeMs() const;      // foco alem do necessario para zerar o inimigo (ms)
         int pontosDeVida() const;        // 0..100
         tempo::LiquidacaoBatalha estimar() const;
+        double progressoFim(bool apertado, uint32_t nowMs);          // "Fim · segure": 0..1 enchendo, -1 = dedo fora
+        void encerrarPeloFim(uint32_t nowMs, Screen& screen);
         Action drawInicio(ui::Context& ui, uint32_t nowMs, Screen& screen);
         Action drawSeletor(ui::Context& ui, uint32_t nowMs, Screen& screen);
         Action drawBatalha(ui::Context& ui, uint32_t nowMs, Screen& screen);
@@ -194,35 +199,32 @@ namespace screens {
         bool syncAtiva_ = false;             // job do TickTick gravando arquivos: nao ler
         uint32_t manutencaoRelogioMs_ = 0;
         std::vector<std::string> titulos_;   // titulos limpos (sem emoji), 1:1 com lista_.projetos
-        size_t primeiro_ = 0;                // primeira linha visivel do seletor (rolagem)
+        size_t pagina_ = 0;                  // pagina do seletor (0 = categorias do Foco livre + 2 projetos recentes)
+        bool pedidoSync_ = false;            // "Sincronizar" tocado no seletor vazio
+        bool fimApertado_ = false;           // dedo em "Fim · segure"
+        uint32_t fimInicioMs_ = 0;           // quando o dedo apoiou em "Fim · segure"
+        uint32_t fimDicaAteMs_ = 0;          // "segure para encerrar" visivel ate (apos toque curto)
+        uint64_t pausaInicioMs_ = 0;         // inicio da pausa em curso (Pausar)
+        uint32_t sincPedidaMs_ = 0;          // "Sincronizar" tocado ha pouco (0 = nao)
         bool seletor_ = false;               // seletor de foco aberto (Screen::TempoHoje)
         int escolha_ = -1;                   // foco escolhido no Inicio: -1 = Foco livre, senao indice do projeto
-        tempo::Categoria categoria_ = tempo::Categoria::Trabalho;   // chip selecionado
+        tempo::Categoria categoria_ = tempo::Categoria::Trabalho;   // categoria do FOCO LIVRE (nunca Projetos; com projeto a categoria e unica)
         int duracaoMin_ = 25;                // duracao do anel do Inicio (5..60)
         bool pomodoro_ = false;              // interruptor do ciclo
         tempo::Ciclo ciclo_;                 // ciclo em curso (ativo = false: sessao unica)
         int64_t descansoMs_ = 5 * 60 * 1000;
         tempo::Categoria categoriaBatalha_ = tempo::Categoria::Trabalho;   // da batalha em curso
         std::string nomeBatalha_;            // "Foco livre · Estudo" ou titulo do projeto
-        ui::modern::ListSwipe swipe_;
 
         Fase fase_ = Fase::Nenhuma;
         int projeto_ = -1;                   // projeto da batalha em curso (-1 = Foco livre)
         int planejadoMin_ = 25;
         uint64_t ultimoMs_ = 0;
-        uint64_t focadoMs_ = 0;
-        uint64_t distraidoMs_ = 0;
-        uint64_t distracaoAtualMs_ = 0;
-        uint64_t comboMs_ = 0;               // foco continuo sem distracao
-        bool distraido_ = false;
+        tempo::Cronometro cron_;             // foco / distracao / pausa (regras das decisoes 18 e 19; src/tempo/Cronometro.h)
         bool overtime_ = false;              // inimigo derrotado, seguindo no bonus
-        int numDistracoes_ = 0;
-        int maiorDistracaoMin_ = 0;
         int ultimoBipeFocoMin_ = 0;          // ultimo multiplo de 10 min de foco ja avisado
         bool avisoFimDado_ = false;
         bool arrastando_ = false;            // dedo no anel do preparo
-        bool puxando_ = false;               // dedo no puxador da categoria
-        int puxadorX_ = 0;
         uint64_t descansoInicioMs_ = 0;
         bool descansoVolta_ = false;         // pausa veio do overtime: volta para a batalha (pausada)
 

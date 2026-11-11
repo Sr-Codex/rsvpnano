@@ -272,8 +272,11 @@ namespace tempo {
         } else {
             r.minutosPagos = std::min(focados, static_cast<int>(plan * (1.0 + param::kOvertimeMax) + kEps));
         }
-        r.perfeita = r.vitoria && in.numDistracoes == 0 && distraidos == 0 &&
-                     plan >= param::kDuracaoMinBonusPerfeita;
+        // Decisao 18: 1 distracao de ate 1 min NAO perde o bonus (so quando o chamador informa os segundos).
+        const bool semDistracao = in.numDistracoes == 0 && distraidos == 0;
+        const bool distracaoCurta = in.segundosDistraidos >= 0 && in.numDistracoes == 1 &&
+                                    in.segundosDistraidos <= param::kDistracaoToleradaSeg;
+        r.perfeita = r.vitoria && (semDistracao || distracaoCurta) && plan >= param::kDuracaoMinBonusPerfeita;
 
         // Minutos base: meditacao tem teto diario de 30 min com taxa cheia.
         const int pagos = r.minutosPagos;
