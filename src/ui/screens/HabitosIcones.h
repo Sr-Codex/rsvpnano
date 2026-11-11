@@ -1,14 +1,14 @@
 #pragma once
 
-// Icones vetoriais do app Habitos v2, desenhados com primitivas do Arduino_GFX (a fonte nao tem emoji).
-// Tracado proporcional ao tamanho; legivel de 24 a 40 px (s = meia largura: 12 a 20). Os desenhos seguem
-// tools/mockup_habitos4.py (funcao icone) — original do projeto, traco tipo Tabler.
+// Icones do app Habitos v2: Phosphor Icons (MIT) rasterizados em mascaras alfa 4 bpp por tools/generate_phosphor_icons.py
+// (a fonte nao tem emoji). Aneis, linhas e faiscas continuam desenhados com primitivas do Arduino_GFX.
 
 #include <Arduino_GFX.h>
 
 #include <cstdint>
 
 #include "tempo/HabitosVista.h"
+#include "ui/icons/PhosphorIcons.generated.h"
 
 namespace screens::icones {
 
@@ -40,13 +40,20 @@ namespace screens::icones {
     // Disco + anel (contorno) com espessura.
     void aro(Arduino_GFX& g, int cx, int cy, int raio, int espessura, uint16_t cor);
 
-    // Icone do habito centrado em (cx, cy); s = meia largura (12 -> 24 px). `fundo` = cor sob o icone (cápsula meio-preenchida).
+    // Mascara alfa Phosphor (src/ui/icons/PhosphorIcons.generated.*) pintada com `cor` sobre `fundo` (cor sob o icone: o blend
+    // alfa e feito em RGB565 pixel a pixel). `lado` = lado desejado em px; usa o tamanho gerado mais proximo.
+    void phosphor(Arduino_GFX& g, icons::phosphor::Id id, int cx, int cy, int lado, uint16_t cor, uint16_t fundo);
+    uint16_t misturarAlfa(uint16_t cor, uint16_t fundo, unsigned alfa4);   // alfa 0..15
+
+    // Icone do habito centrado em (cx, cy); s = meia largura (12 -> 24 px). `fundo` = cor sob o icone. So peso fill.
     void habito(Arduino_GFX& g, tempo::IconeHabito icone, int cx, int cy, int s, uint16_t cor, uint16_t fundo);
 
-    void visto(Arduino_GFX& g, int cx, int cy, int s, uint16_t cor, double espessura = 0);   // check
-    void pular(Arduino_GFX& g, int cx, int cy, int s, uint16_t cor);                           // seta "pular"
-    void chama(Arduino_GFX& g, int cx, int cy, int s, uint16_t cor);                           // sequencia
-    void desfazer(Arduino_GFX& g, int cx, int cy, int s, uint16_t cor);                        // seta curva
+    // Icones de acao (Phosphor fill). `fundo` = cor sob o icone.
+    void visto(Arduino_GFX& g, int cx, int cy, int s, uint16_t cor, uint16_t fundo);     // check
+    void vistoDisco(Arduino_GFX& g, int cx, int cy, int s, uint16_t cor, uint16_t fundo);  // check-circle: visto DENTRO de disco
+    void pular(Arduino_GFX& g, int cx, int cy, int s, uint16_t cor, uint16_t fundo);     // skip-forward
+    void chama(Arduino_GFX& g, int cx, int cy, int s, uint16_t cor, uint16_t fundo);     // fire (sequencia)
+    void desfazer(Arduino_GFX& g, int cx, int cy, int s, uint16_t cor, uint16_t fundo);  // arrow-counter-clockwise
 
     // Estado visual do marcador (estado nunca so por cor: a FORMA muda).
     enum class Marca : uint8_t { Feito, Atual, Atrasado, Pendente, Pulado, Perdido };

@@ -276,7 +276,7 @@ Include physical-device results when changing display, touch, power, storage or 
 ## License
 
 RSVP Nano is distributed under the [MIT license](LICENSE). Fonts and third-party
-libraries keep their own licences. Offline dictionary data is based on Open English
+libraries keep their own licences (vendored icon licences: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)). Offline dictionary data is based on Open English
 Wordnet under CC BY 4.0, with the underlying WordNet notices preserved; online definitions
 come from Wiktionary under CC BY-SA 4.0. See the
 [dictionary attribution and setup guide](docs/new-ui-setup.md#dictionary-setup-new-ui).

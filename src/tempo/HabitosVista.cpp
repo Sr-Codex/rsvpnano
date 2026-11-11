@@ -128,6 +128,7 @@ namespace tempo {
         if (tem("pausa") || tem("descans")) return IconeHabito::Xicara;
         if (tem("banho") || tem("agua")) return IconeHabito::Gota;
         if (tem("medit") || tem("respir")) return IconeHabito::Lotus;
+        if (tem("manha") || tem("acordar")) return IconeHabito::Sol;
         return IconeHabito::Generico;
     }
 
@@ -157,6 +158,11 @@ namespace tempo {
         if (iconRes.substr(0, 6) == "habit_") {
             std::string r;
             for (char c : iconRes.substr(6)) r += (c >= 'A' && c <= 'Z') ? char(c - 'A' + 'a') : c;
+            if (temToken(r, {"quit"})) return IconeHabito::Proibido;
+            if (temToken(r, {"positive", "mind"})) return IconeHabito::Cerebro;
+            if (temToken(r, {"plan"})) return IconeHabito::Plano;
+            if (temToken(r, {"daily", "check"})) return IconeHabito::CheckDiario;
+            if (temToken(r, {"morning", "sun", "wake"})) return IconeHabito::Sol;
             if (temToken(r, {"reading", "read", "book", "study"})) return IconeHabito::Livro;
             if (temToken(r, {"meditat", "yoga", "mindful"})) return IconeHabito::Lotus;
             if (temToken(r, {"gym", "workout", "exercise", "run", "sport", "fitness", "weight", "walk", "stretch"})) return IconeHabito::Haltere;
@@ -166,8 +172,13 @@ namespace tempo {
             if (temToken(r, {"eat", "breakfast", "lunch", "dinner", "meal", "fruit", "food", "diet", "cook"})) return IconeHabito::Talher;
             if (temToken(r, {"teeth", "brush", "floss", "tooth"})) return IconeHabito::Dente;
             if (temToken(r, {"sleep", "rest", "relax", "coffee", "tea", "break"})) return IconeHabito::Xicara;
-            // demais habit_* (stay_positive, plan, quit_snacks, daily_check_in...): cai para o nome/tipo e, no fim, Generico
+            // demais habit_*: cai para o nome/tipo e, no fim, Generico
         } else if (iconRes.substr(0, 4) == "txt_") {
+            if (temEmoji(iconRes, {"🚫", "⛔"})) return IconeHabito::Proibido;
+            if (temEmoji(iconRes, {"🧠"})) return IconeHabito::Cerebro;
+            if (temEmoji(iconRes, {"📅", "🗓", "📆"})) return IconeHabito::Plano;
+            if (temEmoji(iconRes, {"✅", "☑"})) return IconeHabito::CheckDiario;
+            if (temEmoji(iconRes, {"🌅", "🌞", "☀"})) return IconeHabito::Sol;
             if (temEmoji(iconRes, {"📖", "📚", "📕", "📗", "📘"})) return IconeHabito::Livro;
             if (temEmoji(iconRes, {"🧘"})) return IconeHabito::Lotus;
             if (temEmoji(iconRes, {"🏋", "💪", "🏃", "🚴", "🤸"})) return IconeHabito::Haltere;
@@ -285,6 +296,15 @@ namespace tempo {
         a.disco = saida(std::clamp((double(ms) - 120.0) / 350.0, 0.0, 1.0));
         a.faiscas = std::clamp((double(ms) - 200.0) / double(kAnimacaoCelebracaoMs - 200), 0.0, 1.0);
         return a;
+    }
+
+    int posicaoLinhaAgora(int yAgora, const std::vector<int>& pos, const std::vector<int>& meia, size_t acima, int yMin, int yMax) {
+        const size_t n = std::min(pos.size(), meia.size());
+        acima = std::min(acima, n);
+        const int lo = acima > 0 ? pos[acima - 1] + meia[acima - 1] : yMin;
+        const int hi = acima < n ? pos[acima] - meia[acima] : yMax;
+        if (lo > hi) return (lo + hi) / 2;
+        return std::clamp(yAgora, lo, hi);
     }
 
     int rolarPx(int atual, int delta, size_t n, int alturaLinha, int alturaVisivel) {

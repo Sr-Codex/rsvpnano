@@ -69,8 +69,10 @@ namespace tempo {
     inline constexpr int kAgrupaMin = 30;                   // em pe: horarios a <= 30 min viram um grupo
     inline constexpr int kAlturaLinhaLista = 56;            // lista do dia / lista do grupo: linha minima (alvo de toque)
 
-    // Icone desenhado do habito (sem emoji). Escolhido pelo tipo e, para "Geral", pelo nome.
-    enum class IconeHabito : uint8_t { Haltere, Frasco, Capsula, Talher, Dente, Xicara, Gota, Lotus, Livro, Generico };
+    // Icone Phosphor do habito (sem emoji): Haltere=barbell, Frasco=jar-label, Capsula=pill, Talher=fork-knife, Dente=tooth,
+    // Xicara=coffee, Gota=drop, Lotus=flower-lotus, Livro=book-open, Cerebro=brain, Plano=calendar-check, Proibido=prohibit,
+    // Sol=sun, CheckDiario=check-circle, Generico=star. Escolhido pelo tipo e, para "Geral", pelo nome.
+    enum class IconeHabito : uint8_t { Haltere, Frasco, Capsula, Talher, Dente, Xicara, Gota, Lotus, Livro, Generico, Cerebro, Plano, Proibido, Sol, CheckDiario };
     IconeHabito iconeDoHabito(TipoHabito tipo, std::string_view nome);
     // Com o icone escolhido no TickTick (iconRes). Ordem: (a) "habit_*" por palavra; (b) "txt_<emoji>" por emoji comum;
     // (c) tipo + palavras do nome (a funcao de 2 argumentos); (d) Generico. So visual: o TipoHabito nao muda.
@@ -101,6 +103,12 @@ namespace tempo {
     // `minimo` px do anterior; depois um passe de volta garante que o ultimo cabe ate `yMax` (empurra para cima
     // respeitando `minimo`). Devolve um y por grupo.
     std::vector<int> posicoesNoEixo(const std::vector<int>& yIdeal, int minimo, int yMax);
+
+    // Linha "agora" da vista em pe: y (px) mais proximo de `yAgora` que cai no vao livre ENTRE os blocos de texto dos grupos,
+    // respeitando a ordem temporal: os `acima` primeiros grupos (horario <= agora) ficam acima da linha, os demais abaixo.
+    // `pos[i]` = y central do grupo i; `meia[i]` = meia altura do bloco (nome + horario) do grupo i; [yMin, yMax] = limites
+    // da area. Sem vao (blocos encostados) -> ponto medio entre os dois blocos.
+    int posicaoLinhaAgora(int yAgora, const std::vector<int>& pos, const std::vector<int>& meia, size_t acima, int yMin, int yMax);
 
     // Primeiro habito de amanha (nome limpo + horario) para o "amanha: X HH:MM" do dia completo.
     struct HabitoAmanha {

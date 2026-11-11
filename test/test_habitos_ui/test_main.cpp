@@ -739,6 +739,28 @@ namespace {
         TEST_ASSERT_TRUE(g4[1].atrasado);
     }
 
+    void test_linha_agora_nao_cruza_o_texto_dos_grupos() {
+        const std::vector<int> pos{112, 160, 400}, meia{22, 22, 22};
+        // agora em cima do texto do grupo 2 (ainda nao chegou: acima=1) -> sobe para o vao antes dele
+        TEST_ASSERT_EQUAL_INT(138, posicaoLinhaAgora(165, pos, meia, 1, 100, 556));
+        // idem, mas o grupo 2 ja comecou (acima=2) -> desce para o vao depois dele
+        TEST_ASSERT_EQUAL_INT(182, posicaoLinhaAgora(165, pos, meia, 2, 100, 556));
+        // ja num vao livre: fica onde esta
+        TEST_ASSERT_EQUAL_INT(300, posicaoLinhaAgora(300, pos, meia, 2, 100, 556));
+        // antes de todos / depois de todos: limites da area
+        TEST_ASSERT_EQUAL_INT(60, posicaoLinhaAgora(40, pos, meia, 0, 60, 556));
+        TEST_ASSERT_EQUAL_INT(556, posicaoLinhaAgora(600, pos, meia, 3, 100, 556));
+        // blocos encostados (sem vao): ponto medio entre eles
+        const std::vector<int> p2{100, 144};
+        TEST_ASSERT_EQUAL_INT(122, posicaoLinhaAgora(120, p2, {22, 22}, 1, 60, 500));
+        // nunca cruza: para qualquer yAgora o resultado fica fora de todos os blocos
+        for (int y = 90; y <= 560; y += 3)
+            for (size_t k = 0; k <= 3; ++k) {
+                const int r = posicaoLinhaAgora(y, pos, meia, k, 60, 556);
+                for (size_t i = 0; i < pos.size(); ++i) TEST_ASSERT_FALSE(r > pos[i] - 22 && r < pos[i] + 22);
+            }
+    }
+
     void test_posicoes_no_eixo_espacamento_e_limite() {
         const auto y = posicoesNoEixo({100, 110, 300}, 48, 556);
         TEST_ASSERT_EQUAL_INT(100, y[0]);
@@ -835,15 +857,24 @@ namespace {
         TEST_ASSERT_EQUAL_INT((int)IconeHabito::Talher, I("x", "habit_eat_breakfast"));
         TEST_ASSERT_EQUAL_INT((int)IconeHabito::Dente, I("x", "habit_brush_teeth"));
         TEST_ASSERT_EQUAL_INT((int)IconeHabito::Xicara, I("x", "habit_coffee"));
-        // habit_* sem mapa (os 4 reais da conta) -> nome/tipo -> Generico
-        for (const char* r : {"habit_stay_positive", "habit_plan", "habit_quit_snacks", "habit_daily_check_in"})
-            TEST_ASSERT_EQUAL_INT((int)IconeHabito::Generico, I("Regar plantas", r));
-        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Dente, I("Escovar dentes", "habit_plan", TipoHabito::Dentes));
+        // habit_* da conta real (antes Generico) -> Phosphor: cerebro / calendar-check / prohibit / check-circle
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Cerebro, I("Regar plantas", "habit_stay_positive"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Plano, I("Regar plantas", "habit_plan"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Proibido, I("Regar plantas", "habit_quit_snacks"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::CheckDiario, I("Regar plantas", "habit_daily_check_in"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Sol, I("x", "habit_morning"));
+        // habit_* sem mapa -> nome/tipo -> Generico (star)
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Generico, I("Regar plantas", "habit_zzz"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Dente, I("Escovar dentes", "habit_zzz", TipoHabito::Dentes));
+        // nome: manha -> sol (cafe da manha continua talher)
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Sol, I("Rotina da manh\xC3\xA3", ""));
         // (b) emoji
         TEST_ASSERT_EQUAL_INT((int)IconeHabito::Xicara, I("x", "txt_\xE2\x98\x95"));     // cafe
         TEST_ASSERT_EQUAL_INT((int)IconeHabito::Livro, I("x", "txt_\xF0\x9F\x93\x96"));  // livro
         TEST_ASSERT_EQUAL_INT((int)IconeHabito::Capsula, I("x", "txt_\xF0\x9F\x92\x8A"));
-        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Generico, I("x", "txt_\xF0\x9F\x9A\xAB"));  // proibido -> generico
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Proibido, I("x", "txt_\xF0\x9F\x9A\xAB"));  // proibido
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Cerebro, I("x", "txt_\xF0\x9F\xA7\xA0"));
+        TEST_ASSERT_EQUAL_INT((int)IconeHabito::Generico, I("x", "txt_\xF0\x9F\x90\xB6"));  // sem mapa -> generico
         // iconRes vence o tipo; vazio cai no nome; o tipo/valores nao mudam
         TEST_ASSERT_EQUAL_INT((int)IconeHabito::Livro, I("Medica\xC3\xA7\xC3\xA3o", "habit_reading", TipoHabito::Medicacao));
         TEST_ASSERT_EQUAL_INT((int)IconeHabito::Capsula, I("Medica\xC3\xA7\xC3\xA3o", "", TipoHabito::Medicacao));
@@ -924,6 +955,7 @@ int main(int, char**) {
     RUN_TEST(test_log_desfeito_anula_o_evento_anterior);
     RUN_TEST(test_lembrete_ja_avisada_nao_toca_de_novo_na_hora);
     RUN_TEST(test_icones_por_tipo_e_nome);
+    RUN_TEST(test_linha_agora_nao_cruza_o_texto_dos_grupos);
     RUN_TEST(test_fracao_da_janela_e_do_dia);
     RUN_TEST(test_grupos_da_linha_do_tempo);
     RUN_TEST(test_posicoes_no_eixo_espacamento_e_limite);

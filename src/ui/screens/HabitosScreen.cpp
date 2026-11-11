@@ -645,23 +645,23 @@ namespace screens {
             // centro
             if (anelDiaCheio) {
                 ic::disco(g, kAnelX, kAnelY, 34, discoVisto ? kVerde : kLinha);
-                if (discoVisto) ic::visto(g, kAnelX, kAnelY, 20, kTinta, 5);
+                if (discoVisto) ic::vistoDisco(g, kAnelX, kAnelY, 20, kTinta, kVerde);
             } else if (discoVisto) {
                 const int r = int(30 * anim.disco) ;
                 const int raio = celebrando ? r : 30;
                 if (raio > 2) ic::disco(g, kAnelX, kAnelY, raio, kVerde);
-                if (raio > 18) ic::visto(g, kAnelX, kAnelY, std::max(6, int(raio * 0.58)), kTinta, std::max(2.0, raio / 6.0));
+                if (raio > 18) ic::vistoDisco(g, kAnelX, kAnelY, std::max(6, int(raio * 0.7)), kTinta, kVerde);
             } else if (c.temFoco || celebrando) {
                 ic::habito(g, iconeCartao, kAnelX, kAnelY - 7, 15, tomCartao >= 0 ? ic::de888(uint32_t(tomCartao)) : cTexto, cFundo);
             }
             if (celebrando && !celebraPulo_) ic::faiscas(g, kAnelX, kAnelY, kAnelR, anim.faiscas);
             // icone do rotulo
             if (rotIcone == Rot::Habito) ic::habito(g, iconeCartao, tx + 12, 37, 9, corRotulo, cFundo);
-            else if (rotIcone == Rot::Visto) ic::visto(g, tx + 12, 37, 9, corRotulo, 3);
-            else if (rotIcone == Rot::Seta) ic::pular(g, tx + 12, 37, 9, corRotulo);
+            else if (rotIcone == Rot::Visto) ic::visto(g, tx + 12, 37, 9, corRotulo, cFundo);
+            else if (rotIcone == Rot::Seta) ic::pular(g, tx + 12, 37, 9, corRotulo, cFundo);
             if (dir == Dir::Celebracao || dir == Dir::Semana) ic::preencherRR(g, tx, 86, pillFim - tx, 26, 13, kPilula);
             // chama da sequencia
-            if ((dir == Dir::Celebracao || dir == Dir::Semana) && !chamaTexto.empty()) ic::chama(g, pillFim + 16, 99, 9, kAmbar);
+            if ((dir == Dir::Celebracao || dir == Dir::Semana) && !chamaTexto.empty()) ic::chama(g, pillFim + 16, 99, 9, kAmbar, cFundo);
             // pontos do dia
             if (dir != Dir::Semana && c.n > 0) {
                 for (size_t i = 0; i < c.n; ++i) ic::ponto(g, pontosX + int(i) * passo, pontosY, raioPonto, marcas[i], cFundo);
@@ -670,18 +670,18 @@ namespace screens {
             if (dir == Dir::Botoes) {
                 if (!botao1.empty()) {
                     ic::preencherRR(g, rPri.x, rPri.y, rPri.w, rPri.h, 16, corBotao1);
-                    if (botao1Ativo && botao1 == "Feito") ic::visto(g, 506, 60, 12, corTextoBotao1, 3.2);
+                    if (botao1Ativo && botao1 == "Feito") ic::visto(g, 506, 60, 12, corTextoBotao1, corBotao1);
                 }
                 if (!botao2.empty()) {
                     ic::preencherRR(g, rSec.x, rSec.y, rSec.w, rSec.h, 16, kPainel);
-                    if (botao2b.empty()) ic::pular(g, 512, 134, 9, cMudo);
+                    if (botao2b.empty()) ic::pular(g, 512, 134, 9, cMudo, kPainel);
                 }
             } else if (dir == Dir::Celebracao) {
                 ic::preencherRR(g, rPri.x, rPri.y, rPri.w, rPri.h, 16, kVerdeEscuro);
                 if (proxExiste) ic::habito(g, proxIcone, 500, 68, 11, cTexto, kVerdeEscuro);
-                else ic::visto(g, 500, 68, 10, kVerdeClaro, 3);
+                else ic::visto(g, 500, 68, 10, kVerdeClaro, kVerdeEscuro);
                 ic::preencherRR(g, rSec.x, rSec.y, rSec.w, rSec.h, 16, kPainel);
-                ic::desfazer(g, 512, 134, 9, cMudo);
+                ic::desfazer(g, 512, 134, 9, cMudo, kPainel);
             } else if (dir == Dir::Semana) {
                 ic::preencherRR(g, 472, 22, 160, 140, 16, kPainelFundo);
                 int maximo = 1;
@@ -893,9 +893,17 @@ namespace screens {
             b.texto({66, 535, 100, 20}, "sem horário", 15, rgb565(120, 122, 116));
         }
         const int yAgora = Y(c.minuto);
-        int yLinhaAgora = yAgora;
-        for (size_t gi = 0; gi < grupos.size(); ++gi)
-            if (grupos[gi].temFoco && std::abs(yAgora - pos[gi]) < 30) yLinhaAgora = pos[gi] - 30;
+        // a linha "agora" nunca cruza o texto (nome/horario) de um grupo: vai ao vao livre mais proximo, na ordem temporal
+        int yLinhaAgora;
+        {
+            std::vector<int> meia;
+            size_t acima = 0;
+            for (const auto& g : grupos) {
+                meia.push_back(g.temFoco ? 24 : 22);   // destaque do foco = +-24; texto = -21..+21
+                if (g.minutoIni <= c.minuto) ++acima;
+            }
+            yLinhaAgora = tempo::posicaoLinhaAgora(yAgora, pos, meia, acima, y0 - 12, semHora.empty() ? 556 : 504);
+        }
         b.textoEm({3, yLinhaAgora - 8, 38, 17}, "agora", 13, kTinta, kLaranja, TextAlign::Center);
 
         // ---- base: Feito (62 px) / Sim, tomei + Ainda nao / celebracao com Desfazer
@@ -934,7 +942,7 @@ namespace screens {
             desenharAnelApple(g, 46 + dx, 62 + dy, 30, 9, c.fracDia, kVerde, kVerdeClaro, cFundo);
             ic::preencherRR(g, ex - 1, y0, 3, std::max(0, yAgora - y0), 1, kVerde);
             ic::preencherRR(g, ex - 1, yAgora, 3, std::max(0, y1 - yAgora), 1, kLinha);
-            if (c.sequencia > 0) ic::chama(g, 94, 79, 7, kAmbar);
+            if (c.sequencia > 0) ic::chama(g, 94, 79, 7, kAmbar, cFundo);
             // destaque do grupo em foco
             for (size_t gi = 0; gi < grupos.size(); ++gi) {
                 if (!grupos[gi].temFoco) continue;
@@ -956,16 +964,16 @@ namespace screens {
             // base
             if (celebrando) {
                 ic::preencherRR(g, rPri.x, rPri.y, rPri.w, rPri.h, 14, celebraPulo_ ? kPainel : kVerde);
-                if (!celebraPulo_) ic::visto(g, rPri.x + 17, rPri.y + 35, 9, kTinta, 3);
-                else ic::pular(g, rPri.x + 17, rPri.y + 35, 8, cMudo);
+                if (!celebraPulo_) ic::visto(g, rPri.x + 17, rPri.y + 35, 9, kTinta, kVerde);
+                else ic::pular(g, rPri.x + 17, rPri.y + 35, 8, cMudo, kPainel);
                 ic::preencherRR(g, rSec.x, rSec.y, rSec.w, rSec.h, 14, kPainel);
-                ic::desfazer(g, rSec.x + 30, rSec.y + 24, 10, cMudo);
+                ic::desfazer(g, rSec.x + 30, rSec.y + 24, 10, cMudo, kPainel);
             } else if (medicacao) {
                 ic::preencherRR(g, rPri.x, rPri.y, rPri.w, rPri.h, 16, kCarmim);
                 ic::preencherRR(g, rSec.x, rSec.y, rSec.w, rSec.h, 16, kPainel);
             } else if (podeFeito) {
                 ic::preencherRR(g, rPri.x, rPri.y, rPri.w, rPri.h, 16, corFeito);
-                ic::visto(g, rPri.x + 26, rPri.y + 20, 11, corTxtFeito, 3.2);
+                ic::visto(g, rPri.x + 26, rPri.y + 20, 11, corTxtFeito, corFeito);
             } else {
                 ic::preencherRR(g, rPri.x, rPri.y, rPri.w, rPri.h, 16, c.temFoco || c.n == 0 ? kPainelFundo : rgb565(24, 52, 38));
             }
@@ -1072,12 +1080,12 @@ namespace screens {
                             const uint16_t corF = ln.cart.modo == ModoCartao::Atrasado ? kCarmim : kLaranja;
                             if (ln.cart.podeFeito) {
                                 ic::preencherRR(g, 8, y + 58, 100, 42, 12, corF);
-                                ic::visto(g, 26, y + 79, 9, ln.cart.modo == ModoCartao::Atrasado ? cTexto : kTinta, 3);
+                                ic::visto(g, 26, y + 79, 9, ln.cart.modo == ModoCartao::Atrasado ? cTexto : kTinta, corF);
                             } else {
                                 ic::preencherRR(g, 8, y + 58, 100, 42, 12, kPainel);
                             }
                             ic::preencherRR(g, 112, y + 58, 52, 42, 12, kPainel);
-                            ic::pular(g, 138, y + 79, 9, cMudo);
+                            ic::pular(g, 138, y + 79, 9, cMudo, kPainel);
                         }
                     }
                 }
@@ -1123,9 +1131,9 @@ namespace screens {
             r.desenhar([&](Arduino_GFX& g, int, int) {
                 if (!celebrando) return;
                 ic::preencherRR(g, 6, kFim + 6, 94, 70, 14, celebraPulo_ ? kPainel : kVerde);
-                if (!celebraPulo_) ic::visto(g, 24, kFim + 41, 9, kTinta, 3); else ic::pular(g, 24, kFim + 41, 8, cMudo);
+                if (!celebraPulo_) ic::visto(g, 24, kFim + 41, 9, kTinta, kVerde); else ic::pular(g, 24, kFim + 41, 8, cMudo, kPainel);
                 ic::preencherRR(g, 106, kFim + 6, 60, 70, 14, kPainel);
-                ic::desfazer(g, 136, kFim + 30, 10, cMudo);
+                ic::desfazer(g, 136, kFim + 30, 10, cMudo, kPainel);
             });
         }
         // toques: voltar, desfazer, botoes das linhas
