@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_crt_bundle.h>
+#include <esp_heap_caps.h>
 #include <esp_http_client.h>
 #include <esp_log.h>
 
@@ -119,7 +120,12 @@ namespace net::ticktick {
                 return reply;
             }
             if (result != ESP_OK) {
-                reply.error = "Sem rede ou falha HTTPS com o TickTick";
+                // Diagnóstico (lume.11): "sem rede" enganava — inclui o erro do ESP-IDF e a memória interna livre
+                // (cada HTTPS precisa de ~40 KB contíguos), p/ distinguir Wi-Fi, TLS, tempo esgotado e falta de memória.
+                reply.error = std::string{"Falha HTTPS ("} + esp_err_to_name(result) + ", maior bloco livre "
+                              + std::to_string(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024U)
+                              + " KB, Wi-Fi " + (WiFi.status() == WL_CONNECTED ? "ok" : "caiu") + ")";
+                ESP_LOGW(kTag, "%s %s: %s", method == HTTP_METHOD_POST ? "POST" : "GET", path.c_str(), reply.error.c_str());
                 return reply;
             }
             reply.status = esp_http_client_get_status_code(client.value);
@@ -136,6 +142,25 @@ namespace net::ticktick {
             return std::move(reply.body);
         }
 
+        // Falha de transporte (status 0) nos hábitos: 1 nova tentativa após uma pausa curta (lume.11).
+        Reply requestComRetry(esp_http_client_method_t method, const std::string& path, const std::string& token,
+                              const std::string& json) {
+            Reply reply = request(method, path, token, json);
+            if (reply.status == 0) {
+                delay(800);
+                reply = request(method, path, token, json);
+            }
+            return reply;
+        }
+
+        std::expected<std::string, std::string> callComRetry(esp_http_client_method_t method, const std::string& path,
+                                                             const std::string& token, const std::string& json) {
+            Reply reply = requestComRetry(method, path, token, json);
+            if (reply.status == 0) return std::unexpected(std::move(reply.error));
+            if (reply.status != 200) return std::unexpected(statusError(reply.status));
+            return std::move(reply.body);
+        }
+
         // Hábitos (app Hábitos): envia a fila de check-ins, baixa os hábitos ativos e os check-ins de hoje.
         // Melhor esforço: devolve "" se tudo deu certo, senão o erro; nunca derruba a sync dos projetos.
         std::string syncHabits(const settings::DeviceSecrets& secrets, fs::FS& filesystem, const std::string& agora) {
@@ -145,11 +170,11 @@ namespace net::ticktick {
             std::vector<std::pair<tempo::ItemFila, int>> results;
             for (const auto& item : queue) {
                 if (!tempo::devePreEnviar(item)) continue;
-                const Reply reply = request(HTTP_METHOD_POST, tempo::ticktick::caminhoPostCheckin(item),
-                                            secrets.ticktickToken, tempo::ticktick::corpoCheckin(item));
+                const Reply reply = requestComRetry(HTTP_METHOD_POST, tempo::ticktick::caminhoPostCheckin(item),
+                                                    secrets.ticktickToken, tempo::ticktick::corpoCheckin(item));
                 results.emplace_back(item, reply.status);
                 if (reply.status == 0) {   // sem rede: guarda e para
-                    error = reply.error;
+                    error = "check-in: " + reply.error;
                     break;
                 }
                 if (reply.status != 200 && reply.status != 201) {
@@ -160,8 +185,8 @@ namespace net::ticktick {
             if (!results.empty()) TempoStorage::applyQueueResults(filesystem, results);
 
             // 2. hábitos ativos
-            auto habits = call(HTTP_METHOD_GET, "/habit", secrets.ticktickToken, {});
-            if (!habits) return error.empty() ? habits.error() : error;
+            auto habits = callComRetry(HTTP_METHOD_GET, "/habit", secrets.ticktickToken, {});
+            if (!habits) return error.empty() ? "lista de hábitos: " + habits.error() : error;
             const auto json = tempo::ticktick::montarHabitos(*habits, agora);
             if (!json || !TempoStorage::saveHabits(filesystem, *json))
                 return error.empty() ? std::string{"Não foi possível gravar habitos.json"} : error;
@@ -173,8 +198,8 @@ namespace net::ticktick {
             const std::string path =
                 today.valida ? tempo::ticktick::caminhoCheckins(list, tempo::stampDe(today.data)) : std::string{};
             if (!path.empty()) {
-                auto checkins = call(HTTP_METHOD_GET, path, secrets.ticktickToken, {});
-                if (!checkins) return error.empty() ? checkins.error() : error;
+                auto checkins = callComRetry(HTTP_METHOD_GET, path, secrets.ticktickToken, {});
+                if (!checkins) return error.empty() ? "check-ins de hoje: " + checkins.error() : error;
                 const auto file = tempo::ticktick::montarCheckins(*checkins, tempo::stampDe(today.data), agora);
                 if (!file || !TempoStorage::saveHabitCheckins(filesystem, *file))
                     return error.empty() ? std::string{"Não foi possível gravar habitos-checkins.json"} : error;

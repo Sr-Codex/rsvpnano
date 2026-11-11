@@ -37,7 +37,8 @@ auto CompanionApi::getTickTick(httpd_req_t& request) -> companion::api::Result<c
     return api::TickTickInfo{.configurado = !secrets.ticktickToken.empty(),
                              .tag = secrets.ticktickTag,
                              .ultimaSync = status.lastSync,
-                             .erro = status.error};
+                             .erro = status.error,
+                             .erroHabitos = status.habitsError};
 }
 
 companion::api::Result<> CompanionApi::putTickTick(httpd_req_t& request) {

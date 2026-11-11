@@ -64,6 +64,7 @@ namespace companion::api {
         std::string tag;
         std::string ultimaSync;  // "" = nunca sincronizou
         std::string erro;        // "" = ultima tentativa ok
+        std::string erroHabitos; // "" = parte dos habitos ok (lume.11: diagnostico com passo, erro do ESP-IDF e memoria)
     };
 
     struct AppearanceSelection {
