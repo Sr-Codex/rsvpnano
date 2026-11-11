@@ -4,6 +4,7 @@
 #include "board/Board.h"
 #include "board/BoardDeepSleep.h"
 #include "logging/Logger.h"
+#include "network/TlsMemoria.h"
 #include "settings/NvsSecurity.h"
 #include "update/OtaRollback.h"
 
@@ -21,6 +22,7 @@ void setup() {
     delay(50);
     ota::iniciar();   // le o estado da imagem (pendente de verificacao?) e registra no log
     Board::System::begin();
+    rede::tlsNaPsram();   // antes de qualquer HTTPS: buffers do TLS fora da RAM interna (fragmentação, lume.16)
     // Despertar por timer (ADR-009): o aviso nao pode esperar pela serial (a antecedencia e de poucos segundos).
     const bool bootDeTimer = Board::DeepSleep::bootCause() == Board::DeepSleep::BootCause::Timer;
     const uint32_t serialWaitStart = millis();

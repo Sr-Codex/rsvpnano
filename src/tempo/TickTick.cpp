@@ -58,6 +58,7 @@ namespace tempo::ticktick {
             std::string time;
             double value = 1.0;
             double goal = 1.0;
+            int status = 2;   // 2 = concluído; 0 = em andamento/desfeito. Sem isto o APP do TickTick ignora o check-in
         };
 
         struct CorpoFiltro {
@@ -212,6 +213,8 @@ namespace tempo::ticktick {
         corpo.time = item.time;
         corpo.value = item.valor;
         corpo.goal = item.meta;
+        // Medido na conta real (2026-11-11): sem "status" a API grava (status null) mas o app não mostra como feito.
+        corpo.status = (item.meta > 0.0 && item.valor >= item.meta) ? 2 : 0;
         std::string saida;
         if (glz::write_json(corpo, saida)) return {};
         return saida;

@@ -1,6 +1,7 @@
 #include <unity.h>
 
 #include <cmath>
+#include <cstring>
 #include <cstdio>
 #include <string>
 
@@ -473,9 +474,27 @@ namespace {
         a.valor = 1;
         a.meta = 2;
         a.time = "2026-11-10T11:10:00+0000";
-        TEST_ASSERT_EQUAL_STRING("{\"stamp\":20261110,\"time\":\"2026-11-10T11:10:00+0000\",\"value\":1,\"goal\":2}",
+        // 1 de 2: em andamento -> status 0
+        TEST_ASSERT_EQUAL_STRING("{\"stamp\":20261110,\"time\":\"2026-11-10T11:10:00+0000\",\"value\":1,\"goal\":2,\"status\":0}",
                                  ticktick::corpoCheckin(a).c_str());
         TEST_ASSERT_EQUAL_STRING("/habit/6789ad00b9a2d1030a5920c8/checkin", ticktick::caminhoPostCheckin(a).c_str());
+    }
+
+    // Sem "status" a API grava, mas o app do TickTick não mostra como feito (medido na conta real, 2026-11-11).
+    void test_corpo_do_checkin_concluido_e_desfeito() {
+        ItemFila a;
+        a.id = "x";
+        a.stamp = 20261111;
+        a.time = "2026-11-11T13:17:00+0000";
+        a.valor = 1;
+        a.meta = 1;
+        TEST_ASSERT_NOT_NULL(std::strstr(ticktick::corpoCheckin(a).c_str(), "\"status\":2"));
+        a.valor = 3;   // passou da meta: continua concluído
+        a.meta = 2;
+        TEST_ASSERT_NOT_NULL(std::strstr(ticktick::corpoCheckin(a).c_str(), "\"status\":2"));
+        a.valor = 0;   // Desfazer de algo já enviado
+        a.meta = 1;
+        TEST_ASSERT_NOT_NULL(std::strstr(ticktick::corpoCheckin(a).c_str(), "\"status\":0"));
     }
 
     void test_marcar_feita_enfileira_valor_e_meta_do_dia() {
@@ -818,6 +837,7 @@ int main(int, char**) {
     RUN_TEST(test_fila_envio_sucesso_erro_e_rede);
     RUN_TEST(test_fila_serializa_e_ignora_linhas_ruins);
     RUN_TEST(test_corpo_e_caminho_do_post_de_checkin);
+    RUN_TEST(test_corpo_do_checkin_concluido_e_desfeito);
     RUN_TEST(test_marcar_feita_enfileira_valor_e_meta_do_dia);
     RUN_TEST(test_meditacao_pelo_timer_marca_proxima_no_horario);
     RUN_TEST(test_interpretar_tempo_e_tempo_checkin);

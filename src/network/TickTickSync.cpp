@@ -250,9 +250,15 @@ namespace net::ticktick {
             const std::string tag = secrets.ticktickTag.empty() ? tempo::ticktick::kTagPadrao : secrets.ticktickTag;
 
             WifiScope wifi;
-            if (wifi.owned && !net::connectSaved(network, secrets))
+            // Falhas antes dos hábitos também aparecem na tela de Hábitos ("erro de sync"), senão ela fica muda.
+            if (wifi.owned && !net::connectSaved(network, secrets)) {
+                recordHabits("Sem rede: Wi-Fi não conectou");
                 return std::unexpected("Sem rede: Wi-Fi não conectou");
-            if (auto clock = net::syncDownloadClock(); !clock) return std::unexpected(clock.error());
+            }
+            if (auto clock = net::syncDownloadClock(); !clock) {
+                recordHabits(clock.error());
+                return std::unexpected(clock.error());
+            }
             if (!gNtpDone || millis() - gNtpMs >= kNtpRefreshMs) {
                 if (net::syncNetworkClock()) {  // hora de rede -> sistema + RTC; falha aqui nao aborta
                     gNtpDone = true;
@@ -262,7 +268,11 @@ namespace net::ticktick {
 
             Sessao sessao;   // declarada DEPOIS do WifiScope: é destruída (TLS fechado) antes do Wi-Fi desligar
             const std::string erroFila = enviarFilaHabitos(sessao, secrets, filesystem);
-            if (!erroFila.empty()) recordHabits(erroFila);   // registra já; se os projetos falharem, o erro fica visível
+            // lume.16: hábitos ANTES dos projetos. Antes, uma falha nos projetos (ex.: memória) impedia de baixar os
+            // hábitos e a tela não avisava nada (hábito novo "Escovar Dente" não aparecia, 2026-11-11).
+            const std::string agora = tempo::ticktick::iso8601Utc(static_cast<int64_t>(time(nullptr)));
+            const std::string erroBaixar = baixarHabitos(sessao, secrets, filesystem, agora);
+            recordHabits(!erroFila.empty() ? erroFila : erroBaixar);   // não derruba a sync dos projetos
 
             auto listas = call(sessao, HTTP_METHOD_GET, "/project", secrets.ticktickToken, {});
             if (!listas) return std::unexpected(listas.error());
@@ -278,14 +288,11 @@ namespace net::ticktick {
                 if (quantas > 0) break;  // vazio: tenta a variante em minúsculas
             }
 
-            const std::string agora = tempo::ticktick::iso8601Utc(static_cast<int64_t>(time(nullptr)));
             auto json = tempo::ticktick::montarProjetos(tarefas, *listas, tag, agora);
             if (!json) return std::unexpected("Não foi possível montar projetos.json");
             if (!TempoStorage::saveProjects(filesystem, *json)) return std::unexpected("Falha ao gravar no cartão SD");
             tempo::ListaProjetos gravada;
             tempo::lerProjetos(*json, gravada);
-            const std::string erroBaixar = baixarHabitos(sessao, secrets, filesystem, agora);
-            recordHabits(!erroFila.empty() ? erroFila : erroBaixar);   // não derruba a sync dos projetos
             return gravada.projetos.size();
         }
 

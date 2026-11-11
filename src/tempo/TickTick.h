@@ -45,7 +45,8 @@ namespace tempo::ticktick {
     // habitos-checkins.json: so os check-ins com stamp == `stamp` (a resposta traz uma lista de agregados por
     // habito/ano, cada um com "checkins"). nullopt = JSON invalido.
     std::optional<std::string> montarCheckins(std::string_view respostaJson, int stamp, std::string_view geradoEm);
-    // Corpo do POST /habit/{id}/checkin: {"stamp":20261110,"time":"2026-11-10T11:10:00+0000","value":1,"goal":2}
+    // Corpo do POST /habit/{id}/checkin: {"stamp":20261110,"time":"2026-11-10T11:10:00+0000","value":1,"goal":2,"status":0}
+    // status 2 = concluído (valor >= meta); 0 = em andamento ou desfeito. O app do TickTick só mostra "feito" com 2.
     // (campos do OpenAPI oficial; "status" fica de fora: o servidor deduz de value x goal).
     std::string corpoCheckin(const ItemFila& item);
     // "/habit/{id}/checkin"
