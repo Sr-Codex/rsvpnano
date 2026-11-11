@@ -11,6 +11,7 @@
 #include "som/Regras.h"
 #include "tempo/Parametros.h"
 #include "tempo/Sessao.h"
+#include "ui/AnelSuave.h"
 #include "ui/SansFont.h"
 #include "ui/screens/HabitosIcones.h"
 #include "tempo/Progressao.h"
@@ -192,57 +193,43 @@ namespace screens {
             return {((v >> 11) & 31) * 255 / 31, ((v >> 5) & 63) * 255 / 63, (v & 31) * 255 / 31};
         }
 
-        // Anel estilo Apple: trilho (cor do anel 22 % sobre o fundo), arco em degrade ao longo do angulo
-        // (segmentos de 4 graus), comecando no topo no sentido horario, pontas redondas; frac > 1 = 2a volta por
-        // cima com sombra sob a ponta. (ox, oy) = origem da regiao no alvo de pintura.
+        // Anel estilo Apple: trilho (cor do anel 22 % sobre o fundo), arco em degrade continuo ao longo do angulo,
+        // comecando no topo no sentido horario, pontas redondas; frac > 1 = 2a volta por cima com sombra sob a ponta.
+        // Borda suavizada pixel a pixel (ui/AnelSuave). (ox, oy) = origem da regiao no alvo de pintura.
+        ui::anel::Rgb rgbF(Cor c) { return {float(c.r), float(c.g), float(c.b)}; }
+
+        void pintarAnel(Arduino_GFX& g, const ui::anel::Params& p) {
+            const ui::anel::Anel a(p);
+            if (a.raioMiolo() > 0) g.fillCircle(p.cx, p.cy, a.raioMiolo(), ui::anel::Anel::para565(ui::anel::Anel::grade(p.fundo)));
+            g.startWrite();
+            a.pintar([&](int x, int y, uint16_t cor) { g.writePixel(int16_t(x), int16_t(y), cor); }, true);
+            g.endWrite();
+        }
+
         void anel(Arduino_GFX& g, int ox, int oy, int cx, int cy, int raio, int larg, double frac, Cor c0, Cor c1,
                   Cor fundo, Cor baseTrilho, const Cor* volta1a0 = nullptr, const Cor* volta1a1 = nullptr) {
-            const int X = ox + cx, Y = oy + cy;
-            const double ro = raio + larg / 2.0, ri = raio - larg / 2.0;
-            g.fillCircle(X, Y, int(ro), c565(mistura(fundo, baseTrilho, 0.22)));
-            g.fillCircle(X, Y, int(ri), c565(fundo));
-            if (frac <= 0.0005) return;
-            constexpr double kRad = 3.14159265358979 / 180.0;
-            const auto ponto = [&](double ang, double r, int& px, int& py) {
-                px = X + int(std::lround(r * std::cos(ang * kRad)));
-                py = Y + int(std::lround(r * std::sin(ang * kRad)));
-            };
-            const auto segCor = [&](double a0, double a1, double k0, double k1, Cor d0, Cor d1) {
-                const int n = std::max(2, int(std::ceil((a1 - a0) / 4.0)));
-                for (int i = 0; i < n; ++i) {
-                    const double aa = a0 + (a1 - a0) * i / n;
-                    const double bb = a0 + (a1 - a0) * (i + 1) / n + 0.8;
-                    const uint16_t cor = c565(mistura(d0, d1, k0 + (k1 - k0) * (i + 0.5) / n));
-                    int x1, y1, x2, y2, x3, y3, x4, y4;
-                    ponto(aa, ro, x1, y1); ponto(bb, ro, x2, y2); ponto(bb, ri, x3, y3); ponto(aa, ri, x4, y4);
-                    g.fillTriangle(x1, y1, x2, y2, x3, y3, cor);
-                    g.fillTriangle(x1, y1, x3, y3, x4, y4, cor);
-                }
-            };
-            const auto seg = [&](double a0, double a1, double k0, double k1) { segCor(a0, a1, k0, k1, c0, c1); };
-            const auto capa = [&](double ang, Cor c) {
-                int px, py;
-                ponto(ang, raio, px, py);
-                g.fillCircle(px, py, larg / 2, c565(c));
-            };
-            const double volta1 = std::min(frac, 1.0);
-            capa(-90, c0);
-            seg(-90, -90 + 360 * volta1, 0, volta1);
-            if (frac <= 1.0) {
-                capa(-90 + 360 * volta1, mistura(c0, c1, volta1));
-                return;
+            ui::anel::Params p;
+            p.cx = ox + cx;
+            p.cy = oy + cy;
+            p.raio = raio;
+            p.larg = larg;
+            p.frac = frac;
+            p.c0 = rgbF(c0);
+            p.c1 = rgbF(c1);
+            p.fundo = rgbF(fundo);
+            p.baseTrilho = rgbF(baseTrilho);
+            ui::anel::Rgb v0, v1;
+            if (volta1a0 != nullptr && volta1a1 != nullptr) {
+                v0 = rgbF(*volta1a0);
+                v1 = rgbF(*volta1a1);
+                p.volta1a0 = &v0;
+                p.volta1a1 = &v1;
             }
-            if (volta1a0 != nullptr && volta1a1 != nullptr) {   // 1a volta completa nas cores de base (overtime: laranja)
-                capa(-90, *volta1a0);
-                segCor(-90, 269.9, 0, 1, *volta1a0, *volta1a1);
-            }
-            const double fim = -90 + 360 * std::min(frac - 1.0, 0.999);
-            int px, py;
-            ponto(fim + 7, raio, px, py);  // sombra escura sob/adiante da ponta da 2a volta
-            g.fillCircle(px, py, larg / 2 + 1, c565(mistura(c1, kPreto, 0.6)));
-            capa(-90, c0);
-            seg(-90, fim, 0, 1);
-            capa(fim, c1);
+            pintarAnel(g, p);
+        }
+
+        ui::anel::Rgb rgbDe565(uint16_t v) {
+            return {float(((v >> 11) & 31) * 255 / 31), float(((v >> 5) & 63) * 255 / 63), float((v & 31) * 255 / 31)};
         }
 
         // Botao colorido (cores proprias, nao as do tema).
@@ -473,6 +460,22 @@ namespace screens {
                            uint16_t fundo) {
         const auto de565 = [](uint16_t v) { return Cor{((v >> 11) & 31) * 255 / 31, ((v >> 5) & 63) * 255 / 63, (v & 31) * 255 / 31}; };
         anel(g, 0, 0, cx, cy, raio, larg, frac, de565(cor0), de565(cor1), de565(fundo), de565(cor0));
+    }
+
+    void desenharAnelSuave(Arduino_GFX& g, int cx, int cy, float raio, float larg, double frac, uint16_t cor0,
+                           uint16_t cor1, uint16_t fundo, uint16_t trilho) {
+        ui::anel::Params p;
+        p.cx = cx;
+        p.cy = cy;
+        p.raio = raio;
+        p.larg = larg;
+        p.frac = frac;
+        p.c0 = rgbDe565(cor0);
+        p.c1 = rgbDe565(cor1);
+        p.fundo = rgbDe565(fundo);
+        const ui::anel::Rgb tr = rgbDe565(trilho);
+        p.trilhoFixo = &tr;
+        pintarAnel(g, p);
     }
 
     void desenharAnelXp(ui::Context& ui, Arduino_GFX& g, int cx, int cy, int raio, int larg, double frac,
@@ -1857,8 +1860,8 @@ namespace screens {
         // Rosto grande (humor 0..4) do mockup tempo3-fechamento: contorno de 3 px, olhos e boca em arco (Pessimo..Otimo).
         void rostoGrande(Arduino_GFX& g, int cx, int cy, int r, int humor, uint16_t cor, uint16_t fundo) {
             const bool pequeno = r < 16;   // versao miniatura (linha "humor salvo"): tracos de 2 px
-            g.fillCircle(cx, cy, r, cor);
-            g.fillCircle(cx, cy, r - (pequeno ? 2 : 3), fundo);
+            const float traco = pequeno ? 2.0f : 3.0f;   // contorno = anel cheio de cor unica, borda suavizada
+            desenharAnelSuave(g, cx, cy, float(r) - traco / 2.0f, traco, 1.0, cor, cor, fundo, cor);
             const auto ponto = [&](int x, int y, int raio) {
                 if (pequeno) g.fillRect(x - 1, y - 1, 2, 2, cor);
                 else g.fillCircle(x, y, raio, cor);

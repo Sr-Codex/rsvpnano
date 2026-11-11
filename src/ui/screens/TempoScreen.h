@@ -36,6 +36,11 @@ namespace screens {
     void desenharAnelApple(Arduino_GFX& g, int cx, int cy, int raio, int larg, double frac, uint16_t cor0, uint16_t cor1,
                            uint16_t fundo);
 
+    // Anel suavizado com trilho de cor fixa (ex.: cinza do Habitos no launcher; contorno dos rostos = frac 1, cor unica).
+    // raio/larg em pixels (podem ser fracionarios). Cores em RGB565.
+    void desenharAnelSuave(Arduino_GFX& g, int cx, int cy, float raio, float larg, double frac, uint16_t cor0,
+                           uint16_t cor1, uint16_t fundo, uint16_t trilho);
+
     // Anel de XP estilo Apple (laranja -> ambar) para Home/Perfil. raio = linha central; frac 0..1 (>1 = 2a volta).
     void desenharAnelXp(ui::Context& ui, Arduino_GFX& g, int cx, int cy, int raio, int larg, double frac,
                         ui::themes::ColorRole fundo);

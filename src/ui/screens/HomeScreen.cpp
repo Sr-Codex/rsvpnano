@@ -95,16 +95,10 @@ namespace screens {
         }
 
         // Habitos: anel de progresso do dia (verde) com visto no centro.
-        void iconeHabitos(Arduino_GFX& g, int cx, int cy, double frac, int raio = 17, int larg = 6, bool marca = true) {
-            constexpr double kRad = 3.14159265358979 / 180.0;
+        void iconeHabitos(Arduino_GFX& g, int cx, int cy, double frac, uint16_t fundo, int raio = 17, int larg = 6,
+                          bool marca = true) {
             const uint16_t verde = rgb565(25, 158, 112), trilha = rgb565(50, 52, 50);
-            const auto ponto = [&](int a, uint16_t c) {
-                const double rad = (a - 90) * kRad;
-                g.fillCircle(cx + int(std::lround(raio * std::cos(rad))), cy + int(std::lround(raio * std::sin(rad))), larg / 2, c);
-            };
-            for (int a = 0; a < 360; a += 4) ponto(a, trilha);
-            const int ate = int(std::lround(360 * std::clamp(frac, 0.0, 1.0)));
-            for (int a = 0; a <= ate; a += 4) ponto(a, verde);
+            desenharAnelSuave(g, cx, cy, float(raio), float(larg), std::clamp(frac, 0.0, 1.0), verde, verde, fundo, trilha);
             if (!marca) return;
             const double k = raio / 17.0;
             const auto P = [&](double dx, double dy) { return std::pair<int, int>{cx + int(std::lround(dx * k)), cy + int(std::lround(dy * k))}; };
@@ -249,7 +243,8 @@ namespace screens {
                 g.fillRoundRect(areaBotao.x + dx, areaBotao.y + dy, areaBotao.w, areaBotao.h, 10, kLaranja);
                 ui.drawText(g, layoutBotao, kTinta, dx, dy, kLaranja);
                 if (habito) {
-                    iconeHabitos(g, cartao.x + dx + 54, cartao.y + dy + 75, r.habTotal > 0 ? double(r.habFeitas) / r.habTotal : 0.0, 30, 9, false);
+                    iconeHabitos(g, cartao.x + dx + 54, cartao.y + dy + 75, r.habTotal > 0 ? double(r.habFeitas) / r.habTotal : 0.0,
+                                 ui.color(SurfaceMuted), 30, 9, false);
                     return;
                 }
                 const double voce = batalha ? r.vocePct / 100.0 : 0.0;
@@ -308,7 +303,7 @@ namespace screens {
                     break;
                 }
                 case 1: iconeLivro(g, X, Y, kRoxo); break;
-                case 2: iconeHabitos(g, X, Y, r.habTotal > 0 ? double(r.habFeitas) / r.habTotal : 0.0); break;
+                case 2: iconeHabitos(g, X, Y, r.habTotal > 0 ? double(r.habFeitas) / r.habTotal : 0.0, ui.color(SurfaceMuted)); break;
                 default: desenharAnelXp(ui, g, X, Y, 17, 7, r.xpFrac, SurfaceMuted); break;
                 }
             });
