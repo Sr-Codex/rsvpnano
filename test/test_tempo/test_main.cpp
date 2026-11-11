@@ -8,6 +8,8 @@
 
 #include "tempo/Codec.h"
 #include "tempo/Cronometro.h"
+#include "tempo/Fechamento.h"
+#include "tempo/Habitos.h"
 #include "tempo/FocoLeitor.h"
 #include "tempo/Motor.h"
 #include "tempo/Parametros.h"
@@ -1607,6 +1609,154 @@ void test_v3_estado_guarda_projetos_recentes_no_json() {
     TEST_ASSERT_TRUE(antigo.projetosRecentes.empty());
 }
 
+
+// ---------------------------------------------------------------- Tempo v3, etapa 2: Reflexao, saque e Desfazer da batalha
+namespace {
+    Estado estadoComMeditacao() {
+        Estado e = novoEstado();
+        OcorrenciaDia oc;
+        oc.habitoId = "med";
+        oc.nome = "Meditar";
+        oc.tipo = TipoHabito::Meditacao;
+        oc.minuto = 7 * 60;
+        e.dia.ocorrencias.push_back(oc);
+        return e;
+    }
+} // namespace
+
+void test_v3e2_reflexao_so_no_fim_do_ciclo() {
+    Ciclo c = iniciarCiclo();
+    for (int rodada = 1; rodada <= kCicloRodadas; ++rodada) {
+        TEST_ASSERT_EQUAL_INT(rodada, c.rodada);
+        // so a ultima rodada pede reflexao; as intermediarias liquidam em silencio e vao a pausa
+        TEST_ASSERT_EQUAL(rodada == kCicloRodadas, rodadaPedeReflexao(c));
+        c = avancarCiclo(c);                              // foco -> pausa
+        TEST_ASSERT_FALSE(rodadaPedeReflexao(c));         // pausa nunca pede
+        c = avancarCiclo(c);                              // pausa -> proxima rodada (ou fim)
+    }
+    TEST_ASSERT_FALSE(c.ativo);
+    TEST_ASSERT_TRUE(rodadaPedeReflexao(Ciclo{}));        // sessao unica ou ciclo encerrado pelo usuario
+    Ciclo meio = iniciarCiclo();
+    meio.rodada = 2;
+    TEST_ASSERT_TRUE(rodadaPedeReflexao(Ciclo{}));        // usuario encerra o ciclo na rodada 2: ciclo vira inativo -> reflexao
+    TEST_ASSERT_FALSE(rodadaPedeReflexao(meio));
+}
+
+void test_v3e2_sem_resposta_salva_sem_humor_e_nunca_inventa_bem() {
+    TEST_ASSERT_EQUAL_INT(0, humorParaLog(-1));
+    TEST_ASSERT_EQUAL_INT(1, humorParaLog(0));
+    TEST_ASSERT_EQUAL_INT(4, humorParaLog(3));   // "Bem" so quando o usuario toca "Bem"
+    TEST_ASSERT_EQUAL_INT(5, humorParaLog(4));
+    TEST_ASSERT_EQUAL_INT(0, humorParaLog(9));
+    TEST_ASSERT_EQUAL_INT(0, distraiuParaLog(-1));
+    TEST_ASSERT_EQUAL_INT(1, distraiuParaLog(0));
+    TEST_ASSERT_EQUAL_INT(3, distraiuParaLog(2));
+    TEST_ASSERT_EQUAL_INT(60, kReflexaoAutoSalvarSeg);
+}
+
+void test_v3e2_proximo_passo_do_saque() {
+    Ciclo c = iniciarCiclo();
+    TEST_ASSERT_EQUAL((int)ProximoPasso::PausaCurta, (int)proximoPassoDoSaque(c));
+    TEST_ASSERT_EQUAL_INT(5, minutosProximoPasso(proximoPassoDoSaque(c)));
+    c.rodada = kCicloRodadas;
+    TEST_ASSERT_EQUAL((int)ProximoPasso::PausaLonga, (int)proximoPassoDoSaque(c));
+    TEST_ASSERT_EQUAL_INT(15, minutosProximoPasso(ProximoPasso::PausaLonga));
+    TEST_ASSERT_EQUAL((int)ProximoPasso::VoltarInicio, (int)proximoPassoDoSaque(Ciclo{}));
+    TEST_ASSERT_EQUAL_INT(0, minutosProximoPasso(ProximoPasso::VoltarInicio));
+}
+
+void test_v3e2_desfazer_batalha_reverte_tudo() {
+    Estado e = estadoComMeditacao();
+    creditar(e, 40.0);   // saldo previo
+    const Estado antes = e;
+    auto instante = capturarBatalha(e);
+    const auto liq = aplicarBatalha(e, batalha(Categoria::Meditacao, 25, 25));
+    TEST_ASSERT_TRUE(liq.vitoria);
+    std::vector<ItemFila> fila;
+    TEST_ASSERT_TRUE(marcarMeditacaoPorTimer(e, fila).registrado);   // check-in do timer, mesma liquidacao
+    selarBatalha(instante, e);
+    TEST_ASSERT_TRUE(e.saldo > antes.saldo);
+    TEST_ASSERT_TRUE(e.xpTotal > antes.xpTotal);
+    TEST_ASSERT_TRUE(e.dia.fochoPagoMin > 0 || e.dia.meditacaoMin > 0);
+    TEST_ASSERT_TRUE(podeDesfazerBatalha(e, instante));
+
+    TEST_ASSERT_TRUE(desfazerBatalha(e, instante));
+    NEAR(antes.saldo, e.saldo);
+    NEAR(antes.cofre, e.cofre);
+    NEAR(antes.xpTotal, e.xpTotal);
+    for (size_t i = 0; i < kNumAtributos; ++i) NEAR(antes.pontosAtributo[i], e.pontosAtributo[i]);
+    NEAR(antes.dia.crGanho, e.dia.crGanho);
+    NEAR(antes.dia.xpGanho, e.dia.xpGanho);
+    NEAR(antes.dia.habitosCr, e.dia.habitosCr);
+    TEST_ASSERT_EQUAL_INT(antes.dia.fochoPagoMin, e.dia.fochoPagoMin);
+    TEST_ASSERT_EQUAL_INT(antes.dia.meditacaoMin, e.dia.meditacaoMin);
+    TEST_ASSERT_EQUAL_INT((int)antes.dia.eventos.size(), (int)e.dia.eventos.size());
+    TEST_ASSERT_EQUAL_INT(antes.streak, e.streak);
+    TEST_ASSERT_EQUAL_INT((int)StatusHabito::Pendente, (int)e.dia.ocorrencias[0].status);   // Meditacao pelo timer voltou a pendente
+    TEST_ASSERT_FALSE(e.dia.ocorrencias[0].feita);
+}
+
+void test_v3e2_desfazer_batalha_permite_liquidar_de_novo_com_o_mesmo_resultado() {
+    Estado e = novoEstado();
+    auto instante = capturarBatalha(e);
+    const auto primeira = aplicarBatalha(e, batalha(Categoria::Trabalho, 25, 25));
+    selarBatalha(instante, e);
+    const double saldoPago = e.saldo;
+    TEST_ASSERT_TRUE(desfazerBatalha(e, instante));
+    NEAR(0.0, e.saldo);
+    const auto segunda = aplicarBatalha(e, batalha(Categoria::Trabalho, 25, 25));   // Reflexao salva depois do Desfazer: paga de novo
+    NEAR(primeira.cr, segunda.cr);
+    NEAR(primeira.xp, segunda.xp);
+    NEAR(saldoPago, e.saldo);
+}
+
+void test_v3e2_desfazer_batalha_so_se_nada_mais_mexeu() {
+    {   // outra coisa pagou algo depois da liquidacao
+        Estado e = novoEstado();
+        auto instante = capturarBatalha(e);
+        aplicarBatalha(e, batalha(Categoria::Trabalho, 25, 25));
+        selarBatalha(instante, e);
+        const Estado pago = e;
+        creditar(e, 1.0);
+        TEST_ASSERT_FALSE(podeDesfazerBatalha(e, instante));
+        TEST_ASSERT_FALSE(desfazerBatalha(e, instante));
+        NEAR(pago.saldo + 1.0, e.saldo);   // nada foi mexido
+    }
+    {   // evento novo no dia (ex.: outro registro)
+        Estado e = novoEstado();
+        auto instante = capturarBatalha(e);
+        aplicarBatalha(e, batalha(Categoria::Trabalho, 25, 25));
+        selarBatalha(instante, e);
+        e.dia.eventos.push_back(Evento{});
+        TEST_ASSERT_FALSE(podeDesfazerBatalha(e, instante));
+    }
+    {   // virou o dia
+        Estado e = novoEstado();
+        auto instante = capturarBatalha(e);
+        aplicarBatalha(e, batalha(Categoria::Trabalho, 25, 25));
+        selarBatalha(instante, e);
+        abrirDia(e, D(2026, 11, 10));
+        TEST_ASSERT_FALSE(podeDesfazerBatalha(e, instante));
+    }
+    {   // sem captura selada
+        Estado e = novoEstado();
+        TEST_ASSERT_FALSE(podeDesfazerBatalha(e, InstanteBatalha{}));
+        auto instante = capturarBatalha(e);   // nao selado
+        TEST_ASSERT_FALSE(podeDesfazerBatalha(e, instante));
+    }
+}
+
+void test_v3e2_desfazer_batalha_reverte_streak_e_nivel() {
+    Estado e = novoEstado();
+    e.streak = 3;
+    auto instante = capturarBatalha(e);
+    aplicarBatalha(e, batalha(Categoria::Estudo, 60, 60));
+    e.streak = 4;   // a liquidacao do dia valido pode mexer no streak (a tela captura tudo antes)
+    selarBatalha(instante, e);
+    TEST_ASSERT_TRUE(desfazerBatalha(e, instante));
+    TEST_ASSERT_EQUAL_INT(3, e.streak);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_datas);
@@ -1695,5 +1845,12 @@ int main(int, char**) {
     RUN_TEST(test_leitor_titulo_vazio_e_longo);
     RUN_TEST(test_leitor_evento_ida_e_volta_no_log_e_logs_antigos_continuam_legiveis);
     RUN_TEST(test_leitor_resumo_conta_leitura_como_foco_livre);
+    RUN_TEST(test_v3e2_reflexao_so_no_fim_do_ciclo);
+    RUN_TEST(test_v3e2_sem_resposta_salva_sem_humor_e_nunca_inventa_bem);
+    RUN_TEST(test_v3e2_proximo_passo_do_saque);
+    RUN_TEST(test_v3e2_desfazer_batalha_reverte_tudo);
+    RUN_TEST(test_v3e2_desfazer_batalha_permite_liquidar_de_novo_com_o_mesmo_resultado);
+    RUN_TEST(test_v3e2_desfazer_batalha_so_se_nada_mais_mexeu);
+    RUN_TEST(test_v3e2_desfazer_batalha_reverte_streak_e_nivel);
     return UNITY_END();
 }

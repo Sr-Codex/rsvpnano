@@ -400,7 +400,7 @@ void App::update(uint32_t nowMs) {
     if (screen_ != screens::Screen::Status) ota::primeiroQuadro(nowMs);   // 1o quadro de verdade (nao o splash)
     desenharAvisoHabito(nowMs);
     if (!preparingTypography && !readerScreen_.session.playing && !companionApi_.active() && !usbTransfer_.active()
-        && !lembreteBoot_ && !focusScreen_.active() && !silentJobActive() && !tempoScreen_.battleActive() && screen_ != screens::Screen::FocusSession && screen_ != screens::Screen::Status
+        && !lembreteBoot_ && !focusScreen_.active() && !silentJobActive() && !tempoScreen_.battleActive() && !tempoScreen_.emFechamento() && screen_ != screens::Screen::FocusSession && screen_ != screens::Screen::Status
         && screen_ != screens::Screen::Onboarding
         && kStandbyMs[settingsStore_.settings().interface.standbyTimerIndex] > 0
         && nowMs - lastActivityMs_ >= kStandbyMs[settingsStore_.settings().interface.standbyTimerIndex]) {

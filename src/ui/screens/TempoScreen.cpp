@@ -181,7 +181,6 @@ namespace screens {
         constexpr int kIniCx = 80, kIniCy = 106, kIniRaio = 56, kIniLarg = 12;   // anel unico do Inicio (v3)
         constexpr Cor kTonal{34, 36, 35}, kSelFundo{44, 28, 16}, kClaro{228, 228, 220};
         constexpr Cor kCinzaA{120, 122, 116}, kCinzaB{165, 166, 158}, kVinhoApagado{120, 56, 72}, kVinhoApagado2{150, 70, 92};
-        constexpr int kAutoSalvarSeg = 60;
 
         uint16_t c565(Cor c) { return rgb565(uint8_t(c.r), uint8_t(c.g), uint8_t(c.b)); }
         Cor mistura(Cor a, Cor b, double t) {
@@ -453,26 +452,6 @@ namespace screens {
             }
         }
 
-        // Rosto (humor 0..4) com circulos/arcos: a fonte nao tem emoji.
-        void rosto(Arduino_GFX& g, int cx, int cy, int humor, uint16_t cor) {
-            g.drawCircle(cx, cy, 11, cor);
-            g.drawCircle(cx, cy, 10, cor);
-            g.fillCircle(cx - 4, cy - 3, 2, cor);
-            g.fillCircle(cx + 4, cy - 3, 2, cor);
-            constexpr double kRad = 3.14159265358979 / 180.0;
-            if (humor == 2) {
-                g.fillRect(cx - 5, cy + 3, 11, 2, cor);
-            } else if (humor > 2) {
-                const double h = humor == 3 ? 3 : 5;  // sorriso: metade de baixo de uma elipse
-                for (int a = 20; a <= 160; a += 6)
-                    g.fillCircle(cx + int(std::lround(5 * std::cos(a * kRad))), cy + 4 + int(std::lround(h * std::sin(a * kRad))), 1, cor);
-            } else {
-                const double h = humor == 1 ? 3 : 5;  // carranca: metade de cima
-                for (int a = 200; a <= 340; a += 6)
-                    g.fillCircle(cx + int(std::lround(5 * std::cos(a * kRad))), cy + 4 + int(h) + int(std::lround(h * std::sin(a * kRad))), 1, cor);
-            }
-        }
-
         std::string fmtHoraRelogio(int minutoDoDia) {
             char texto[8];
             minutoDoDia = ((minutoDoDia % 1440) + 1440) % 1440;
@@ -518,7 +497,7 @@ namespace screens {
         }
         r.streak = estado_.streak;
         r.focoHojeMin = estado_.dia.fochoPagoMin;
-        if (fase_ == Fase::Reflexao) {
+        if (emFechamento()) {
             r.estado = ResumoTempo::Estado::Reflexao;
         } else if (battleActive()) {
             r.estado = ResumoTempo::Estado::Batalha;
@@ -569,12 +548,12 @@ namespace screens {
     }
 
     void TempoScreen::abrirBatalha(Screen& screen) {
-        screen = fase_ == Fase::Reflexao ? Screen::TempoVitoria : Screen::TempoBatalha;
+        screen = emFechamento() || saqueAtivo_ ? Screen::TempoVitoria : Screen::TempoBatalha;
     }
 
     // Botao do cartao AGORA (sem batalha): abre o Inicio com o proximo projeto (o 1o da lista) ja escolhido.
     bool TempoScreen::comecar(Screen& screen) {
-        if (battleActive() || fase_ == Fase::Reflexao) return false;
+        if (battleActive() || emFechamento()) return false;
         seletor_ = false;
         if (!lista_.projetos.empty()) escolher(0);
         screen = Screen::TempoHoje;
@@ -584,7 +563,7 @@ namespace screens {
     // BOOT curto no launcher: Foco livre imediato com a ultima categoria/duracao (ignora o ciclo pomodoro).
     void TempoScreen::focoRapido(uint32_t nowMs, Screen& screen, fs::FS* filesystem) {
         if (!carregado_) carregar(filesystem, true, nowMs);
-        if (battleActive() || fase_ == Fase::Reflexao) {
+        if (battleActive() || emFechamento()) {
             abrirBatalha(screen);
             return;
         }
@@ -632,13 +611,13 @@ namespace screens {
         std::vector<tempo::ItemFila> fila;
         const auto r = tempo::marcarMeditacaoPorTimer(estado_, fila);
         if (!r.registrado) return;
-        for (const auto& item : fila) TempoStorage::enqueueCheckin(*filesystem, item);
-        if (!fila.empty()) checkinNovo_ = true;   // lume.12: o App sincroniza logo ("Feito" envia na hora)
-        gravarEventoHabito(filesystem, r, "timer");
+        // Etapa 2: nada vai para a fila nem para o log antes de confirmarSaque (o Desfazer da batalha tem que poder apagar tudo).
+        filaMed_ = std::move(fila);
+        if (estado_.dia.data.ano >= tempo::kAnoMinimoValido) eventoMedPend_ = tempo::eventoHabito(estado_, r, "timer");
     }
 
     void TempoScreen::atualizarHabitos(fs::FS* filesystem, uint32_t nowMs) {
-        if (filesystem == nullptr || fase_ == Fase::Lutando || fase_ == Fase::Pausada || fase_ == Fase::Descanso) return;
+        if (filesystem == nullptr || fase_ == Fase::Lutando || fase_ == Fase::Pausada || fase_ == Fase::Descanso || emFechamento()) return;
         if (!carregado_) carregar(filesystem, true, nowMs);   // ja le habitos.json
         else if (syncAtiva_) recargaPedida_ = true;           // o job esta gravando habitos.json: le depois do sinal de "terminou"
         else {
@@ -729,7 +708,7 @@ namespace screens {
 
     void TempoScreen::sincronizacaoTerminou(fs::FS* filesystem, uint32_t nowMs, uint32_t versao) {
         syncAtiva_ = false;
-        if (!carregado_ || fase_ != Fase::Nenhuma) return;   // em batalha/reflexao: a manutencao relê depois (versaoVista_ fica velha de proposito)
+        if (!carregado_ || fase_ != Fase::Nenhuma || emFechamento()) return;   // em batalha/reflexao: a manutencao relê depois (versaoVista_ fica velha de proposito)
         versaoVista_ = versao;
         recargaPedida_ = false;
         recarregarProjetos(filesystem);
@@ -737,7 +716,7 @@ namespace screens {
     }
 
     void TempoScreen::manutencaoHabitos(uint32_t nowMs, fs::FS* filesystem, uint32_t versaoSync) {
-        if (!carregado_ || filesystem == nullptr || fase_ != Fase::Nenhuma) return;   // nada durante batalha/reflexao
+        if (!carregado_ || filesystem == nullptr || fase_ != Fase::Nenhuma || emFechamento()) return;   // nada durante batalha/reflexao/saque
         const auto agora = tempo::agora(nowMs);
         if (!agora.valida) return;
         const bool viradaDoDia = !estado_.dia.aberto || !(estado_.dia.data == agora.data);
@@ -851,7 +830,7 @@ namespace screens {
 
     // Comeca a batalha (ou o ciclo pomodoro) com a escolha do Inicio.
     void TempoScreen::comecarSessao(uint32_t nowMs) {
-        if (battleActive() || fase_ == Fase::Reflexao) return;
+        if (battleActive() || emFechamento()) return;
         const bool comProjeto = escolha_ >= 0 && size_t(escolha_) < titulos_.size();
         categoriaBatalha_ = tempo::categoriaDoFoco(comProjeto, categoria_);   // categoria unica do projeto
         if (comProjeto) {
@@ -863,6 +842,9 @@ namespace screens {
             nomeBatalha_ = tempo::nomeFocoLivre(categoriaBatalha_);
         }
         ciclo_ = pomodoro_ ? tempo::iniciarCiclo() : tempo::Ciclo{};
+        emCiclo_ = pomodoro_;
+        cicloRodadas_ = 0;
+        cicloFocadoMin_ = 0;
         planejadoMin_ = pomodoro_ ? tempo::kCicloFocoMin : duracaoMin_;
         salvarPreferencias();
         ligarBatalha(nowMs);
@@ -875,6 +857,7 @@ namespace screens {
         fimApertado_ = false;
         fimDicaAteMs_ = 0;
         ultimoMs_ = tempo::ms(nowMs);
+        saqueAtivo_ = false;
         fase_ = Fase::Lutando;
         pedirSom(som::SomId::SobeQuatro);   // comecar batalha/foco (inclui a proxima rodada do ciclo)
     }
@@ -926,25 +909,48 @@ namespace screens {
         descansoVolta_ = false;
     }
 
+    // Fim da batalha: guarda a entrada, liquida (a economia ja vale e o estado ja e salvo, como antes) e abre a Reflexao. Nada vai
+    // para o log do dia / resumo.json ate confirmarSaque (para o Desfazer poder apagar tudo sem rastro).
     void TempoScreen::finalizar(uint32_t nowMs, bool abandonou, fs::FS* filesystem, bool tocarDesfecho) {
         acumular(nowMs);
         cron_.voltar();   // fecha uma distracao em aberto
         garantirDia(nowMs);
+        if (!confirmado_) confirmarSaque(filesystem);   // defesa: nunca perde um fechamento anterior
+        entradaPend_ = cron_.entrada(categoriaBatalha_, true);
+        entradaPend_.abandonou = abandonou;
+        distracoesPend_ = cron_.numDistracoes;
+        if (emCiclo_) {
+            ++cicloRodadas_;
+            cicloFocadoMin_ += entradaPend_.minutosFocados;
+        }
+        liquidar(nowMs, filesystem, tocarDesfecho);
+        humor_ = distraiu_ = -1;
+        distracaoAberta_ = false;
+        saqueAtivo_ = false;
+        confirmado_ = false;
+        reflexaoInicioMs_ = nowMs;
+        overtime_ = false;
+        fase_ = Fase::Reflexao;
+    }
+
+    void TempoScreen::liquidar(uint32_t nowMs, fs::FS* filesystem, bool tocarDesfecho) {
         const int nivelAntes = tempo::nivelDeXp(estado_.xpTotal);
         const int streakAntes = estado_.streak;
-        tempo::EntradaBatalha entrada = cron_.entrada(categoriaBatalha_, true);
-        entrada.abandonou = abandonou;
-        const auto liquidacao = tempo::aplicarBatalha(estado_, entrada);
-        // Meditacao vencida marca a proxima ocorrencia pendente do habito de Meditacao (no horario) e enfileira o check-in.
+        const bool abandonou = entradaPend_.abandonou;
+        instante_ = tempo::capturarBatalha(estado_);
+        filaMed_.clear();
+        eventoMedPend_.reset();
+        const auto liquidacao = tempo::aplicarBatalha(estado_, entradaPend_);
+        // Meditacao vencida marca a proxima ocorrencia pendente do habito de Meditacao (no horario); o check-in so entra na fila ao confirmar.
         if (liquidacao.vitoria && categoriaBatalha_ == tempo::Categoria::Meditacao) registrarHabitoMeditacao(filesystem);
+        tempo::selarBatalha(instante_, estado_);
+        liquidado_ = true;
 
         const std::string titulo = nomeBatalha_;
-        resultado_ = {liquidacao, titulo, planejadoMin_, entrada.minutosFocados,
+        resultado_ = {liquidacao, titulo, planejadoMin_, entradaPend_.minutosFocados,
                       tempo::nivelAtributo(estado_, liquidacao.atributo), estado_.streak, abandonou,
                       tempo::nivelDeXp(estado_.xpTotal) > nivelAntes, false};
 
-        // O evento do log e gravado ao salvar a reflexao (campos humor/distraiu). A economia ja foi liquidada
-        // e persistida aqui: a reflexao nunca da credito nem XP.
         const auto agora = tempo::agora(nowMs);
         auto& evento = eventoPendente_;
         evento = tempo::EventoLog{};
@@ -956,54 +962,136 @@ namespace screens {
         evento.projetoId = projeto_ >= 0 && size_t(projeto_) < lista_.projetos.size() ? lista_.projetos[projeto_].id : std::string{};
         evento.resultado = liquidacao.vitoria ? "vitoria" : "fuga";
         evento.planejadoMin = planejadoMin_;
-        evento.focadoMin = entrada.minutosFocados;
-        evento.distraidoMin = entrada.minutosDistraidos;
-        evento.distracoes = cron_.numDistracoes;
+        evento.focadoMin = entradaPend_.minutosFocados;
+        evento.distraidoMin = entradaPend_.minutosDistraidos;
+        evento.distracoes = distracoesPend_;
         evento.overtimeMin = liquidacao.minutosOvertime;
         evento.cr = liquidacao.cr;
         evento.xp = liquidacao.xp;
         evento.perfeita = liquidacao.perfeita;
         dataPendente_ = agora.valida ? agora.data : tempo::Data{};
         resultado_.conquista = conquistaNova(filesystem != nullptr ? filesystem : fs_, evento, streakAntes);
-        if (tocarDesfecho) {   // no ciclo, concluirRodada escolhe o som (descanso); aqui so batalha unica / "Fim" / "Concluir"
+        if (tocarDesfecho) {   // no ciclo, concluirRodada escolhe o som (descanso); aqui so batalha unica / "Fim" / "Concluir". O Desfazer nao repete som.
             if (const auto id = som::escolher({liquidacao.vitoria ? som::SomId::Moeda : som::SomId::DesceAlerta,
                                                resultado_.subiuNivel ? som::SomId::PowerUp : som::SomId::Bip,
                                                resultado_.conquista ? som::SomId::Jingle : som::SomId::Bip}))
                 pedirSom(*id);
         }
-
-        humor_ = distraiu_ = -1;
-        reflexaoInicioMs_ = nowMs;
-        overtime_ = false;
-        fase_ = Fase::Reflexao;
+        if (filesystem == nullptr) filesystem = fs_;
         if (filesystem != nullptr) TempoStorage::saveState(*filesystem, estado_);
     }
 
-    // Ciclo pomodoro: a rodada terminou (inimigo derrotado). Liquida a batalha sozinha, grava o log sem a reflexao
-    // (nao da para pedir resposta no meio do ciclo) e entra na pausa curta ou longa.
+    // Ciclo pomodoro: a rodada terminou (inimigo derrotado). Liquida a batalha sozinha. Rodadas intermediarias vao direto ao saque
+    // curto (+ Desfazer) e depois a pausa, sem Reflexao; a ultima rodada abre a Reflexao do ciclo inteiro (decisao 22).
     void TempoScreen::concluirRodada(uint32_t nowMs, fs::FS* filesystem) {
+        const bool pedeReflexao = tempo::rodadaPedeReflexao(ciclo_);
         finalizar(nowMs, false, filesystem, false);
         // Fim do foco -> descanso: um som so (a moeda/vitoria ficam na tela); nivel e conquista valem mais.
         if (const auto id = som::escolher({som::SomId::SuaveDescendo,
                                            resultado_.subiuNivel ? som::SomId::PowerUp : som::SomId::Bip,
                                            resultado_.conquista ? som::SomId::Jingle : som::SomId::Bip}))
             pedirSom(*id);
-        salvarReflexao(filesystem);
-        ciclo_ = tempo::avancarCiclo(ciclo_);   // foco -> pausa
-        descansoMs_ = int64_t(tempo::duracaoCicloMin(ciclo_)) * 60000;
-        iniciarDescanso(nowMs, false);
+        if (!pedeReflexao) fecharReflexao(nowMs, filesystem, true, false);   // silencioso: saque curto + pausa
     }
 
-    void TempoScreen::salvarReflexao(fs::FS* filesystem) {
+    // Sai da Reflexao. mostrarSaque: abre o saque (humor_ ja decidido; -1 = sem humor); senao confirma direto (voltar/BOOT sem saque).
+    void TempoScreen::fecharReflexao(uint32_t nowMs, fs::FS* filesystem, bool mostrarSaque, bool deReflexao) {
         if (fase_ != Fase::Reflexao) return;
-        eventoPendente_.humor = humor_ >= 0 ? humor_ + 1 : 0;
-        eventoPendente_.distraiu = distraiu_ >= 0 ? distraiu_ + 1 : 0;
+        if (!liquidado_) liquidar(nowMs, filesystem, false);   // voltou da Desfeita: paga de novo (sem som)
+        distracaoAberta_ = false;
+        proximo_ = tempo::proximoPassoDoSaque(ciclo_);
+        if (!mostrarSaque) {
+            confirmarSaque(filesystem);
+            ciclo_ = tempo::Ciclo{};
+            emCiclo_ = false;
+            fase_ = Fase::Nenhuma;
+            return;
+        }
+        saqueAtivo_ = true;
+        saqueDeReflexao_ = deReflexao;
+        saqueInicioMs_ = nowMs;
+        fase_ = Fase::Nenhuma;   // o saque e uma sobreposicao; a pausa so comeca ao sair dele (relogio ancorado em saqueInicioMs_)
+    }
+
+    // Ponto sem volta: grava o evento da batalha (com humor/distracao), o resumo.json do Perfil e o que a Meditacao enfileirou.
+    void TempoScreen::confirmarSaque(fs::FS* filesystem) {
+        if (confirmado_) return;
+        confirmado_ = true;
+        eventoPendente_.humor = tempo::humorParaLog(humor_);
+        eventoPendente_.distraiu = tempo::distraiuParaLog(distraiu_);
         if (filesystem == nullptr) filesystem = fs_;
-        if (filesystem != nullptr) {
+        if (filesystem != nullptr && liquidado_) {
             TempoStorage::appendLog(*filesystem, dataPendente_, eventoPendente_);
             TempoStorage::recordBattle(*filesystem, eventoPendente_, estado_.streak);   // resumo.json do Perfil
+            for (const auto& item : filaMed_) TempoStorage::enqueueCheckin(*filesystem, item);
+            if (eventoMedPend_) TempoStorage::appendLog(*filesystem, estado_.dia.data, *eventoMedPend_);
         }
+        if (!filaMed_.empty()) checkinNovo_ = true;   // lume.12: o App sincroniza logo ("Feito" envia na hora)
+        filaMed_.clear();
+        eventoMedPend_.reset();
+        instante_ = tempo::InstanteBatalha{};
+    }
+
+    // Depois do saque: no ciclo, a pausa (curta/longa) com o relogio contado desde o fim da rodada; senao, nada (Inicio/outra rodada).
+    void TempoScreen::iniciarProximoPasso(uint32_t nowMs) {
+        if (proximo_ != tempo::ProximoPasso::VoltarInicio && ciclo_.ativo) {
+            ciclo_ = tempo::avancarCiclo(ciclo_);   // foco -> pausa
+            descansoMs_ = int64_t(tempo::duracaoCicloMin(ciclo_)) * 60000;
+            iniciarDescanso(nowMs, false);
+            descansoInicioMs_ = std::min<uint64_t>(descansoInicioMs_, tempo::ms(saqueInicioMs_));   // a pausa conta desde o fim da rodada
+            return;
+        }
+        ciclo_ = tempo::Ciclo{};
+        emCiclo_ = false;
         fase_ = Fase::Nenhuma;
+    }
+
+    void TempoScreen::sairDoSaque(uint32_t nowMs, fs::FS* filesystem) {
+        if (!saqueAtivo_) return;
+        confirmarSaque(filesystem);
+        saqueAtivo_ = false;
+        iniciarProximoPasso(nowMs);
+    }
+
+    // BOOT / botao primario do saque: confirma e segue (pausa do ciclo -> Batalha; senao Inicio).
+    void TempoScreen::acaoPrimariaSaque(uint32_t nowMs, Screen& screen, fs::FS* filesystem) {
+        const bool pausa = proximo_ != tempo::ProximoPasso::VoltarInicio;
+        sairDoSaque(nowMs, filesystem);
+        screen = pausa && battleActive() ? Screen::TempoBatalha : Screen::TempoHoje;
+    }
+
+    bool TempoScreen::podeDesfazerBatalha(uint32_t nowMs) const {
+        return saqueAtivo_ && !confirmado_ && liquidado_ && tempo::desfazerDisponivel(nowMs, saqueInicioMs_)
+               && tempo::podeDesfazerBatalha(estado_, instante_);
+    }
+
+    // "Desfazer": reverte a liquidacao inteira (carteira, cofre, XP, atributos, totais do dia, streak, eventos do dia, Meditacao pelo
+    // timer) e descarta o que ainda nao foi gravado (log, resumo.json, check-in). Volta a Reflexao (batalha unica / fim do ciclo) ou
+    // ao Inicio (rodada intermediaria: o ciclo se encerra).
+    bool TempoScreen::desfazerBatalha(uint32_t nowMs, fs::FS* filesystem, Screen& screen) {
+        if (!podeDesfazerBatalha(nowMs)) return false;
+        if (!tempo::desfazerBatalha(estado_, instante_)) return false;
+        instante_ = tempo::InstanteBatalha{};
+        filaMed_.clear();
+        eventoMedPend_.reset();
+        liquidado_ = false;
+        if (filesystem == nullptr) filesystem = fs_;
+        if (filesystem != nullptr) TempoStorage::saveState(*filesystem, estado_);
+        saqueAtivo_ = false;
+        if (saqueDeReflexao_) {
+            humor_ = distraiu_ = -1;
+            reflexaoInicioMs_ = nowMs;
+            confirmado_ = false;
+            fase_ = Fase::Reflexao;
+            screen = Screen::TempoVitoria;
+        } else {
+            confirmado_ = true;
+            ciclo_ = tempo::Ciclo{};
+            emCiclo_ = false;
+            fase_ = Fase::Nenhuma;
+            screen = Screen::TempoHoje;
+        }
+        return true;
     }
 
     bool TempoScreen::registrarFocoLeitor(uint32_t nowMs, fs::FS* filesystem, const tempo::RodadaLeitor& rodada,
@@ -1013,7 +1101,7 @@ namespace screens {
         garantirDia(nowMs);
         const auto agora = tempo::agora(nowMs);
         const std::string data = agora.valida ? tempo::textoData(agora.data) : std::string{};
-        const bool batalhaAtiva = battleActive() || fase_ == Fase::Reflexao;
+        const bool batalhaAtiva = battleActive() || emFechamento();
         const int nivelAntes = tempo::nivelDeXp(estado_.xpTotal);
         const int streakAntes = estado_.streak;
         const auto evento = tempo::liquidarFocoLeitor(estado_, rodada, batalhaAtiva, tituloLivro, data, horaTexto(agora));
@@ -1032,6 +1120,15 @@ namespace screens {
     }
 
     bool TempoScreen::tick(uint32_t nowMs, fs::FS* filesystem) {
+        if (saqueAtivo_) {   // janela do Desfazer fechou: confirma; com pausa do ciclo a vez dela comeca sozinha
+            if (!confirmado_ && !tempo::desfazerDisponivel(nowMs, saqueInicioMs_)) confirmarSaque(filesystem);
+            if (confirmado_ && proximo_ != tempo::ProximoPasso::VoltarInicio) {
+                saqueAtivo_ = false;
+                iniciarProximoPasso(nowMs);
+                return true;
+            }
+            return false;
+        }
         if (fase_ == Fase::Descanso) {
             if (int64_t(tempo::ms(nowMs)) - int64_t(descansoInicioMs_) >= descansoMs_) {
                 encerrarDescanso(nowMs);
@@ -1041,7 +1138,8 @@ namespace screens {
             return false;
         }
         if (fase_ == Fase::Reflexao) {
-            if (nowMs - reflexaoInicioMs_ >= uint32_t(kAutoSalvarSeg) * 1000U) salvarReflexao(filesystem);
+            if (nowMs - reflexaoInicioMs_ >= uint32_t(tempo::kReflexaoAutoSalvarSeg) * 1000U)
+                fecharReflexao(nowMs, filesystem, true, true);   // 60 s sem resposta: salva SEM humor
             return false;
         }
         if (fase_ != Fase::Lutando && fase_ != Fase::Pausada) return false;
@@ -1081,18 +1179,24 @@ namespace screens {
     // ===================================================================== entradas
     void TempoScreen::boot(uint32_t nowMs, Screen& screen, fs::FS* filesystem) {
         if (screen == Screen::TempoVitoria) {
-            salvarReflexao(filesystem);
-            screen = Screen::TempoHoje;
+            if (saqueAtivo_) {   // BOOT = acao primaria do saque (proximo passo)
+                acaoPrimariaSaque(nowMs, screen, filesystem);
+            } else if (fase_ == Fase::Reflexao) {
+                if (distracaoAberta_) distracaoAberta_ = false;
+                else fecharReflexao(nowMs, filesystem, true, true);   // sem resposta: salva sem humor e mostra o saque
+            } else {
+                screen = Screen::TempoHoje;
+            }
         } else if (screen == Screen::TempoBatalha) {
             if (fase_ == Fase::Lutando || fase_ == Fase::Pausada) pausarOuRetomar(nowMs);
             else if (fase_ == Fase::Descanso) encerrarDescanso(nowMs);
-            else if (fase_ == Fase::Reflexao) screen = Screen::TempoVitoria;
+            else if (emFechamento() || saqueAtivo_) screen = Screen::TempoVitoria;
             else screen = Screen::TempoHoje;
         } else if (seletor_) {
             // seletor aberto: BOOT nao faz nada (escolha por toque)
         } else if (battleActive()) {
             screen = Screen::TempoBatalha;
-        } else if (fase_ == Fase::Reflexao) {
+        } else if (emFechamento() || saqueAtivo_) {
             screen = Screen::TempoVitoria;
         } else if (!carregado_) {
             carregar(filesystem, true, nowMs);
@@ -1103,7 +1207,6 @@ namespace screens {
     }
 
     void TempoScreen::back(uint32_t nowMs, Screen& screen, fs::FS* filesystem) {
-        (void)nowMs;
         if (screen == Screen::TempoHoje) {
             if (seletor_) seletor_ = false;
             else {
@@ -1111,7 +1214,9 @@ namespace screens {
                 screen = Screen::Home;
             }
         } else {
-            if (screen == Screen::TempoVitoria || fase_ == Fase::Reflexao) salvarReflexao(filesystem);   // sem resposta
+            if (screen == Screen::TempoVitoria && distracaoAberta_) { distracaoAberta_ = false; return; }   // volta aos rostos
+            if (saqueAtivo_) sairDoSaque(nowMs, filesystem);                                        // confirma; a pausa do ciclo segue
+            else if (fase_ == Fase::Reflexao) fecharReflexao(nowMs, filesystem, false, true);       // sem resposta: salva sem humor
             screen = Screen::TempoHoje;  // batalha em curso continua em segundo plano
         }
     }
@@ -1123,6 +1228,8 @@ namespace screens {
         if (!carregado_) carregar(filesystem, true, nowMs);
         else if (reentrada && screen == Screen::TempoHoje) carregar(filesystem, false, nowMs);
         tick(nowMs, filesystem);
+        if (saqueAtivo_ && confirmado_ && proximo_ == tempo::ProximoPasso::VoltarInicio && screen != Screen::TempoVitoria)
+            saqueAtivo_ = false;   // saque ja confirmado e fora da tela: nao reabre sozinho
         if (screen != Screen::TempoHoje) seletor_ = false;
         if (screen == Screen::TempoHoje) return seletor_ ? drawSeletor(ui, nowMs, screen) : drawInicio(ui, nowMs, screen);
         if (screen == Screen::TempoBatalha) return drawBatalha(ui, nowMs, screen);
@@ -1133,7 +1240,7 @@ namespace screens {
     // Layout 640x172 (mockup tempo3-foco, quadros 1-2): anel de minutos + -5/+5 a esquerda, cartao unico "FOCO EM" no meio
     // (toque abre o seletor), Comecar grande + ciclo a direita. Com projeto NAO existe seletor de categoria (e unica).
     Action TempoScreen::drawInicio(ui::Context& ui, uint32_t nowMs, Screen& screen) {
-        if (fase_ == Fase::Reflexao) { screen = Screen::TempoVitoria; return Action::None; }
+        if (fase_ == Fase::Reflexao || (saqueAtivo_ && !confirmado_)) { screen = Screen::TempoVitoria; return Action::None; }
         garantirDia(nowMs);
         const bool emBatalha = battleActive();
         const bool ciclo = pomodoro_;
@@ -1466,7 +1573,7 @@ namespace screens {
     // Layout 640x172: aneis a esquerda (0..172), texto no meio (176..468), botoes a direita (472..632).
     // Estados: normal, "Fim · segure" apertado, distraido, pausado, overtime (e a pausa do ciclo).
     Action TempoScreen::drawBatalha(ui::Context& ui, uint32_t nowMs, Screen& screen) {
-        if (fase_ == Fase::Reflexao) { screen = Screen::TempoVitoria; return Action::None; }
+        if (fase_ == Fase::Reflexao || (saqueAtivo_ && !confirmado_)) { screen = Screen::TempoVitoria; return Action::None; }
         if (fase_ == Fase::Nenhuma) { screen = Screen::TempoHoje; return Action::None; }
         const bool descanso = fase_ == Fase::Descanso;
         const bool pausada = fase_ == Fase::Pausada;
@@ -1745,62 +1852,255 @@ namespace screens {
         return Action::None;
     }
 
-    // Reflexao "COMO FOI?" (substitui a antiga Vitoria). So registra no log; nao rende cr nem XP.
-    Action TempoScreen::drawVitoria(ui::Context& ui, uint32_t nowMs, Screen& screen) {
-        if (fase_ != Fase::Reflexao) { screen = Screen::TempoHoje; return Action::None; }
-        const auto& r = resultado_;
-        const uint16_t cLaranja = c565(kLaranja), cMudo = ui.color(Muted), cTexto = ui.color(Foreground);
-        const uint16_t cFundoBtn = ui.color(SurfaceMuted), cBg = ui.color(Background), cVerde = c565(kVerde);
-        static constexpr const char* kHumor[] = {"Péssimo", "Mal", "Ok", "Bem", "Ótimo"};
+    // ====================================================================== Fechamento v3 (Reflexao + Saque)
+    namespace {
+        // Rosto grande (humor 0..4) do mockup tempo3-fechamento: contorno de 3 px, olhos e boca em arco (Pessimo..Otimo).
+        void rostoGrande(Arduino_GFX& g, int cx, int cy, int r, int humor, uint16_t cor, uint16_t fundo) {
+            const bool pequeno = r < 16;   // versao miniatura (linha "humor salvo"): tracos de 2 px
+            g.fillCircle(cx, cy, r, cor);
+            g.fillCircle(cx, cy, r - (pequeno ? 2 : 3), fundo);
+            const auto ponto = [&](int x, int y, int raio) {
+                if (pequeno) g.fillRect(x - 1, y - 1, 2, 2, cor);
+                else g.fillCircle(x, y, raio, cor);
+            };
+            for (const int ex : {-1, 1}) ponto(cx + int(std::lround(ex * r * 0.36)), cy - int(std::lround(r * 0.22)), 3);
+            const double curva = (humor - 2) / 2.0 * (pequeno ? 2.4 : 1.0);   // miniatura: boca exagerada para ler o humor
+            for (int k = 0; k <= 40; ++k) {
+                const double u = -0.5 + k / 40.0;
+                ponto(cx + int(std::lround(u * r * 1.1)), cy + int(std::lround((0.28 + curva * (0.18 - 0.7 * u * u)) * r)), 1);
+            }
+        }
 
-        Bloco topo(ui, {8, 4, 470, 48}, Background, 0, 80);
-        topo.textoCor({16, 8, 300, 18}, "COMO FOI?", 10, cMudo);
-        topo.textoCor({16, 24, 460, 26}, r.projeto + " · " + std::to_string(r.focadoMin) + " min", 16, cTexto);
+        // Corta com reticencias para caber em `larg` px.
+        std::string cortarLargura(std::string texto, int larg, uint8_t tam) {
+            const auto& fonte = ui::sans::font(tam);
+            if (ui::sans::width(texto, fonte) <= larg) return texto;
+            while (!texto.empty() && ui::sans::width(texto + "...", fonte) > larg) {
+                texto.pop_back();
+                while (!texto.empty() && (static_cast<unsigned char>(texto.back()) & 0xC0U) == 0x80U) texto.pop_back();   // nao parte UTF-8
+            }
+            return texto + "...";
+        }
+
+        constexpr const char* kHumorNome[] = {"Péssimo", "Mal", "Ok", "Bem", "Ótimo"};
+        constexpr const char* kDistraiuNome[] = {"Não", "Um pouco", "Muito"};
+    } // namespace
+
+    Action TempoScreen::drawVitoria(ui::Context& ui, uint32_t nowMs, Screen& screen) {
+        if (saqueAtivo_) return drawSaque(ui, nowMs, screen);
+        if (fase_ != Fase::Reflexao) { screen = battleActive() ? Screen::TempoBatalha : Screen::TempoHoje; return Action::None; }
+        return distracaoAberta_ ? drawDistracoes(ui, nowMs, screen) : drawReflexao(ui, nowMs, screen);
+    }
+
+    // Reflexao v3 (quadro 1): 5 rostos grandes (125 x 78 px), nenhum pre-selecionado, 1 toque salva (e abre o saque); chip opcional
+    // "distracoes" (56 px) corrige o que nao foi marcado na hora. Sem resposta em 60 s salva SEM humor (tick).
+    Action TempoScreen::drawReflexao(ui::Context& ui, uint32_t nowMs, Screen& screen) {
+        (void)screen;
+        const auto& r = resultado_;
+        const uint16_t cMudo = ui.color(Muted), cTexto = ui.color(Foreground), cBg = ui.color(Background);
+        const uint16_t cPainel = ui.color(SurfaceMuted), cTonal = c565(kTonal), cDim = c565(Cor{110, 112, 106});
+
+        const std::string meio = emCiclo_ && cicloRodadas_ > 0
+                                     ? "ciclo de " + std::to_string(cicloRodadas_) + (cicloRodadas_ == 1 ? " rodada · " : " rodadas · ") + fmtHoraMin(cicloFocadoMin_)
+                                     : "foco · " + fmtHoraMin(r.focadoMin);
+        const int larguraMeio = ui::sans::width(meio, ui::sans::font(15));
+        Bloco topo(ui, {0, 0, 640, 28}, Background, 0, 0xC0DE);
+        topo.linha(8, 13, 96, "COMO FOI?", 15, cMudo);
+        topo.linha(108, 13, larguraMeio + 6, meio, 15, cTexto);
+        const int xProj = 108 + larguraMeio + 16;
+        topo.linha(xProj, 13, 632 - xProj, cortarLargura(r.projeto, 632 - xProj, 15), 15, cMudo, TextAlign::Right);
         topo.desenhar();
 
+        int escolhido = -1;
         for (int i = 0; i < 5; ++i) {
-            const Rect caixa{static_cast<int16_t>(16 + i * 92), 56, 84, 52};
-            const bool sel = humor_ == i;
-            const uint32_t sig = ui::Context::combine(0x9000U + i, sel);
+            const Rect caixa{static_cast<int16_t>(8 + i * 125), 28, 119, 78};
+            const bool apertado = ui.pressed(caixa);
+            const uint32_t sig = ui::Context::combine(0x9100U + uint32_t(i), apertado);
             if (ui.redraw(caixa, sig, true)) {
-                const auto rotulo = ui.prepareText({caixa.x, static_cast<int16_t>(caixa.y + 34), caixa.w, 16}, kHumor[i], 11, TextAlign::Center, 1);
+                const auto rotulo = ui.prepareText({caixa.x, static_cast<int16_t>(caixa.y + 54), caixa.w, 22}, kHumorNome[i], 17, TextAlign::Center, 1);
                 ui.paint(caixa, [&](Arduino_GFX& g, Rect alvo) {
+                    const uint16_t fundo = apertado ? misturar565(cPainel, 0xFFFF, 0.2) : cPainel;
                     g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, cBg);
-                    g.fillRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, 10, cFundoBtn);
-                    if (sel) {
-                        g.drawRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, 10, cLaranja);
-                        g.drawRoundRect(alvo.x + 1, alvo.y + 1, alvo.w - 2, alvo.h - 2, 9, cLaranja);
+                    g.fillRoundRect(caixa.x, caixa.y, caixa.w, caixa.h, 16, fundo);
+                    if (apertado) {
+                        g.drawRoundRect(caixa.x, caixa.y, caixa.w, caixa.h, 16, 0xFFFF);
+                        g.drawRoundRect(caixa.x + 1, caixa.y + 1, caixa.w - 2, caixa.h - 2, 15, 0xFFFF);
                     }
-                    rosto(g, alvo.x + 42, alvo.y + 20, i, sel ? cLaranja : cMudo);
-                    ui.drawText(g, rotulo, sel ? cTexto : cMudo, alvo.x - caixa.x, alvo.y - caixa.y, cFundoBtn);
+                    rostoGrande(g, caixa.x + 60, caixa.y + 28, 25, i, cTexto, fundo);
+                    ui.drawText(g, rotulo, cTexto, alvo.x - caixa.x, alvo.y - caixa.y, fundo);
                 });
             }
-            if (ui.tap(caixa)) humor_ = i;
+            if (ui.firmTap(caixa)) escolhido = i;
         }
 
-        ui.label({16, 117, 200, 16}, "Se distraiu?", 11, Muted);
-        static constexpr const char* kDistraiu[] = {"Não", "Um pouco", "Muito"};
-        static constexpr int kLargDistraiu[] = {100, 100, 100};
+        // chip opcional "distracoes: N ›" (nao bloqueia o 1 toque) + dicas
+        Btn chip;
+        chip.texto = "distrações: " + (distraiu_ >= 0 ? std::string{kDistraiuNome[distraiu_]} : std::to_string(distracoesPend_)) + " ›";
+        chip.tam = 17;
+        chip.comIcone = true;
+        chip.icone = IconeId::HandPalm;
+        chip.fundo = cTonal;
+        chip.tinta = cTexto;
+        const bool abrirDistracoes = botao3(ui, Rect{8, 114, 222, 56}, chip);
+        Bloco dicas(ui, {240, 114, 392, 56}, Background, 0, 0xD1CA);
+        dicas.linha(246, 130, 380, "toque num rosto e já salva", 15, cMudo);
+        dicas.linha(246, 152, 380, "sem resposta em " + std::to_string(tempo::kReflexaoAutoSalvarSeg) + " s: salva sem humor", 15, cDim);
+        dicas.desenhar();
+
+        if (escolhido >= 0) {
+            humor_ = escolhido;
+            ui.cancelTouchUntilRelease();
+            fecharReflexao(nowMs, fs_, true, true);
+        } else if (abrirDistracoes) {
+            distracaoAberta_ = true;
+            reflexaoInicioMs_ = nowMs;   // interagiu: o prazo de 60 s recomeca
+        }
+        return Action::None;
+    }
+
+    // Corrige "Se distraiu?" (Nao / Um pouco / Muito) so para o registro; volta aos rostos.
+    Action TempoScreen::drawDistracoes(ui::Context& ui, uint32_t nowMs, Screen& screen) {
+        (void)screen;
+        const uint16_t cMudo = ui.color(Muted), cTexto = ui.color(Foreground), cBg = ui.color(Background);
+        const uint16_t cTonal = c565(kTonal), cPainel = ui.color(SurfaceMuted), cAmbar = c565(kAmbar);
+        Bloco topo(ui, {0, 0, 640, 28}, Background, 0, 0xC0DF);
+        topo.linha(8, 13, 120, "DISTRAÇÕES", 15, cMudo);
+        const std::string marcadas = distracoesPend_ == 0 ? std::string{"nenhuma marcada na hora"}
+                                                          : std::to_string(distracoesPend_) + (distracoesPend_ == 1 ? " marcada na hora" : " marcadas na hora");
+        topo.linha(136, 13, 496, marcadas + " · como foi no geral?", 15, cTexto);
+        topo.desenhar();
+        int escolhido = -1;
         for (int j = 0; j < 3; ++j) {
-            const Rect b{static_cast<int16_t>(16 + j * 108), 134, static_cast<int16_t>(kLargDistraiu[j]), 30};
-            const bool sel = distraiu_ == j;
-            if (botao(ui, b, kDistraiu[j], sel ? (j == 0 ? cVerde : c565(kAmbar)) : cFundoBtn, sel ? cBg : cTexto, 12)) distraiu_ = j;
+            Btn b;
+            b.texto = kDistraiuNome[j];
+            b.tam = 21;
+            b.fundo = distraiu_ == j ? cAmbar : cPainel;
+            b.tinta = distraiu_ == j ? cBg : cTexto;
+            if (botao3(ui, Rect{static_cast<int16_t>(8 + j * 212), 28, 204, 78}, b)) escolhido = j;
         }
-        const int restante = std::max(0, kAutoSalvarSeg - int((nowMs - reflexaoInicioMs_) / 1000));
-        if (botao(ui, {360, 134, 118, 30}, "Salvar · " + std::to_string(restante) + "s", cLaranja, cBg, 13)) {
-            salvarReflexao(fs_);
-            screen = Screen::TempoHoje;
-            return Action::None;
+        Btn voltar;
+        voltar.texto = "‹ Voltar";
+        voltar.tam = 17;
+        voltar.fundo = cTonal;
+        voltar.tinta = cTexto;
+        const bool vai = botao3(ui, Rect{8, 114, 222, 56}, voltar);
+        Bloco dica(ui, {240, 114, 392, 56}, Background, 0, 0xD1CB);
+        dica.linha(246, 130, 380, "só corrige o registro do dia", 15, cMudo);
+        dica.linha(246, 152, 380, "não muda créditos nem XP", 15, cMudo);
+        dica.desenhar();
+        if (escolhido >= 0) {
+            distraiu_ = escolhido;
+            distracaoAberta_ = false;
+            reflexaoInicioMs_ = nowMs;
+        } else if (vai) {
+            distracaoAberta_ = false;
+        }
+        return Action::None;
+    }
+
+    // Saque (quadro 2, estilo celebracao dos Habitos): resultado, nome do foco, +cr +XP, bonus, humor, Desfazer por 8 s e o proximo passo.
+    Action TempoScreen::drawSaque(ui::Context& ui, uint32_t nowMs, Screen& screen) {
+        const auto& r = resultado_;
+        const bool podeDesfazer = podeDesfazerBatalha(nowMs);
+        const uint16_t cLaranja = c565(kLaranja), cAmbar = c565(kAmbar), cAgua = c565(kAgua);
+        const uint16_t cMudo = ui.color(Muted), cTexto = ui.color(Foreground), cBg = ui.color(Background);
+        const uint16_t cTonal = c565(kTonal), cVerde = c565(Cor{60, 200, 110}), cPilula = rgb565(52, 40, 14);
+
+        std::string titulo = r.liq.vitoria ? (r.liq.perfeita ? "VITÓRIA PERFEITA" : "VITÓRIA") : "ENCERRADA";
+        if (emCiclo_ && cicloRodadas_ > 0) titulo += " · RODADA " + std::to_string(cicloRodadas_) + " DE " + std::to_string(tempo::kCicloRodadas);
+        const uint16_t cTitulo = r.liq.vitoria ? cVerde : cMudo;
+
+        // ---- aneis (cheio = venceu; encerrada = fracao feita) + marca de vitoria
+        const double plano = std::max(1.0, double(r.planejadoMin));
+        const double voce = std::floor((r.liq.vitoria ? 1.0 : std::clamp(double(r.focadoMin) / plano, 0.0, 1.0)) * 720) / 720;
+        {
+            Bloco aneis(ui, {0, 0, 172, 172}, Background, 0, 0x5A00U + r.liq.vitoria);
+            aneis.marca(static_cast<uint32_t>(voce * 720));
+            const Cor fundo = deRole(ui, Background);
+            const bool venceu = r.liq.vitoria;
+            aneis.desenhar([&](Arduino_GFX& g, int dx, int dy) {
+                anel(g, dx, dy, kCx, kCy, kRaioFora, kEspessura, voce, kLaranja, kAmbar, fundo, kLaranja);
+                anel(g, dx, dy, kCx, kCy, kRaioDentro, kEspessura, 0.0, kCarmim, kVinho, fundo, kCarmim);
+                icones::phosphor(g, venceu ? IconeId::Check : IconeId::FlagCheckered, kCx, kCy, 40, venceu ? cVerde : cMudo, cBg);
+            });
         }
 
-        Bloco saque(ui, {488, 10, 142, 152}, SurfaceMuted, 10, r.liq.perfeita ? 81 : 82);
-        saque.textoCor({502, 18, 120, 16}, "SAQUE", 10, cMudo);
-        saque.textoCor({502, 36, 120, 24}, fmtSinal(r.liq.cr) + " cr", 18, cLaranja);
-        saque.textoCor({502, 62, 124, 18}, fmtSinal(r.liq.xp) + " XP · " + nomeAtributo(r.liq.atributo), 12, cTexto);
-        if (r.liq.perfeita) saque.textoCor({502, 92, 124, 16}, "Vitória perfeita!", 11, cVerde);
-        else if (!r.liq.vitoria) saque.textoCor({502, 92, 124, 16}, r.abandonou ? "encerrada antes do fim" : "distrações demais", 11, cMudo);
-        saque.textoCor({502, 126, 124, 16}, "somado à carteira", 10, cMudo);
-        saque.desenhar();
+        // ---- texto central
+        Bloco texto(ui, {176, 4, 292, 164}, Background, 0, 0x5B00U + r.liq.vitoria * 2U + r.liq.perfeita);
+        std::vector<std::function<void(Arduino_GFX&)>> extras;
+        const auto icone = [&](IconeId id, int cx, int cy, int lado, uint16_t cor) {
+            extras.push_back([=](Arduino_GFX& g) { icones::phosphor(g, id, cx, cy, lado, cor, cBg); });
+        };
+        icone(r.liq.vitoria ? IconeId::CheckCircle : IconeId::FlagCheckered, 184, 16, 18, cTitulo);
+        texto.linha(198, 16, 270, titulo, 15, cTitulo);
+        const auto q = quebrar(r.projeto.empty() ? std::string{"Foco livre"} : r.projeto, 282, 21, 17);
+        const int passoNome = q.tam >= 21 ? 25 : 20;
+        for (size_t i = 0; i < q.linhas.size(); ++i) texto.linha(176, 40 + int(i) * passoNome, 292, q.linhas[i], q.tam, cTexto);
+        const std::string crTxt = fmtSinal(r.liq.cr) + " cr", xpTxt = fmtSinal(r.liq.xp) + " XP";
+        const int wCr = ui::sans::width(crTxt, ui::sans::font(17)) + 24, wXp = ui::sans::width(xpTxt, ui::sans::font(17)) + 24;
+        texto.linha(176 + 12, 90, wCr, crTxt, 17, cAmbar);
+        texto.linha(176 + wCr + 8 + 12, 90, wXp, xpTxt, 17, cAmbar);
+        if (r.liq.perfeita) texto.linha(176, 134, 292, "inclui bônus perfeito +25%", 15, cVerde);
+        else if (!r.liq.vitoria) texto.linha(176, 134, 292, r.abandonou ? "encerrada antes do fim" : "distrações demais", 15, cMudo);
+        if (!saqueDeReflexao_) {
+            texto.linha(176, 154, 292, "humor: só no fim do ciclo", 15, cMudo);
+        } else if (humor_ >= 0 && humor_ <= 4) {
+            texto.linha(202, 154, 266, std::string{"humor salvo: "} + kHumorNome[humor_], 15, cMudo);
+            const int h = humor_;
+            extras.push_back([=](Arduino_GFX& g) { rostoGrande(g, 187, 154, 9, h, cMudo, cBg); });
+        } else {
+            texto.linha(176, 154, 292, "sem humor", 15, cMudo);
+        }
+        texto.marca(uint32_t(humor_ + 1) * 31U + saqueDeReflexao_);
+        texto.desenhar([&](Arduino_GFX& g, int, int) {
+            g.fillRoundRect(176, 76, wCr, 28, 14, cPilula);
+            g.fillRoundRect(176 + wCr + 8, 76, wXp, 28, 14, cPilula);
+            for (const auto& f : extras) f(g);
+        });
+        // ---- botoes: proximo passo (primario) + Desfazer (8 s) ou "Mais uma rodada"
+        const int minutos = tempo::minutosProximoPasso(proximo_);
+        const bool pausa = proximo_ != tempo::ProximoPasso::VoltarInicio;
+        Btn primario;
+        primario.texto = pausa ? "Pausa " + std::to_string(minutos) + " min" : "Voltar ao início";
+        primario.sub = "próximo passo";
+        primario.tam = 17;
+        primario.comIcone = pausa;
+        primario.icone = IconeId::Coffee;
+        primario.fundo = pausa ? cAgua : cLaranja;
+        primario.tinta = cBg;
+        const bool vaiAdiante = botao3(ui, Rect{472, 8, 160, 92}, primario);
+        bool desfez = false, maisUma = false;
+        if (podeDesfazer) {
+            Btn d;
+            d.texto = "Desfazer";
+            d.tam = 17;
+            d.comIcone = true;
+            d.icone = IconeId::ArrowCounterClockwise;
+            d.fundo = cTonal;
+            d.tinta = cTexto;
+            desfez = botao3(ui, Rect{472, 108, 160, 56}, d);
+        } else if (!pausa) {
+            Btn m;
+            m.texto = "Mais uma rodada";
+            m.tam = 15;
+            m.comIcone = true;
+            m.icone = IconeId::Play;
+            m.fundo = cTonal;
+            m.tinta = cTexto;
+            maisUma = botao3(ui, Rect{472, 108, 160, 56}, m);
+        }
+        if (desfez) {
+            ui.cancelTouchUntilRelease();
+            desfazerBatalha(nowMs, fs_, screen);
+        } else if (vaiAdiante) {
+            ui.cancelTouchUntilRelease();
+            acaoPrimariaSaque(nowMs, screen, fs_);
+        } else if (maisUma) {
+            ui.cancelTouchUntilRelease();
+            sairDoSaque(nowMs, fs_);
+            comecarSessao(nowMs);
+            screen = battleActive() ? Screen::TempoBatalha : Screen::TempoHoje;
+        }
         return Action::None;
     }
 

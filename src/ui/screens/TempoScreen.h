@@ -3,6 +3,7 @@
 #include <FS.h>
 
 #include <array>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -10,6 +11,7 @@
 
 #include "tempo/Codec.h"
 #include "tempo/Cronometro.h"
+#include "tempo/Fechamento.h"
 #include "tempo/FocoLeitor.h"
 #include "tempo/Habitos.h"
 #include "tempo/Lembretes.h"
@@ -146,9 +148,13 @@ namespace screens {
         bool estadoCarregado() const { return carregado_; }
         bool battleActive() const { return fase_ == Fase::Lutando || fase_ == Fase::Pausada || fase_ == Fase::Descanso; }
         uint8_t surface() const {
-            return static_cast<uint8_t>(static_cast<uint8_t>(fase_) * 4 + (cron_.distraido ? 1 : 0) + (overtime_ ? 2 : 0)
+            return static_cast<uint8_t>((static_cast<uint8_t>(fase_) + (saqueAtivo_ ? 5 : 0)) * 4 + (cron_.distraido ? 1 : 0)
+                                        + (overtime_ ? 2 : 0) + (distracaoAberta_ ? 160 : 0)
                                         + (seletor_ ? 32 + (pagina_ & 1U) * 64 : 0));
         }
+        // Reflexao aberta ou saque com a janela do "Desfazer" ainda aberta (nada gravado no log/resumo): o estado nao pode
+        // mudar por fora (sync de habitos, manutencao) nem comecar outra batalha.
+        bool emFechamento() const { return fase_ == Fase::Reflexao || (saqueAtivo_ && !confirmado_); }
 
     private:
         enum class Fase : uint8_t { Nenhuma, Lutando, Pausada, Descanso, Reflexao };
@@ -165,7 +171,15 @@ namespace screens {
         void finalizar(uint32_t nowMs, bool abandonou, fs::FS* filesystem, bool tocarDesfecho = true);
         void iniciarDescanso(uint32_t nowMs, bool voltaParaBatalha);
         void encerrarDescanso(uint32_t nowMs);
-        void salvarReflexao(fs::FS* filesystem);
+        // ---- Fechamento (Tempo v3 etapa 2): liquida -> [Reflexao] -> saque (+ Desfazer 8 s) -> proximo passo
+        void liquidar(uint32_t nowMs, fs::FS* filesystem, bool tocarDesfecho);   // aplica a batalha e guarda o instante do Desfazer
+        void fecharReflexao(uint32_t nowMs, fs::FS* filesystem, bool mostrarSaque, bool deReflexao);   // humor_/distraiu_ ja decididos
+        void confirmarSaque(fs::FS* filesystem);                // grava log do dia + resumo.json + check-in da Meditacao (ponto sem volta)
+        void iniciarProximoPasso(uint32_t nowMs);               // pausa do ciclo (relogio desde o fim da rodada) ou nada
+        bool desfazerBatalha(uint32_t nowMs, fs::FS* filesystem, Screen& screen);
+        bool podeDesfazerBatalha(uint32_t nowMs) const;
+        void acaoPrimariaSaque(uint32_t nowMs, Screen& screen, fs::FS* filesystem);   // BOOT / botao primario do saque
+        void sairDoSaque(uint32_t nowMs, fs::FS* filesystem);  // confirma e segue o proximo passo (pausa) sem mudar de tela
         void garantirDia(uint32_t nowMs);
         void registrarHabitoMeditacao(fs::FS* filesystem);     // batalha de Meditacao vencida: marca o habito
         void gravarEventoHabito(fs::FS* filesystem, const tempo::ResultadoOcorrencia& r, std::string_view origem);
@@ -182,7 +196,10 @@ namespace screens {
         Action drawInicio(ui::Context& ui, uint32_t nowMs, Screen& screen);
         Action drawSeletor(ui::Context& ui, uint32_t nowMs, Screen& screen);
         Action drawBatalha(ui::Context& ui, uint32_t nowMs, Screen& screen);
-        Action drawVitoria(ui::Context& ui, uint32_t nowMs, Screen& screen);
+        Action drawVitoria(ui::Context& ui, uint32_t nowMs, Screen& screen);   // Reflexao ou Saque
+        Action drawReflexao(ui::Context& ui, uint32_t nowMs, Screen& screen);
+        Action drawDistracoes(ui::Context& ui, uint32_t nowMs, Screen& screen);
+        Action drawSaque(ui::Context& ui, uint32_t nowMs, Screen& screen);
 
         bool checkinNovo_ = false;
         uint32_t checkinLiberaEmMs_ = 0;
@@ -231,7 +248,22 @@ namespace screens {
         // reflexao
         uint32_t reflexaoInicioMs_ = 0;
         int humor_ = -1;                     // 0..4 (Pessimo..Otimo), -1 = sem resposta
-        int distraiu_ = -1;                  // 0 Nao, 1 Um pouco, 2 Muito, -1 = sem resposta
+        int distraiu_ = -1;                  // correcao opcional no chip "distracoes": 0 Nao, 1 Um pouco, 2 Muito, -1 = nao corrigida
+        bool distracaoAberta_ = false;       // sub-tela Nao / Um pouco / Muito
+        tempo::EntradaBatalha entradaPend_;     // entrada da batalha em fechamento (para re-liquidar apos o Desfazer)
+        bool liquidado_ = false;             // a economia da batalha em fechamento esta aplicada (false apos o Desfazer)
+        bool saqueAtivo_ = false;            // tela de saque no ar (Screen::TempoVitoria)
+        bool confirmado_ = true;             // log/resumo/check-in ja gravados (sem volta)
+        bool saqueDeReflexao_ = false;       // o Desfazer volta a Reflexao (senao: ao Inicio, ciclo encerrado)
+        uint32_t saqueInicioMs_ = 0;         // inicio da janela de 8 s do Desfazer (e ancora da pausa do ciclo)
+        tempo::ProximoPasso proximo_ = tempo::ProximoPasso::VoltarInicio;
+        bool emCiclo_ = false;               // a batalha em fechamento veio de um ciclo 4x
+        int cicloRodadas_ = 0;               // rodadas do ciclo ja liquidadas (para "ciclo de N rodadas")
+        int cicloFocadoMin_ = 0;
+        int distracoesPend_ = 0;             // distracoes marcadas na hora (chip)
+        tempo::InstanteBatalha instante_;    // estado antes/depois da liquidacao
+        std::vector<tempo::ItemFila> filaMed_;           // check-in da Meditacao por timer, enviado so ao confirmar
+        std::optional<tempo::EventoLog> eventoMedPend_;  // evento de habito da Meditacao, gravado so ao confirmar
         tempo::EventoLog eventoPendente_;
         tempo::Data dataPendente_;
 
