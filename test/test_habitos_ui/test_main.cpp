@@ -10,11 +10,15 @@
 #include "tempo/HabitosVista.h"
 #include "tempo/Lembretes.h"
 #include "tempo/Motor.h"
+#include "tempo/Parametros.h"
+#include "tempo/Recarga.h"
 
 using namespace tempo;
 
-void setUp() {}
-void tearDown() {}
+// Penalidades LIGADAS explicitamente: estes testes cobrem as regras de punicao (o padrao do produto e desligado; ver
+// param::kPenalidadesAtivas e os testes "penalidades_desligadas_*").
+void setUp() { tempo::definirPenalidadesParaTeste(true); }
+void tearDown() { tempo::definirPenalidadesParaTeste(tempo::param::kPenalidadesAtivas); }
 
 namespace {
 
@@ -309,6 +313,98 @@ namespace {
         for (int m = 0; m < 600; m += 5) TEST_ASSERT_FALSE(b.avaliar(so, m, 1000 + m * 1000U, true).has_value());
     }
 
+    // ---- despertar por timer atrasado (achado 4): o lembrete que motivou o despertar toca mesmo passada a tolerancia
+    void test_lembrete_atrasado_so_toca_com_aviso_forcado_do_despertar() {
+        const auto l = lista({def("al", "Almo\xC3\xA7o", {"12:30"})});
+        // acordou 20 min depois do alvo (oscilador RC): sem forcar, o aviso inicial e calado (tolerancia de 5 min)
+        Estado e = estadoCom(l, 12 * 60 + 50);
+        AgendaLembretes calado;
+        TEST_ASSERT_FALSE(calado.avaliar(e, 12 * 60 + 50, 100000, false).has_value());
+        // boot de lembrete: forca SO a ocorrencia do alvo (12:30) -> toca, como aviso inicial, uma vez
+        AgendaLembretes ag;
+        ag.forcarAvisoInicial(e, 12 * 60 + 30);
+        auto a = ag.avaliar(e, 12 * 60 + 50, 100000, false);
+        TEST_ASSERT_TRUE(a.has_value());
+        TEST_ASSERT_FALSE(a->repeticao);
+        TEST_ASSERT_EQUAL_STRING("Almo\xC3\xA7o", a->nome.c_str());
+        TEST_ASSERT_FALSE(ag.avaliar(e, 12 * 60 + 51, 101000, false).has_value());   // so uma vez
+    }
+
+    void test_forcar_aviso_so_vale_para_o_minuto_do_alvo_e_pendentes() {
+        const auto l = lista({def("al", "Almo\xC3\xA7o", {"12:30"}), def("de", "Dentes", {"12:00"})});
+        Estado e = estadoCom(l, 12 * 60 + 40);
+        AgendaLembretes ag;
+        ag.forcarAvisoInicial(e, 12 * 60 + 30);   // so o 12:30; o 12:00 (10 min atrasado) continua calado
+        auto a = ag.avaliar(e, 12 * 60 + 40, 100000, false);
+        TEST_ASSERT_TRUE(a.has_value());
+        TEST_ASSERT_EQUAL_STRING("Almo\xC3\xA7o", a->nome.c_str());
+        TEST_ASSERT_EQUAL_INT(0, a->outros);
+        // ja feita: nao toca
+        Estado f = estadoCom(l, 12 * 60 + 40);
+        const size_t idx = achar(f, "al");
+        std::vector<ItemFila> fila;
+        marcarFeita(f, idx, fila);
+        AgendaLembretes b;
+        b.forcarAvisoInicial(f, 12 * 60 + 30);
+        TEST_ASSERT_FALSE(b.avaliar(f, 12 * 60 + 40, 100000, false).has_value());
+    }
+
+    // ---- releitura do SD so quando precisa (achado 3)
+    void test_recarga_so_com_sync_terminada_virada_ou_tela() {
+        EntradaRecarga e;
+        e.versaoSync = 3;
+        e.versaoVista = 3;
+        TEST_ASSERT_FALSE(deveReler(e));            // nada mudou: nao relê (antes relia a cada 60 s)
+        e.versaoSync = 4;
+        TEST_ASSERT_TRUE(deveReler(e));             // a sync terminou
+        e.versaoSync = 3;
+        e.viradaDoDia = true;
+        TEST_ASSERT_TRUE(deveReler(e));             // dia virou
+        e.viradaDoDia = false;
+        e.pedidoTela = true;
+        TEST_ASSERT_TRUE(deveReler(e));             // tela de Habitos abriu
+    }
+
+    void test_recarga_nunca_com_a_sync_rodando() {
+        EntradaRecarga e;
+        e.syncRodando = true;
+        e.versaoSync = 9;
+        e.viradaDoDia = true;
+        e.pedidoTela = true;
+        TEST_ASSERT_FALSE(deveReler(e));            // o job grava os arquivos: espera o sinal de "terminou"
+        e.syncRodando = false;
+        TEST_ASSERT_TRUE(deveReler(e));             // terminou: relê
+    }
+
+    void test_status_por_versao_nao_copia_a_cada_segundo() {
+        uint32_t vista = 0;
+        int copias = 0;
+        for (int i = 0; i < 60; ++i)
+            if (consumirVersao(vista, 0)) ++copias;   // 60 s sem sync: nenhuma copia de string
+        TEST_ASSERT_EQUAL_INT(0, copias);
+        for (int i = 0; i < 60; ++i)
+            if (consumirVersao(vista, 1)) ++copias;   // uma sync terminou: uma copia
+        TEST_ASSERT_EQUAL_INT(1, copias);
+        TEST_ASSERT_TRUE(consumirVersao(vista, 2));
+        TEST_ASSERT_FALSE(consumirVersao(vista, 2));
+    }
+
+    // ---- penalidades desligadas nos habitos (achado 6): medicacao esquecida no fechamento nao tira coracao
+    void test_penalidades_desligadas_medicacao_esquecida_no_fechamento() {
+        const auto l = lista({def("md", "Medica\xC3\xA7\xC3\xA3o", {"08:10"})});
+        definirPenalidadesParaTeste(false);
+        Estado e = estadoCom(l, 23 * 60 + 59);
+        const int antes = e.coracoesMeios;
+        fecharDia(e, false);
+        TEST_ASSERT_TRUE(e.coracoesMeios >= antes);   // nenhum coracao perdido (so poderia ganhar)
+        definirPenalidadesParaTeste(true);
+        Estado f = estadoCom(l, 23 * 60 + 59);
+        const int antesF = f.coracoesMeios;
+        fecharDia(f, false);
+        TEST_ASSERT_TRUE(f.coracoesMeios < antesF + 1);   // com punicao: medicacao esquecida custa -1 coracao (-2 meios)
+        TEST_ASSERT_TRUE(f.coracoesMeios < e.coracoesMeios);
+    }
+
     void test_reaviso_por_movimento_limites() {
         const auto l = lista({def("ds", "Descanso", {"14:00"})});
         Estado e = estadoCom(l, 14 * 60);
@@ -425,6 +521,12 @@ int main(int, char**) {
     RUN_TEST(test_totais_e_minuto_proximo);
     RUN_TEST(test_detector_pegada_dispara_uma_vez_e_rearma_so_quieto);
     RUN_TEST(test_lembrete_na_hora_uma_vez_e_sem_qualquer_hora);
+    RUN_TEST(test_lembrete_atrasado_so_toca_com_aviso_forcado_do_despertar);
+    RUN_TEST(test_forcar_aviso_so_vale_para_o_minuto_do_alvo_e_pendentes);
+    RUN_TEST(test_recarga_so_com_sync_terminada_virada_ou_tela);
+    RUN_TEST(test_recarga_nunca_com_a_sync_rodando);
+    RUN_TEST(test_status_por_versao_nao_copia_a_cada_segundo);
+    RUN_TEST(test_penalidades_desligadas_medicacao_esquecida_no_fechamento);
     RUN_TEST(test_reaviso_por_movimento_limites);
     RUN_TEST(test_nao_avisa_fora_da_janela_e_ligou_tarde_so_por_movimento);
     RUN_TEST(test_medicacao_insiste_15min_adia_e_para);

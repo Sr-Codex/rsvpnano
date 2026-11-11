@@ -38,6 +38,18 @@ namespace tempo {
         return melhor;
     }
 
+    AvaliacaoDespertar avaliarDespertar(int64_t epochAgora, int64_t alvoEpoch, int reDormidas) {
+        AvaliacaoDespertar a;
+        if (epochAgora <= 0 || alvoEpoch <= 0) return a;   // sem relogio/alvo: trata como na hora
+        a.faltamS = alvoEpoch - epochAgora;
+        a.atrasado = a.faltamS < 0;
+        if (a.faltamS > kAdiantadoMinS && a.faltamS <= kHorizonteMaxS + 60 && reDormidas < kMaxReDormidas) {
+            a.adiantado = true;
+            a.dormirS = static_cast<uint32_t>(std::max<int64_t>(a.faltamS - kAntecedenciaS, kMinimoSonoS));
+        }
+        return a;
+    }
+
     DecisaoDespertador decidirDespertador(const EntradaDespertador& in) {
         DecisaoDespertador d;
         if (in.motivo == MotivoDesligar::Manual) {

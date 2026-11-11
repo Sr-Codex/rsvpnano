@@ -108,13 +108,25 @@ private:
     void iniciarLembreteBoot(uint32_t nowMs);
     static void renderStorageStatus(void* context, const char* title, const char* line1, const char* line2,
                                     int progressPercent);
-    bool backgroundJobActive() const {
+    // lume.12 (achado 8): o job do TickTick e "silencioso" (a UI, os lembretes e o tick do Tempo continuam). Todo o
+    // codigo que antes perguntava "tem job?" para travar a UI pergunta backgroundJobActive(), que agora so vale para os
+    // jobs BLOQUEANTES (ou para um bloqueante que esta esperando o silencioso terminar: deferredKind_).
+    bool silentJobActive() const {
+        return jobKind_ == JobKind::TickTick;
+    }
+    bool anyJobRunning() const {
         return jobKind_ != JobKind::None;
     }
+    bool backgroundJobActive() const {
+        return jobKind_ != JobKind::None && (jobKind_ != JobKind::TickTick || deferredKind_ != JobKind::None);
+    }
     bool typographyJobActive() const {
-        return jobKind_ == JobKind::Typography;
+        return jobKind_ == JobKind::Typography || deferredKind_ == JobKind::Typography;
     }
     bool onboardingJobActive() const {return jobKind_==JobKind::OnboardingStorage;}
+    // Espera (bloqueante, no maximo maxMs) o job silencioso terminar: para operacoes que desmontam/mexem no SD
+    // (desligar, USB, Companion, criptografia). Devolve true se terminou.
+    bool aguardarSyncSilenciosa(uint32_t maxMs);
 
     ui::Context immediateUi_{Board::Display::gfx()};
     settings::SettingsStore settingsStore_;
@@ -207,4 +219,10 @@ private:
     bool tickTickCheckinPendente_ = false;   // "Feito" num habito: sincronizar logo (lume.12)
     bool tickTickTried_ = false;
     uint32_t tickTickLastMs_ = 0;
+    // Job TickTick em segundo plano: copias POR VALOR de rede/segredos (achado 15) e blocos de job que esperam por ele.
+    settings::NetworkSettings jobNetwork_;
+    settings::DeviceSecrets jobSecrets_;
+    JobKind deferredKind_ = JobKind::None;   // job bloqueante pedido enquanto a sync silenciosa roda: comeca quando ela terminar
+    uint32_t tickTickVersaoVista_ = 0;       // contador de "sync terminou" ja aplicado (status copiado so quando muda)
+    bool habitosAbertoAntes_ = false;        // para pedir releitura quando a tela de Habitos abre
 };

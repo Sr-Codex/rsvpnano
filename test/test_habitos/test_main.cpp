@@ -12,8 +12,10 @@
 
 using namespace tempo;
 
-void setUp() {}
-void tearDown() {}
+// Penalidades LIGADAS explicitamente: estes testes cobrem as regras de punicao (o padrao do produto e desligado; ver
+// param::kPenalidadesAtivas e os testes "penalidades_desligadas_*").
+void setUp() { tempo::definirPenalidadesParaTeste(true); }
+void tearDown() { tempo::definirPenalidadesParaTeste(tempo::param::kPenalidadesAtivas); }
 
 namespace {
 

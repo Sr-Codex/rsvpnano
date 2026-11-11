@@ -5,6 +5,7 @@
 #include <esp_log.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <thread>
 
 #include "FirmwareVersion.generated.h"
@@ -67,7 +68,10 @@ const char* UsbMassStorageManager::statusMessage() const { return statusMessage_
 // ------------------------------------------------------------------ TickTick (Wi-Fi HTTPS)
 namespace net::ticktick {
     Status status() { return {.lastSync = {}, .error = kUnavailable}; }
+    uint32_t versao() { return 0; }
     std::expected<size_t, std::string> sync(const settings::NetworkSettings&, const settings::DeviceSecrets&, fs::FS&) {
+        if (const char* ms = std::getenv("LUME_SIM_SYNC_MS"))   // finge uma sync lenta (captura do indicador de sync)
+            std::this_thread::sleep_for(std::chrono::milliseconds(std::atoi(ms)));
         return std::unexpected(std::string{kUnavailable});
     }
 } // namespace net::ticktick

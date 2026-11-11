@@ -206,6 +206,36 @@ void test_primeiro_lembrete_do_dia_da_lista() {
     TEST_ASSERT_FALSE(primeiroLembreteDoDia(ListaHabitos{}, kHoje).has_value());
 }
 
+void test_avaliar_despertar_na_hora_nao_dorme_de_novo() {
+    const auto a = avaliarDespertar(kEpoch + 10, kEpoch + 5, 0);   // acordou 5 s DEPOIS do alvo
+    TEST_ASSERT_FALSE(a.adiantado);
+    TEST_ASSERT_TRUE(a.atrasado);
+    const auto b = avaliarDespertar(kEpoch, kEpoch + 5, 0);   // acordou 5 s antes (antecedencia normal)
+    TEST_ASSERT_FALSE(b.adiantado);
+    TEST_ASSERT_FALSE(b.atrasado);
+    const auto c = avaliarDespertar(kEpoch, kEpoch + kAdiantadoMinS, 0);   // exatamente no limite: ainda na hora
+    TEST_ASSERT_FALSE(c.adiantado);
+}
+
+void test_avaliar_despertar_adiantado_dorme_ate_o_alvo() {
+    const auto a = avaliarDespertar(kEpoch, kEpoch + 300, 0);   // faltam 5 min
+    TEST_ASSERT_TRUE(a.adiantado);
+    TEST_ASSERT_FALSE(a.atrasado);
+    TEST_ASSERT_EQUAL_INT64(300, a.faltamS);
+    TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(300 - kAntecedenciaS), a.dormirS);   // acorda de novo com a mesma antecedencia
+    const auto b = avaliarDespertar(kEpoch, kEpoch + 21, 0);   // 21 s: logo acima do limite, nunca menos que o minimo
+    TEST_ASSERT_TRUE(b.adiantado);
+    TEST_ASSERT_TRUE(b.dormirS >= kMinimoSonoS);
+}
+
+void test_avaliar_despertar_limita_re_dormidas_e_ignora_sem_relogio() {
+    TEST_ASSERT_FALSE(avaliarDespertar(kEpoch, kEpoch + 300, kMaxReDormidas).adiantado);   // protecao contra laco
+    TEST_ASSERT_TRUE(avaliarDespertar(kEpoch, kEpoch + 300, kMaxReDormidas - 1).adiantado);
+    TEST_ASSERT_FALSE(avaliarDespertar(0, kEpoch + 300, 0).adiantado);   // sem hora: trata como na hora
+    TEST_ASSERT_FALSE(avaliarDespertar(kEpoch, 0, 0).adiantado);         // sem alvo gravado
+    TEST_ASSERT_FALSE(avaliarDespertar(kEpoch, kEpoch + kHorizonteMaxS + 3600, 0).adiantado);   // alvo absurdo (RTC errado)
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_dorme_ate_proximo_lembrete_5s_antes);
@@ -222,5 +252,8 @@ int main(int, char**) {
     RUN_TEST(test_limite_de_ciclos_so_ate_o_fim_do_dia);
     RUN_TEST(test_alvo_iminente_nao_agenda_timer_no_passado);
     RUN_TEST(test_primeiro_lembrete_do_dia_da_lista);
+    RUN_TEST(test_avaliar_despertar_na_hora_nao_dorme_de_novo);
+    RUN_TEST(test_avaliar_despertar_adiantado_dorme_ate_o_alvo);
+    RUN_TEST(test_avaliar_despertar_limita_re_dormidas_e_ignora_sem_relogio);
     return UNITY_END();
 }

@@ -74,6 +74,10 @@ namespace tempo {
     void debitar(Estado& e, double cr);
     int nivelDivida(double saldo);                    // floor(-saldo / 60) para saldo < 0
 
+    // ---- penalidades (param::kPenalidadesAtivas; ver Parametros.h). So os testes mudam o valor em tempo de execucao.
+    bool penalidadesAtivas();
+    void definirPenalidadesParaTeste(bool ativas);   // false/true = forca; chamar de novo com param::kPenalidadesAtivas para voltar
+
     // ---- desafios
     // Avalia gatilhos pendentes (patamar de divida e 2 fechamentos negativos); max 1 por dia.
     bool avaliarGatilhos(Estado& e);

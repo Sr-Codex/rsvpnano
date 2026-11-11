@@ -528,7 +528,10 @@ namespace screens {
         {
             std::string texto;
             uint16_t cor = cMudo;
-            if (!info.erroSync.empty()) {
+            if (info.sincronizando) {
+                texto = "sincronizando…";
+                cor = kAmbar;
+            } else if (!info.erroSync.empty()) {
                 texto = "Sync de hábitos: " + cortar(info.erroSync, 40);
                 cor = kCarmim;
             } else if (filaParados_ > 0) {

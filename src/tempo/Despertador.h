@@ -31,6 +31,8 @@ namespace tempo {
     inline constexpr int kMaxCiclosSemInteracao = 3;
     inline constexpr int64_t kAntecedenciaS = 5;
     inline constexpr int64_t kMinimoSonoS = 3;                   // nunca agenda o timer para menos que isso
+    inline constexpr int64_t kAdiantadoMinS = 20;                // acordou com mais que isso faltando para o alvo = adiantado (oscilador RC)
+    inline constexpr int kMaxReDormidas = 4;                     // protecao: no maximo N "dorme de novo" seguidos (relogio maluco nao vira laco)
     inline constexpr uint32_t kJanelaLembreteBootMs = 60U * 1000U;   // acordado esperando interacao apos despertar por timer
 
     enum class MotivoDesligar : uint8_t {
@@ -74,6 +76,18 @@ namespace tempo {
     };
 
     DecisaoDespertador decidirDespertador(const EntradaDespertador& entrada);
+
+    // Boot por timer (ADR-009, achado 4 da revisao): o timer de sono usa o oscilador RC interno e pode acordar adiantado
+    // ou atrasado. Compara o relogio (RTC externo) com o alvo gravado antes de dormir.
+    //  - adiantado (faltam > kAdiantadoMinS): dorme de novo ate o alvo SEM contar ciclo sem interacao;
+    //  - atrasado ou na hora: toca o lembrete MESMO se passou da tolerancia de 5 min (so neste caso).
+    struct AvaliacaoDespertar {
+        bool adiantado = false;
+        bool atrasado = false;          // passou do alvo (qualquer atraso)
+        int64_t faltamS = 0;            // > 0 = ainda falta; < 0 = atraso
+        uint32_t dormirS = 0;           // quando adiantado: segundos de novo sono (ja descontada a antecedencia)
+    };
+    AvaliacaoDespertar avaliarDespertar(int64_t epochAgora, int64_t alvoEpoch, int reDormidas);
 
     // Primeiro horario de lembrete (minuto do dia) que a lista de habitos gera em `dia`; nullopt = nenhum.
     std::optional<int> primeiroLembreteDoDia(const ListaHabitos& lista, const Data& dia);

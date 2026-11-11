@@ -12,6 +12,7 @@ namespace screens {
     // proximo projeto) e 2 x 2 blocos grandes (Tempo, Leitor, Perfil, Ajustes). Textos em pt-BR direto no codigo (fora do pacote de idiomas).
     struct HomeInfo {
         bool wifi = false;
+        bool sincronizando = false;   // sync do TickTick em segundo plano: ponto ambar discreto na barra de status
         bool bateriaPresente = false;
         int bateriaPct = 0;
         bool carregando = false;

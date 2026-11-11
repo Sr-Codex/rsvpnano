@@ -24,6 +24,7 @@ namespace Board::DeepSleep {
         int64_t ultimoAvisoMedicacaoEpoch = 0;   // 0 = desconhecido
         int64_t alvoEpoch = 0;                // lembrete que motivou o ultimo sono
         uint8_t origemProxima = 0;            // tempo::OrigemDespertar do ultimo sono
+        int32_t reDormidas = 0;               // acordou ADIANTADO e voltou a dormir (seguidas); nao conta como ciclo sem interacao
     };
     inline constexpr uint32_t kRtcMagic = 0x4C554D39;   // "LUM9"
 

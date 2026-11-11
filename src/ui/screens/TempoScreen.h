@@ -13,6 +13,7 @@
 #include "tempo/Habitos.h"
 #include "tempo/Lembretes.h"
 #include "tempo/Motor.h"
+#include "tempo/Recarga.h"
 #include "som/Sintese.h"
 #include "tempo/Sessao.h"
 #include "ui/screens/ModernScreens.h"
@@ -94,6 +95,16 @@ namespace screens {
         // check-ins feitos no celular (/tempo/habitos-checkins.json, baixados pelo sync). Chamar fora do desenho,
         // ex.: ao fim da sync do TickTick. Idempotente.
         void atualizarHabitos(fs::FS* filesystem, uint32_t nowMs);
+        // Fim da sync do TickTick (lume.12): relê projetos + habitos.json + check-ins UMA vez, DEPOIS que o job gravou tudo.
+        // `versao` = net::ticktick::versao() (marca como vista: a manutencao nao relê de novo).
+        void sincronizacaoTerminou(fs::FS* filesystem, uint32_t nowMs, uint32_t versao);
+        // Enquanto true o job de fundo esta gravando projetos/habitos/check-ins: a UI NAO le esses arquivos (a releitura
+        // fica pendente e acontece quando a sync terminar).
+        void definirSyncAtiva(bool ativa) { syncAtiva_ = ativa; }
+        // A tela de Habitos abriu: relê na proxima manutencao.
+        void pedirRecarga() { recargaPedida_ = true; }
+        // Despertar por timer (ADR-009): o lembrete das `minutoAlvo` toca mesmo atrasado.
+        void forcarAvisoInicial(int minutoAlvo) { if (carregado_) lembretes_.forcarAvisoInicial(estado_, minutoAlvo); }
         // "Feito agora" na ocorrencia `indice` de estado().dia.ocorrencias: paga, grava o log e enfileira o check-in
         // (enviado ao TickTick na proxima sync com Wi-Fi). Devolve false se ja estava feita ou sem SD.
         bool marcarHabito(uint32_t nowMs, fs::FS* filesystem, size_t indice);
@@ -105,7 +116,8 @@ namespace screens {
         void adiarHabito(uint32_t nowMs, size_t indice);
         // Manutencao dos Habitos, FORA do desenho (App::update, ~1x/s): avanca o relogio do dia, na virada do dia e a cada
         // minuto reconcilia com habitos.json + check-ins do celular (atualizarHabitos). Nao roda durante batalha/reflexao.
-        void manutencaoHabitos(uint32_t nowMs, fs::FS* filesystem);
+        // So relê arquivos quando a sync terminou (versao mudou), na virada do dia ou se a tela de Habitos abriu (tempo::deveReler).
+        void manutencaoHabitos(uint32_t nowMs, fs::FS* filesystem, uint32_t versaoSync);
         // Lembretes (bipe + aviso no topo): devolve o aviso a mostrar agora (o App toca o bipe). `pegouAgora` = pulso do
         // detector de pegada (IMU). Nao pausa leitura nem batalha. Chamar ~1x/s fora do desenho.
         std::optional<tempo::Aviso> lembretesTick(uint32_t nowMs, bool pegouAgora);
@@ -160,7 +172,9 @@ namespace screens {
         tempo::ListaProjetos lista_;
         tempo::ListaHabitos habitos_;        // definicoes dos habitos (habitos.json)
         tempo::AgendaLembretes lembretes_;   // estado dos lembretes de habitos (so RAM)
-        uint32_t manutencaoHabitosMs_ = 0;   // ultimo atualizarHabitos periodico (millis)
+        uint32_t versaoVista_ = 0;           // ultima versao da sync (net::ticktick::versao()) ja aplicada
+        bool recargaPedida_ = false;         // tela de Habitos abriu / releitura que ficou pendente (sync ativa)
+        bool syncAtiva_ = false;             // job do TickTick gravando arquivos: nao ler
         uint32_t manutencaoRelogioMs_ = 0;
         std::vector<std::string> titulos_;   // titulos limpos (sem emoji), 1:1 com lista_.projetos
         size_t primeiro_ = 0;                // primeira linha visivel do seletor (rolagem)

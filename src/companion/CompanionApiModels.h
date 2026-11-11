@@ -31,6 +31,14 @@ namespace companion::api {
         std::string ssid;
         std::string firmwareVersion;
         std::string otaAsset;
+        // Medidor de memoria e diagnostico (achado 12 da revisao; somente leitura). Bytes da SRAM INTERNA (onde mora o TLS).
+        uint32_t freeInternalHeap = 0;       // heap interna livre
+        uint32_t largestInternalBlock = 0;   // maior bloco interno livre (fragmentacao)
+        uint32_t minFreeInternalHeap = 0;    // minimo historico da heap interna desde o boot
+        uint32_t freePsram = 0;              // PSRAM livre
+        uint32_t uptimeSeconds = 0;
+        std::string lastResetReason;         // esp_reset_reason(): "power_on", "software", "panic", "task_wdt", "deep_sleep"...
+        std::string wakeCause;               // esp_sleep_get_wakeup_cause(): "undefined" (boot normal), "timer", "ext0"...
     };
 
     struct BookLanguage {

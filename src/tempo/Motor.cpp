@@ -81,7 +81,7 @@ namespace tempo {
         }
 
         void atualizarDesafiosVencidos(Estado& e) {
-            if (congelado(e)) {
+            if (congelado(e) || !penalidadesAtivas()) {
                 return;
             }
             const int64_t agora = agoraAbs(e);
@@ -127,6 +127,12 @@ namespace tempo {
 
     } // namespace
 
+    namespace {
+        bool gPenalidades = param::kPenalidadesAtivas;
+    }
+    bool penalidadesAtivas() { return gPenalidades; }
+    void definirPenalidadesParaTeste(bool ativas) { gPenalidades = ativas; }
+
     // ------------------------------------------------------------------ carteira
     int nivelDivida(double saldo) {
         if (saldo >= 0.0) {
@@ -165,8 +171,8 @@ namespace tempo {
         }
         int aplicado = 0;
         if (deltaMeios < 0) {
-            if (e.dia.recuperacao) {
-                return 0;
+            if (e.dia.recuperacao || !penalidadesAtivas()) {
+                return 0;   // penalidades desligadas ate existir o Recibo (Parametros.h)
             }
             const int novo = std::max(0, e.coracoesMeios + deltaMeios);
             aplicado = novo - e.coracoesMeios;
@@ -198,6 +204,12 @@ namespace tempo {
         if (k < e.patamarDisparado) {
             e.patamarDisparado = k;  // dívida diminuiu: rearma
         }
+        if (!penalidadesAtivas()) {
+            // Sem punicao: acompanha o patamar em silencio (divida feita agora nao dispara desafio retroativo ao religar).
+            e.patamarDisparado = std::max(e.patamarDisparado, k);
+            e.gatilhoFechamentoPendente = false;
+            return false;
+        }
         if (e.dia.desafioHoje || e.dia.recuperacao) {
             return false;
         }
@@ -226,6 +238,7 @@ namespace tempo {
     }
 
     bool lojaTravada(const Estado& e) {
+        if (!penalidadesAtivas()) return false;   // sem punicao nao ha o que travar (desafio/heroi caido ficam guardados)
         return !e.desafiosPendentes.empty() || e.heroiCaido;
     }
 
@@ -378,6 +391,7 @@ namespace tempo {
                 }
                 break;
         }
+        if (!penalidadesAtivas() && r.coracoesMeios < 0) r.coracoesMeios = 0;   // sem punicao (Parametros.h)
         e.dia.habitosCr += r.cr;
         creditar(e, r.cr);
         addXp(e, r.xp, v.atributo);
@@ -441,6 +455,7 @@ namespace tempo {
                 }
                 break;
         }
+        if (!penalidadesAtivas() && r.coracoesMeios < 0) r.coracoesMeios = 0;   // sem punicao (Parametros.h)
         e.dia.habitosCr += r.cr;
         creditar(e, r.cr);
         addXp(e, r.xp, v.atributo);
@@ -675,7 +690,7 @@ namespace tempo {
         }
 
         // 4. fechamentos negativos seguidos
-        if (!recuperacao) {
+        if (!recuperacao && penalidadesAtivas()) {
             if (e.saldo < 0.0) {
                 if (++e.fechamentosNegativosSeguidos >= param::kFechamentosNegativos) {
                     e.fechamentosNegativosSeguidos = 0;

@@ -23,6 +23,11 @@ namespace net::ticktick {
     // Copia segura entre tarefas (o job roda em segundo plano; a API le para o GET).
     Status status();
 
+    // Contador de "sync terminou" (sucesso OU erro): sobe 1 vez ao fim de cada sync(), depois que TODOS os arquivos do
+    // SD (projetos.json, habitos.json, habitos-checkins.json, fila) ja foram gravados. Barato (atomico, sem copiar texto):
+    // a UI compara com o ultimo valor visto e so entao relê os arquivos (lume.12, achados 3 e 8).
+    uint32_t versao();
+
     // Bloqueante (rodar no job de segundo plano). Usa o Wi-Fi ja conectado ou conecta pelas redes salvas e
     // desconecta ao fim se foi ela quem conectou. Devolve a quantidade de projetos gravados; o resultado
     // (sucesso ou erro) tambem fica em status(). O token nunca e registrado em log.

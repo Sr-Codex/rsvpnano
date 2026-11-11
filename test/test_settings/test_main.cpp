@@ -260,7 +260,7 @@ void test_companion_appearance_selection_decodes_one_id() {
     TEST_ASSERT_EQUAL_STRING("night", selection->id.c_str());
 }
 
-void test_companion_device_is_identity_only() {
+void test_companion_device_is_identity_and_memory_meter() {
     const companion::api::DeviceInfo response{
         .ssid = "RSVP-Nano-123456",
         .firmwareVersion = "preview-v0.0.9+abc",
@@ -269,7 +269,9 @@ void test_companion_device_is_identity_only() {
     std::string json;
     TEST_ASSERT_TRUE(companion::api::encode(response, json).has_value());
     TEST_ASSERT_EQUAL_STRING(
-        R"({"ssid":"RSVP-Nano-123456","firmwareVersion":"preview-v0.0.9+abc","otaAsset":"reader-ota.bin"})",
+        R"({"ssid":"RSVP-Nano-123456","firmwareVersion":"preview-v0.0.9+abc","otaAsset":"reader-ota.bin",)"
+        R"("freeInternalHeap":0,"largestInternalBlock":0,"minFreeInternalHeap":0,"freePsram":0,"uptimeSeconds":0,)"
+        R"("lastResetReason":"","wakeCause":""})",
         json.c_str());
 }
 
@@ -437,7 +439,7 @@ int main() {
     RUN_TEST(test_companion_resource_encodes_directly);
     RUN_TEST(test_companion_library_is_a_bare_array);
     RUN_TEST(test_companion_appearance_selection_decodes_one_id);
-    RUN_TEST(test_companion_device_is_identity_only);
+    RUN_TEST(test_companion_device_is_identity_and_memory_meter);
     RUN_TEST(test_companion_catalog_creations_return_one_resource);
     RUN_TEST(test_companion_theme_list_uses_ids_and_names);
     RUN_TEST(test_companion_font_list_uses_ids_and_names);

@@ -193,10 +193,14 @@ namespace screens {
             barra.texto({14, 1, 60, 22}, hora(agora), 14, cTexto);
             barra.texto({78, 5, 110, 16}, data(agora), 10, cMudo);
             if (info.bateriaPresente) barra.texto({496, 5, 56, 16}, std::to_string(info.bateriaPct) + "%", 10, cMudo, TextAlign::Right);
-            barra.marca(uint32_t(info.wifi) * 2U + uint32_t(info.bateriaPresente) * 4U + uint32_t(info.carregando) * 8U
+            barra.marca(uint32_t(info.sincronizando) + uint32_t(info.wifi) * 2U + uint32_t(info.bateriaPresente) * 4U + uint32_t(info.carregando) * 8U
                         + uint32_t(info.bateriaPct) * 16U);
             const uint16_t fundo = ui.color(Background);
             barra.desenhar([&](Arduino_GFX& g, int dx, int dy) {
+                if (info.sincronizando) {   // ponto ambar (sync do TickTick em curso), ao lado do Wi-Fi
+                    g.fillCircle(466 + dx, 12 + dy, 4, kAmbar);
+                    g.drawCircle(466 + dx, 12 + dy, 6, rgb565(110, 84, 36));
+                }
                 iconeWifi(g, 480 + dx, 19 + dy, info.wifi, cTexto, rgb565(70, 72, 70), rgb565(235, 50, 90));
                 if (info.bateriaPresente) iconeBateria(g, 558 + dx, 5 + dy, info.bateriaPct, info.carregando, cTexto, fundo);
                 iconeAjustes(g, 618 + dx, 12 + dy, cMudo);   // Ajustes: engrenagem no topo direito (toque abaixo, depois dos blocos)

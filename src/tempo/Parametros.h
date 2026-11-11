@@ -78,6 +78,13 @@ namespace tempo::param {
     constexpr double kPrecoPerdido = 1.0;
     constexpr int kPerdidoCoracaoMin = 90;
 
+    // Penalidades (revisao 2026-11-11, achado 6; decisao do dono): ENQUANTO NAO EXISTIR O RECIBO do dia (nem onde gastar
+    // creditos), o jogo nao pune em silencio. false = no fechamento/abertura do dia e nas acoes NAO tira coracoes
+    // (inclusive medicacao atrasada/esquecida e Perdido > 90 min), NAO dispara desafio de punicao (patamar de divida nem 2
+    // fechamentos negativos), NAO cobra desafio vencido e NAO derruba o heroi. Creditos, XP, nivel, streak e os ganhos de
+    // coracao seguem como antes. Nada e apagado: com true volta tudo (estado antigo preservado).
+    constexpr bool kPenalidadesAtivas = false;
+
     // Carteira / divida / desafio
     constexpr double kTetoCarteira = 600.0;
     constexpr double kPatamarDivida = 60.0;

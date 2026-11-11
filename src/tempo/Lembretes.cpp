@@ -90,6 +90,15 @@ namespace tempo {
         }
     }
 
+    void AgendaLembretes::forcarAvisoInicial(const Estado& e, int minutoAlvo) {
+        stamp_ = stampDe(e.dia.data);
+        for (const OcorrenciaDia& oc : e.dia.ocorrencias) {
+            if (oc.feita || oc.status != StatusHabito::Pendente || oc.minuto != minutoAlvo) continue;
+            Item& it = garantir(oc);
+            if (it.avisos == 0) it.forcarInicial = true;
+        }
+    }
+
     std::optional<Aviso> AgendaLembretes::avaliar(const Estado& e, int minutoAgora, uint32_t agoraMs, bool pegouAgora) {
         const int stamp = stampDe(e.dia.data);
         if (stamp != stamp_) {   // virada do dia: estado novo
@@ -116,7 +125,7 @@ namespace tempo {
                     it.adiado = false;
                 }
             } else if (it.avisos == 0) {
-                if (minutoAgora - oc.minuto <= kToleranciaAvisoInicialMin) {
+                if (it.forcarInicial || minutoAgora - oc.minuto <= kToleranciaAvisoInicialMin) {
                     disparar = true;   // aviso inicial (1x), na hora
                 } else {
                     // Ligou/abriu tarde (ex.: placa desligada na hora): nao apita do nada; fica armada para o re-aviso por movimento.

@@ -75,6 +75,10 @@ namespace tempo {
         // pendentes (na janela/atrasadas) para insistirem ja no proximo avaliar(); `insistenciasFeitas` inclui esta.
         void semearInsistenciaMedicacao(const Estado& e, int minutoAgora, uint32_t agoraMs, int insistenciasFeitas);
 
+        // Despertar por timer (ADR-009): o lembrete que motivou o despertar toca MESMO atrasado (ignora a tolerancia de
+        // kToleranciaAvisoInicialMin so para as ocorrencias pendentes marcadas para `minutoAlvo`). Chamar com o estado do dia carregado.
+        void forcarAvisoInicial(const Estado& e, int minutoAlvo);
+
         void zerar() { itens_.clear(); stamp_ = 0; }
 
     private:
@@ -87,6 +91,7 @@ namespace tempo {
             uint32_t ultimoMs = 0;
             bool adiado = false;
             uint32_t adiadoAteMs = 0;
+            bool forcarInicial = false;   // aviso inicial mesmo atrasado (despertar por timer)
         };
         Item* achar(const OcorrenciaDia& oc);
         Item& garantir(const OcorrenciaDia& oc);

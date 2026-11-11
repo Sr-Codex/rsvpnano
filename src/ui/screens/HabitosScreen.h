@@ -16,6 +16,7 @@ namespace screens {
     // Textos em pt-BR direto no codigo (fora do pacote de idiomas). PWR ou "‹ HABITOS" volta ao Home.
     struct HabitosInfo {
         std::string erroSync;   // net::ticktick::status().habitsError ("" = ok)
+        bool sincronizando = false;   // sync do TickTick em segundo plano (rodape discreto)
     };
 
     class HabitosScreen {

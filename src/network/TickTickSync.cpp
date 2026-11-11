@@ -8,6 +8,7 @@
 #include <esp_log.h>
 
 #include <ctime>
+#include <atomic>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -28,6 +29,7 @@ namespace net::ticktick {
 
         std::mutex gStatusMutex;
         Status gStatus;
+        std::atomic<uint32_t> gVersao{0};
         bool gNtpDone = false;
         uint32_t gNtpMs = 0;
 
@@ -294,6 +296,10 @@ namespace net::ticktick {
         return gStatus;
     }
 
+    uint32_t versao() {
+        return gVersao.load(std::memory_order_acquire);
+    }
+
     std::expected<size_t, std::string> sync(const settings::NetworkSettings& network,
                                             const settings::DeviceSecrets& secrets, fs::FS& filesystem) {
         auto result = run(network, secrets, filesystem);
@@ -304,6 +310,7 @@ namespace net::ticktick {
             record({}, result.error());
             ESP_LOGW(kTag, "sync falhou: %s", result.error().c_str());
         }
+        gVersao.fetch_add(1, std::memory_order_release);   // por ultimo: os arquivos e o status ja estao gravados
         return result;
     }
 

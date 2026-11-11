@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <optional>
 #include <cstdio>
 #include <esp_system.h>
@@ -28,6 +29,7 @@
 #include "library/ReadingProgress.h"
 #include "storage/migration/Migration.h"
 #include "update/OtaUpdater.h"
+#include "update/OtaRollback.h"
 #include "update/SwitchSettings.h"
 #include <WiFi.h>
 #include "ui/screens/ModernScreens.h"
@@ -111,6 +113,22 @@ void App::begin() {
     if (!Board::Display::begin()) {
         ESP_LOGE("app", "display init failed");
     }
+    if (lembreteBoot_) {
+        // Achado 4: o timer de sono usa o oscilador RC e pode acordar ADIANTADO. Compara com o RTC externo (hora do sistema
+        // no boot) e, se faltar mais que ~20 s para o alvo, dorme de novo ate ele SEM contar ciclo sem interacao.
+        auto& rtc = Board::DeepSleep::rtc();
+        const auto av = tempo::avaliarDespertar(static_cast<int64_t>(time(nullptr)), rtc.alvoEpoch, rtc.reDormidas);
+        ESP_LOGI("app", "despertar por timer: faltam %lld s (alvo %lld) -> %s", static_cast<long long>(av.faltamS),
+                 static_cast<long long>(rtc.alvoEpoch), av.adiantado ? "ADIANTADO, dorme de novo" : av.atrasado ? "atrasado, toca mesmo assim" : "na hora");
+        if (av.adiantado) {
+            ++rtc.reDormidas;
+            Board::Display::sleep();
+            if (Board::DeepSleep::enter(av.dormirS)) return;   // nao volta em caso de sucesso
+            ESP_LOGE("app", "deep sleep falhou ao dormir de novo; seguindo com o boot de lembrete");
+        } else {
+            rtc.reDormidas = 0;
+        }
+    }
     immediateUi_.setOrientation(Board::Display::defaultUiOrientation());
     immediateUi_.setTheme(interfaceScreen_.themes.resolve(settingsStore_.settings().interface.selectedThemeId));
     const bool modernStartup = immediateUi_.width() == 640 && immediateUi_.height() == 172;
@@ -123,11 +141,14 @@ void App::begin() {
         startupStage(UiText::Storage);
     else if (!lembreteBoot_)
         screens::status(immediateUi_, immediateUi_.text(UiText::Ready));
-    if (!Input::begin())
+    const bool inputOk = Input::begin();
+    ota::toqueOk(inputOk);
+    if (!inputOk)
         ESP_LOGE("input", "startup failed");
     immediateUi_.setTouchSource({.surface = Board::Input::touchSurface(), .poll = &Input::pollTouch});
 
     storage_.begin();
+    ota::sdMontado(storage_.mounted());
     if (storage_.mounted() && !dictionary::recoverInstall())
         ESP_LOGW("dictionary", "Interrupted dictionary install needs SD recovery");
     Logger::startupCheckpoint("storage");
@@ -240,6 +261,7 @@ void App::liberarSom(uint32_t nowMs) {
 }
 
 void App::update(uint32_t nowMs) {
+    ota::tick(nowMs);   // ADR-010: confirma a imagem OTA nova quando o laco esta saudavel
     // Sons dos eventos do quadro anterior (Tempo/Habitos/foco do leitor): um so por quadro
     for (som::SomId id; tempoScreen_.pegarSom(id);) acumularSom(id);
     const bool focoAtivo = focusScreen_.session().phase() != focus::Phase::Complete;
@@ -290,12 +312,14 @@ void App::update(uint32_t nowMs) {
         // A loading worker owns the book; a manual resume waits until it is finished.
         handleScreenAction(action, nowMs);
         lastActivityMs_ = nowMs;
+        ota::primeiroQuadro(nowMs);
         return;
     }
 
     if (backgroundJobActive() && !preparingTypography) {
         if(onboardingJobActive()&&screen_==screens::Screen::Onboarding)renderScreen(nowMs);
         else screens::animateStatus(immediateUi_, nowMs);
+        ota::primeiroQuadro(nowMs);
         return;
     }
 
@@ -304,6 +328,7 @@ void App::update(uint32_t nowMs) {
             return;
         statusUntilMs_ = 0;
         if (restartAfterStatus_) {
+            ota::confirmarAntesDeReiniciar("reinício após troca de firmware");
             ESP.restart();
             return;
         }
@@ -345,6 +370,7 @@ void App::update(uint32_t nowMs) {
             return;
         }
         standbyScreen_.update(immediateUi_, nowMs);
+        ota::primeiroQuadro(nowMs);
         return;
     }
 
@@ -371,9 +397,10 @@ void App::update(uint32_t nowMs) {
     ReadingProgress::save(readerScreen_.session, prefs_, false, nowMs);
 
     renderScreen(nowMs);
+    if (screen_ != screens::Screen::Status) ota::primeiroQuadro(nowMs);   // 1o quadro de verdade (nao o splash)
     desenharAvisoHabito(nowMs);
     if (!preparingTypography && !readerScreen_.session.playing && !companionApi_.active() && !usbTransfer_.active()
-        && !lembreteBoot_ && !focusScreen_.active() && !tempoScreen_.battleActive() && screen_ != screens::Screen::FocusSession && screen_ != screens::Screen::Status
+        && !lembreteBoot_ && !focusScreen_.active() && !silentJobActive() && !tempoScreen_.battleActive() && screen_ != screens::Screen::FocusSession && screen_ != screens::Screen::Status
         && screen_ != screens::Screen::Onboarding
         && kStandbyMs[settingsStore_.settings().interface.standbyTimerIndex] > 0
         && nowMs - lastActivityMs_ >= kStandbyMs[settingsStore_.settings().interface.standbyTimerIndex]) {
@@ -699,6 +726,7 @@ void App::renderScreen(uint32_t nowMs) {
             info.livroPct = ReadingProgress::percent(readerScreen_.session.state.wordIndex,
                                                      ReadingLoop::wordCount(readerScreen_.session));
         }
+        info.sincronizando = silentJobActive();
         action = homeScreen_.draw(immediateUi_, nowMs, screen_, tempoScreen_,
                                   storage_.mounted() ? &Board::Storage::filesystem() : nullptr, info);
         break;
@@ -711,6 +739,7 @@ void App::renderScreen(uint32_t nowMs) {
         immediateUi_.beginFrame(static_cast<uint8_t>(screen_), 0);
         screens::HabitosInfo habitosInfo;
         habitosInfo.erroSync = habitsError_;
+        habitosInfo.sincronizando = silentJobActive();
         action = habitosScreen_.draw(immediateUi_, nowMs, screen_, tempoScreen_,
                                      storage_.mounted() ? &Board::Storage::filesystem() : nullptr, habitosInfo);
         break;
@@ -839,6 +868,7 @@ void App::handleScreenAction(screens::Action action, uint32_t nowMs) {
         powerOff(nowMs);
         return;
     case screens::Action::CompanionSync:
+        aguardarSyncSilenciosa(20000);   // a API de companhia grava no SD / token
 
         screen_ = screens::Screen::Sync;
         immediateUi_.invalidate();
@@ -861,6 +891,7 @@ void App::handleScreenAction(screens::Action action, uint32_t nowMs) {
                                 screens::Screen::Device);
         return;
     case screens::Action::EnableStorageEncryption:
+        aguardarSyncSilenciosa(20000);
         screens::status(immediateUi_, immediateUi_.text(UiText::StorageEncryption),
                         immediateUi_.text(UiText::EnablingEncryption));
         ReadingProgress::save(readerScreen_.session, prefs_, true, nowMs);
@@ -1104,6 +1135,7 @@ void App::updateBackgroundJob() {
     JobUpdate update;
     while (jobQueue_ != nullptr && xQueueReceive(jobQueue_, &update, 0) == pdTRUE) {
         if (!update.complete) {
+            if (silentJobActive()) continue;   // job silencioso: nunca desenha status
             if(onboardingJobActive()){
                 if(screen_==screens::Screen::Onboarding)onboardingScreen_.acceptStorageProgress(update.storageRequest,update.storage,millis());
             }else screens::status(immediateUi_, update.title, update.line1, update.line2, update.progressPercent);
@@ -1235,10 +1267,18 @@ void App::updateBackgroundJob() {
             // Sem tela de status: o Tempo so passa a mostrar a lista nova. Hora de rede/RTC -> relogio do Tempo.
             if (const auto now = static_cast<int64_t>(time(nullptr)); tempo::deEpoch(now).valida)
                 tempo::ancorar(now, millis());
-            tempoScreen_.recarregarProjetos(storage_.mounted() ? &Board::Storage::filesystem() : nullptr);
-            // Habitos do TickTick: ocorrencias de hoje + check-ins feitos no celular (a fila de envio ja foi tratada na sync).
-            tempoScreen_.atualizarHabitos(storage_.mounted() ? &Board::Storage::filesystem() : nullptr, millis());
+            // Todos os arquivos ja foram gravados: UMA releitura (projetos + habitos + check-ins do celular), so agora.
+            const uint32_t versao = net::ticktick::versao();
+            tempoScreen_.sincronizacaoTerminou(storage_.mounted() ? &Board::Storage::filesystem() : nullptr, millis(), versao);
+            if (tempo::consumirVersao(tickTickVersaoVista_, versao)) habitsError_ = net::ticktick::status().habitsError;
+            jobSecrets_ = {};   // nao deixa copia do token na RAM
             immediateUi_.invalidate();
+            if (deferredKind_ != JobKind::None) {   // um job bloqueante estava esperando a sync
+                const JobKind proximo = deferredKind_;
+                deferredKind_ = JobKind::None;
+                if (!startBackgroundJob(proximo))
+                    showTransientStatus("Please try again", "Worker could not start", {}, 1200, screens::Screen::Home);
+            }
             return;
         }
         if (completed == JobKind::Rss) {
@@ -1266,8 +1306,29 @@ void App::updateBackgroundJob() {
     }
 }
 
+bool App::aguardarSyncSilenciosa(uint32_t maxMs) {
+    if (!silentJobActive())
+        return true;
+    screens::status(immediateUi_, "Sincronizando", "Aguarde o fim da sincronização");
+    const uint32_t startMs = millis();
+    while (silentJobActive() && static_cast<uint32_t>(millis() - startMs) < maxMs) {
+        delay(50);
+        updateBackgroundJob();
+    }
+    immediateUi_.invalidate();
+    return !silentJobActive();
+}
+
 bool App::startBackgroundJob(JobKind kind) {
-    if (backgroundJobActive())
+    if (silentJobActive() && kind != JobKind::TickTick && kind != JobKind::OnboardingStorage
+        && deferredKind_ == JobKind::None) {
+        // O job bloqueante espera a sync silenciosa terminar (so existe 1 fila/tarefa de job por vez). Ate la a UI ja
+        // se comporta como se ele rodasse (backgroundJobActive()); o job real comeca em updateBackgroundJob().
+        deferredKind_ = kind;
+        ESP_LOGI("background", "job %u adiado ate a sync do TickTick terminar", static_cast<unsigned>(kind));
+        return true;
+    }
+    if (anyJobRunning())
         return false;
     if (jobQueue_ == nullptr)
         jobQueue_ = xQueueCreate(kJobQueueLength, sizeof(JobUpdate));
@@ -1331,9 +1392,8 @@ void App::runBackgroundJob() {
     }
     case JobKind::TickTick: {
         Logger::checkpoint("ticktick_sync");
-        if (storage_.mounted())
-            (void) net::ticktick::sync(settingsStore_.settings().network, settingsStore_.secrets(),
-                                       Board::Storage::filesystem());  // resultado fica em net::ticktick::status()
+        if (storage_.mounted())   // rede/segredos: copias por valor feitas ao iniciar o job (a UI pode mudar os originais)
+            (void) net::ticktick::sync(jobNetwork_, jobSecrets_, Board::Storage::filesystem());  // resultado fica em net::ticktick::status()
         break;
     }
     case JobKind::StorageCheck: {
@@ -1471,8 +1531,14 @@ void App::updateTickTickSync(uint32_t nowMs) {
     const bool entered = launcher && !tickTickWasLauncher_;
     tickTickWasLauncher_ = launcher;
     if (tempoScreen_.pegarCheckinNovo()) tickTickCheckinPendente_ = true;   // guarda ate a sync poder rodar
-    if (!launcher || backgroundJobActive() || !storage_.mounted() || companionApi_.active() || usbTransfer_.active()
-        || tempoScreen_.battleActive() || settingsStore_.secrets().ticktickToken.empty())
+#if defined(LUME_SIM)
+    // Simulador: LUME_SIM_SYNC_MS=N finge uma sync de N ms (sem token) para capturar o indicador de sync.
+    const bool semToken = settingsStore_.secrets().ticktickToken.empty() && std::getenv("LUME_SIM_SYNC_MS") == nullptr;
+#else
+    const bool semToken = settingsStore_.secrets().ticktickToken.empty();
+#endif
+    if (!launcher || anyJobRunning() || !storage_.mounted() || companionApi_.active() || usbTransfer_.active()
+        || tempoScreen_.battleActive() || semToken)
         return;
     const uint32_t sinceMs = nowMs - tickTickLastMs_;
     const bool due = !tickTickTried_ || sinceMs >= kTickTickPeriodMs || (entered && sinceMs >= kTickTickReopenMinMs)
@@ -1482,8 +1548,14 @@ void App::updateTickTickSync(uint32_t nowMs) {
     tickTickTried_ = true;
     tickTickLastMs_ = nowMs;
     tickTickCheckinPendente_ = false;
-    if (!startBackgroundJob(JobKind::TickTick))
+    jobNetwork_ = settingsStore_.settings().network;
+    jobSecrets_ = settingsStore_.secrets();
+    tempoScreen_.definirSyncAtiva(true);   // a UI nao le projetos/habitos/check-ins enquanto o job grava
+    if (!startBackgroundJob(JobKind::TickTick)) {
+        tempoScreen_.definirSyncAtiva(false);
+        jobSecrets_ = {};
         ESP_LOGW("ticktick", "sync job could not start");
+    }
 }
 
 // ---------------------------------------------------------------- Habitos (fase 2): lembretes, aviso e orientacao em pe
@@ -1508,8 +1580,13 @@ bool App::tickHabitos(uint32_t nowMs) {
     if (nowMs - habitosTickMs_ < 1000) return false;
     habitosTickMs_ = nowMs;
     fs::FS* tempoFs = storage_.mounted() ? &Board::Storage::filesystem() : nullptr;
-    tempoScreen_.manutencaoHabitos(nowMs, tempoFs);
-    habitsError_ = net::ticktick::status().habitsError;
+    const bool habitosAberto = screen_ == screens::Screen::Habitos;
+    if (habitosAberto && !habitosAbertoAntes_) tempoScreen_.pedirRecarga();   // a tela abriu: relê na manutencao
+    habitosAbertoAntes_ = habitosAberto;
+    // So relê arquivos na sync terminada / virada do dia / tela aberta; o status (strings) so e copiado quando a versao muda.
+    const uint32_t versaoSync = net::ticktick::versao();
+    tempoScreen_.manutencaoHabitos(nowMs, tempoFs, versaoSync);
+    if (tempo::consumirVersao(tickTickVersaoVista_, versaoSync)) habitsError_ = net::ticktick::status().habitsError;
     const bool pegou = pegouPendente_;
     pegouPendente_ = false;
     const auto aviso = tempoScreen_.lembretesTick(nowMs, pegou);
@@ -1616,6 +1693,7 @@ void App::runBookOpen(size_t index, uint32_t nowMs) {
 }
 
 void App::enterUsbTransfer(uint32_t nowMs) {
+    aguardarSyncSilenciosa(20000);   // storage_.end() desmonta o SD: espera o job silencioso
 
 #if RSVP_USB_TRANSFER_ENABLED
     if (serialCompanion_.active())
@@ -1892,6 +1970,11 @@ void App::iniciarLembreteBoot(uint32_t nowMs) {
     }
     ESP_LOGI("app", "boot de lembrete: alvo=%lld origem=%u ciclos=%d insistencias=%d", static_cast<long long>(rtc.alvoEpoch),
              static_cast<unsigned>(rtc.origemProxima), rtc.ciclosSemInteracao, rtc.insistenciasMedicacao);
+    // Achado 4: o lembrete que motivou o despertar toca MESMO atrasado (ignora a tolerancia de 5 min so neste caso).
+    if (rtc.origemProxima == static_cast<uint8_t>(tempo::OrigemDespertar::Lembrete) && rtc.alvoEpoch > 0) {
+        const auto alvo = tempo::deEpoch(rtc.alvoEpoch);
+        if (alvo.valida && agora.valida && alvo.data == agora.data) tempoScreen_.forcarAvisoInicial(alvo.minutoDoDia);
+    }
     if (screen_ != screens::Screen::Habitos) {
         screen_ = screens::Screen::Habitos;
         immediateUi_.invalidate();
@@ -1899,6 +1982,9 @@ void App::iniciarLembreteBoot(uint32_t nowMs) {
 }
 
 void App::powerOff(uint32_t nowMs, bool automatic) {
+    // Desligar/dormir e RESET: se a imagem OTA nova ainda esta pendente, o bootloader voltaria a anterior (ADR-010).
+    ota::confirmarAntesDeReiniciar(automatic ? "desligamento automático / deep sleep" : "desligar");
+    aguardarSyncSilenciosa(20000);   // storage_.end() com o job gravando no SD corromperia o arquivo: espera a sync (ate 20 s)
 
     if (companionApi_.active())
         companionApi_.end();

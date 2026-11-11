@@ -2,7 +2,11 @@
 
 #include <ESPmDNS.h>
 #include <WiFi.h>
+#include <esp_heap_caps.h>
 #include <esp_log.h>
+#include <esp_sleep.h>
+#include <esp_system.h>
+#include <esp_timer.h>
 #include "board/BoardConfig.h"
 
 #include <algorithm>
@@ -263,11 +267,49 @@ companion::api::Result<companion::api::DeviceInfo> CompanionApi::getDevice(httpd
     return deviceInfo();
 }
 
+namespace {
+    const char* resetReasonName(esp_reset_reason_t reason) {
+        switch (reason) {
+        case ESP_RST_POWERON: return "power_on";
+        case ESP_RST_EXT: return "external_pin";
+        case ESP_RST_SW: return "software";
+        case ESP_RST_PANIC: return "panic";
+        case ESP_RST_INT_WDT: return "int_wdt";
+        case ESP_RST_TASK_WDT: return "task_wdt";
+        case ESP_RST_WDT: return "wdt";
+        case ESP_RST_DEEPSLEEP: return "deep_sleep";
+        case ESP_RST_BROWNOUT: return "brownout";
+        case ESP_RST_SDIO: return "sdio";
+        default: return "unknown";
+        }
+    }
+
+    const char* wakeCauseName(esp_sleep_wakeup_cause_t cause) {
+        switch (cause) {
+        case ESP_SLEEP_WAKEUP_UNDEFINED: return "undefined";   // nao foi despertar de sono (boot normal)
+        case ESP_SLEEP_WAKEUP_TIMER: return "timer";
+        case ESP_SLEEP_WAKEUP_EXT0: return "ext0";
+        case ESP_SLEEP_WAKEUP_EXT1: return "ext1";
+        case ESP_SLEEP_WAKEUP_GPIO: return "gpio";
+        case ESP_SLEEP_WAKEUP_TOUCHPAD: return "touchpad";
+        default: return "other";
+        }
+    }
+} // namespace
+
 companion::api::DeviceInfo CompanionApi::deviceInfo() const {
+    constexpr uint32_t kInternal = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
     return companion::api::DeviceInfo{
         .ssid = accessPointSsid_.empty() ? "RSVP-Nano-" + deviceSuffix() : accessPointSsid_,
         .firmwareVersion = std::string{OtaUpdater::currentVersion()},
         .otaAsset = Board::Config::OTA_ASSET_NAME,
+        .freeInternalHeap = static_cast<uint32_t>(heap_caps_get_free_size(kInternal)),
+        .largestInternalBlock = static_cast<uint32_t>(heap_caps_get_largest_free_block(kInternal)),
+        .minFreeInternalHeap = static_cast<uint32_t>(heap_caps_get_minimum_free_size(kInternal)),
+        .freePsram = static_cast<uint32_t>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+        .uptimeSeconds = static_cast<uint32_t>(esp_timer_get_time() / 1000000LL),
+        .lastResetReason = resetReasonName(esp_reset_reason()),
+        .wakeCause = wakeCauseName(esp_sleep_get_wakeup_cause()),
     };
 }
 

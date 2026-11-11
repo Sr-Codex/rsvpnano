@@ -17,9 +17,11 @@
 
 using namespace tempo;
 
-void setUp() {}
+// Penalidades LIGADAS explicitamente: estes testes cobrem as regras de punicao (o padrao do produto e desligado; ver
+// param::kPenalidadesAtivas e os testes "penalidades_desligadas_*").
+void setUp() { tempo::definirPenalidadesParaTeste(true); }
 
-void tearDown() {}
+void tearDown() { tempo::definirPenalidadesParaTeste(tempo::param::kPenalidadesAtivas); }
 
 namespace {
 
@@ -574,6 +576,86 @@ namespace {
         ResumoDia s = fecharDia(f, false);
         TEST_ASSERT_TRUE(s.valido);
         TEST_ASSERT_FALSE(s.limpo);
+    }
+
+    // ------------------------------------------------ penalidades (param::kPenalidadesAtivas; achado 6 da revisao)
+    void test_penalidades_padrao_do_produto_e_desligado() {
+        TEST_ASSERT_FALSE(param::kPenalidadesAtivas);
+    }
+
+    void test_penalidades_desligadas_nao_tiram_coracao_nem_disparam_desafio() {
+        definirPenalidadesParaTeste(false);
+        Estado e = novoEstado();
+        const int coracoes0 = e.coracoesMeios;
+        // medicacao esquecida (+300 min) e atrasada: sem perda de coracao, e o resultado nao promete perda
+        const ResultadoHabito esquecida = registrarHabito(e, Habito::Medicacao, 480, 480 + 300);
+        TEST_ASSERT_EQUAL_INT(0, esquecida.coracoesMeios);
+        const ResultadoHabito atrasada = registrarHabito(e, Habito::Almoco, 720, 720 + 40);
+        TEST_ASSERT_EQUAL_INT(0, atrasada.coracoesMeios);
+        TEST_ASSERT_EQUAL_INT(coracoes0, e.coracoesMeios);
+        // divida: cruza varios patamares e nada de desafio / loja travada; os creditos continuam valendo (saldo negativo)
+        const double saldoAntes = e.saldo;   // (os habitos acima ja pagaram alguns creditos)
+        registrarLazer(e, 130);
+        NEAR(saldoAntes - 130.0, e.saldo);
+        TEST_ASSERT_TRUE(e.saldo < -60.0);   // cruzou patamares de divida
+        TEST_ASSERT_EQUAL_size_t(0, e.desafiosPendentes.size());
+        TEST_ASSERT_FALSE(lojaTravada(e));
+        TEST_ASSERT_FALSE(e.heroiCaido);
+        // perdido > 90 min no dia + fechamentos negativos seguidos: nada de -coracao nem desafio
+        registrarPerdido(e, 100);
+        fecharDia(e, true);
+        abrirDia(e, D(2026, 11, 10));
+        fecharDia(e, true);
+        abrirDia(e, D(2026, 11, 11));
+        TEST_ASSERT_EQUAL_size_t(0, e.desafiosPendentes.size());
+        TEST_ASSERT_FALSE(e.gatilhoFechamentoPendente);
+        TEST_ASSERT_FALSE(e.heroiCaido);
+        TEST_ASSERT_TRUE(e.coracoesMeios >= coracoes0);   // so pode ter ganho (habitos bons / dia limpo), nunca perder
+    }
+
+    void test_penalidades_desligadas_mantem_xp_nivel_e_streak() {
+        definirPenalidadesParaTeste(false);
+        Estado e = novoEstado();
+        jogarDiaValido(e);
+        TEST_ASSERT_TRUE(e.xpTotal > 0.0);
+        const double xp = e.xpTotal;
+        fecharDia(e, true);   // +20 XP do recibo
+        TEST_ASSERT_EQUAL_INT(1, e.streak);
+        TEST_ASSERT_TRUE(e.xpTotal > xp);
+        abrirDia(e, D(2026, 11, 10));
+        fecharDia(e, false);   // dia invalido: a folga/streak funcionam como antes (streak e visivel no Perfil)
+        abrirDia(e, D(2026, 11, 11));
+        const ResumoDia r = fecharDia(e, false);
+        TEST_ASSERT_TRUE(r.streakQuebrado);
+        TEST_ASSERT_EQUAL_INT(0, e.streak);
+    }
+
+    void test_penalidades_ligadas_voltam_tudo() {
+        definirPenalidadesParaTeste(true);
+        Estado e = novoEstado();
+        e.dia.habitos[static_cast<size_t>(Habito::Medicacao)] = StatusHabito::NoHorario;  // isola coracoes
+        registrarLazer(e, 60);   // cruza -60: desafio + -1 coracao
+        TEST_ASSERT_EQUAL_size_t(1, e.desafiosPendentes.size());
+        TEST_ASSERT_EQUAL_INT(8, e.coracoesMeios);
+        TEST_ASSERT_TRUE(lojaTravada(e));
+        Estado f = novoEstado();
+        const ResultadoHabito esquecida = registrarHabito(f, Habito::Medicacao, 480, 480 + 300);
+        TEST_ASSERT_EQUAL_INT(-2, esquecida.coracoesMeios);
+        TEST_ASSERT_EQUAL_INT(8, f.coracoesMeios);
+    }
+
+    void test_penalidades_alternar_nao_apaga_estado_guardado() {
+        Estado e = novoEstado();
+        Desafio d;
+        d.nivel = 1;
+        e.desafiosPendentes.push_back(d);
+        e.heroiCaido = true;
+        definirPenalidadesParaTeste(false);
+        TEST_ASSERT_FALSE(lojaTravada(e));
+        TEST_ASSERT_EQUAL_size_t(1, e.desafiosPendentes.size());   // nada apagado
+        TEST_ASSERT_TRUE(e.heroiCaido);
+        definirPenalidadesParaTeste(true);
+        TEST_ASSERT_TRUE(lojaTravada(e));
     }
 
     void test_streak_com_folga() {
@@ -1392,6 +1474,11 @@ int main(int, char**) {
     RUN_TEST(test_heroi_caido_e_resgate);
     RUN_TEST(test_coracoes_ganho_max_por_dia);
     RUN_TEST(test_dia_valido_e_limpo);
+    RUN_TEST(test_penalidades_padrao_do_produto_e_desligado);
+    RUN_TEST(test_penalidades_desligadas_nao_tiram_coracao_nem_disparam_desafio);
+    RUN_TEST(test_penalidades_desligadas_mantem_xp_nivel_e_streak);
+    RUN_TEST(test_penalidades_ligadas_voltam_tudo);
+    RUN_TEST(test_penalidades_alternar_nao_apaga_estado_guardado);
     RUN_TEST(test_streak_com_folga);
     RUN_TEST(test_streak_guarda_brasa_e_folga_reseta_na_segunda);
     RUN_TEST(test_dia_de_recuperacao);

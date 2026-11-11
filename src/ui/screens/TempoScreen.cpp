@@ -416,11 +416,13 @@ namespace screens {
     void TempoScreen::atualizarHabitos(fs::FS* filesystem, uint32_t nowMs) {
         if (filesystem == nullptr || fase_ == Fase::Lutando || fase_ == Fase::Pausada || fase_ == Fase::Descanso) return;
         if (!carregado_) carregar(filesystem, true, nowMs);   // ja le habitos.json
+        else if (syncAtiva_) recargaPedida_ = true;           // o job esta gravando habitos.json: le depois do sinal de "terminou"
         else {
             habitos_ = tempo::ListaHabitos{};
             TempoStorage::loadHabits(*filesystem, habitos_);
         }
         garantirDia(nowMs);
+        if (syncAtiva_) return;                               // idem para os check-ins do celular
         bool mudou = false;
         tempo::ArquivoCheckins remotos;
         if (TempoStorage::loadHabitCheckins(*filesystem, remotos)) {
@@ -469,17 +471,33 @@ namespace screens {
         lembretes_.adiar(estado_, indice, nowMs, uint32_t(tempo::kAdiarMedicacaoMin) * 60000U);
     }
 
-    void TempoScreen::manutencaoHabitos(uint32_t nowMs, fs::FS* filesystem) {
+    void TempoScreen::sincronizacaoTerminou(fs::FS* filesystem, uint32_t nowMs, uint32_t versao) {
+        syncAtiva_ = false;
+        if (!carregado_ || fase_ != Fase::Nenhuma) return;   // em batalha/reflexao: a manutencao relê depois (versaoVista_ fica velha de proposito)
+        versaoVista_ = versao;
+        recargaPedida_ = false;
+        recarregarProjetos(filesystem);
+        atualizarHabitos(filesystem, nowMs);
+    }
+
+    void TempoScreen::manutencaoHabitos(uint32_t nowMs, fs::FS* filesystem, uint32_t versaoSync) {
         if (!carregado_ || filesystem == nullptr || fase_ != Fase::Nenhuma) return;   // nada durante batalha/reflexao
         const auto agora = tempo::agora(nowMs);
         if (!agora.valida) return;
         const bool viradaDoDia = !estado_.dia.aberto || !(estado_.dia.data == agora.data);
-        const bool periodico = nowMs - manutencaoHabitosMs_ >= 60000U;
-        if (viradaDoDia || periodico) {
-            manutencaoHabitosMs_ = nowMs;
+        const bool reler = tempo::deveReler({viradaDoDia, versaoSync, versaoVista_, recargaPedida_, syncAtiva_});
+        if (reler) {
+            versaoVista_ = versaoSync;
+            recargaPedida_ = false;
             const tempo::Data antes = estado_.dia.data;
             atualizarHabitos(filesystem, nowMs);   // garantirDia (abre/fecha o dia) + reconcilia + check-ins do celular
+            recarregarProjetos(filesystem);
             if (viradaDoDia && !(estado_.dia.data == antes)) salvar(filesystem);
+        } else if (viradaDoDia) {
+            // So acontece com a sync ativa (deveReler = false): abre/fecha o dia em RAM; os arquivos sao relidos quando ela terminar.
+            const tempo::Data antes = estado_.dia.data;
+            atualizarHabitos(filesystem, nowMs);
+            if (!(estado_.dia.data == antes)) salvar(filesystem);
         } else {
             tempo::avancarRelogio(estado_, agora.minutoDoDia);
         }
@@ -529,8 +547,12 @@ namespace screens {
         if (recarregarEstado) {
             estado_ = tempo::Estado{};
             if (filesystem != nullptr) TempoStorage::loadState(*filesystem, estado_);
-            habitos_ = tempo::ListaHabitos{};
-            if (filesystem != nullptr) TempoStorage::loadHabits(*filesystem, habitos_);
+            if (syncAtiva_) {
+                recargaPedida_ = true;   // o job grava habitos.json agora: le depois do sinal de "terminou"
+            } else {
+                habitos_ = tempo::ListaHabitos{};
+                if (filesystem != nullptr) TempoStorage::loadHabits(*filesystem, habitos_);
+            }
             garantirDia(nowMs);
             carregado_ = true;
             categoria_ = estado_.ultimaCategoria >= 0 && estado_.ultimaCategoria < int(tempo::kNumCategorias)
@@ -539,10 +561,14 @@ namespace screens {
             pomodoro_ = estado_.ciclopomodoro;
             salvar(filesystem);
         }
-        lista_ = tempo::ListaProjetos{};
-        titulos_.clear();
-        if (filesystem != nullptr) TempoStorage::loadProjects(*filesystem, lista_);
-        for (const auto& projeto : lista_.projetos) titulos_.push_back(tempo::limparTitulo(projeto.titulo));
+        if (syncAtiva_) {
+            recargaPedida_ = true;       // projetos.json esta sendo gravado: mantem a lista atual ate a sync terminar
+        } else {
+            lista_ = tempo::ListaProjetos{};
+            titulos_.clear();
+            if (filesystem != nullptr) TempoStorage::loadProjects(*filesystem, lista_);
+            for (const auto& projeto : lista_.projetos) titulos_.push_back(tempo::limparTitulo(projeto.titulo));
+        }
         primeiro_ = 0;
         if (escolha_ >= int(titulos_.size())) escolha_ = -1;
     }
@@ -1339,7 +1365,7 @@ namespace screens {
         saque.textoCor({502, 62, 124, 18}, fmtSinal(r.liq.xp) + " XP · " + nomeAtributo(r.liq.atributo), 12, cTexto);
         if (r.liq.perfeita) saque.textoCor({502, 92, 124, 16}, "Vitória perfeita!", 11, cVerde);
         else if (!r.liq.vitoria) saque.textoCor({502, 92, 124, 16}, r.abandonou ? "encerrada antes do fim" : "distrações demais", 11, cMudo);
-        saque.textoCor({502, 126, 124, 16}, "vai para o recibo", 10, cMudo);
+        saque.textoCor({502, 126, 124, 16}, "somado à carteira", 10, cMudo);
         saque.desenhar();
         return Action::None;
     }
