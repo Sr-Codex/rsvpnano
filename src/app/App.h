@@ -38,6 +38,8 @@
 #include "ui/screens/HomeScreen.h"
 #include "ui/screens/PerfilScreen.h"
 #include "ui/screens/HabitosScreen.h"
+#include "ui/cenas/CenaFoco.h"
+#include "tempo/CenaFocoEstado.h"
 #include "focus/FocusOrientation.h"
 #include "tempo/Lembretes.h"
 #include "update/OtaUpdater.h"
@@ -192,6 +194,17 @@ private:
     tempo::modofoco::Controlador modoFoco_;
     uint8_t brilhoAplicado_ = 0;                      // ultimo valor enviado pelo laco (0 = nenhum ainda)
     void atualizarBrilho(uint32_t nowMs);
+    // Modo Foco etapa 1 (ajuste Cena): cena QG em tela cheia no lugar da batalha escurecida (ui/cenas/CenaFoco +
+    // tempo/CenaFocoEstado). O buffer do fundo vive na PSRAM so enquanto a batalha com o ajuste Cena esta na tela.
+    ui::cenas::CenaFoco cenaFoco_;
+    tempo::cenafoco::Roteiro roteiroCena_;            // vitoria (~10 s) quando o inimigo zera com a cena na tela
+    tempo::cenafoco::Quadro quadroCena_;
+    uint32_t quadroCenaMs_ = 0;                       // ultimo calculo do quadro (no maximo ~1x/s)
+    bool quadroCenaValido_ = false;
+    bool cenaNaTela_ = false;                         // a cena foi desenhada no ultimo quadro
+    bool cenaFalhou_ = false;                         // sem PSRAM / JPEG ruim: age como Escurecer ate sair da batalha
+    tempo::modofoco::Contexto contextoFoco_;          // contexto desta volta (renderScreen decide se a cena entra)
+    bool desenharCenaFoco(uint32_t nowMs);            // true = desenhou a cena (no lugar da batalha)
     screens::Screen lastRenderedScreen_ = screens::Screen::Home;
     bool settingsFromHome_ = false;
     OtaUpdater::Offer otaOffer_;

@@ -127,12 +127,20 @@ namespace settings {
     };
 
     // Modo Foco do app Tempo (docs/app-tempo/revisao-fable-modo-foco-2026-11-11.md, 3.1): off = desligado, dim = so
-    // escurecer a batalha apos 10 s sem toque (etapa 0), scene = paisagem (etapa 1; ainda nao oferecida no ajuste e,
-    // ate existir, se comporta como dim). Grafia persistida = nomes do TOML/JSON.
+    // escurecer a batalha apos 10 s sem toque (etapa 0), scene = a cena escolhida em focusScene em tela cheia no lugar
+    // da batalha escurecida. Grafia persistida = nomes do TOML/JSON.
     enum class FocusMode : uint8_t {
         off,
         dim,
         scene,
+        Count,
+    };
+
+    // Cena do Modo Foco (focusMode = scene): neon = "QG Neon" (v1), city = "QG Cidade" (v2, padrao). Arte em
+    // src/ui/cenas/CenasFoco.generated.*.
+    enum class FocusScene : uint8_t {
+        neon,
+        city,
         Count,
     };
 
@@ -151,6 +159,7 @@ namespace settings {
         BoundedValue<uint16_t, 0, 1410, 30> quietStartMinute{1380};
         BoundedValue<uint16_t, 0, 1410, 30> quietEndMinute{420};
         FocusMode focusMode = FocusMode::dim;
+        FocusScene focusScene = FocusScene::city;
 
         bool operator==(const InterfaceSettings&) const = default;
     };

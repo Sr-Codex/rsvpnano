@@ -60,6 +60,12 @@ struct glz::meta<settings::FocusMode> {
 };
 
 template<>
+struct glz::meta<settings::FocusScene> {
+    using enum settings::FocusScene;
+    static constexpr auto value = glz::enumerate(neon, city);
+};
+
+template<>
 struct glz::meta<standby::Kind> {
     using enum standby::Kind;
     static constexpr auto value = glz::enumerate(life, maze, voronoi, screenOff, reaction);

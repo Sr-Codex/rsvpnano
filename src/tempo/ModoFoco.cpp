@@ -24,6 +24,19 @@ namespace tempo::modofoco {
         return static_cast<uint8_t>(alvo);
     }
 
+    uint8_t brilhoCena(uint8_t brilhoUsuario, int minutoDoDia) {
+        const int usuario = std::clamp<int>(brilhoUsuario, 1, 100);
+        const int fator = noite(minutoDoDia) ? kFatorCenaNoitePct : kFatorCenaDiaPct;
+        int alvo = (usuario * fator + 50) / 100;
+        alvo = std::max<int>(alvo, kPisoPct);
+        alvo = std::min(alvo, usuario);
+        return static_cast<uint8_t>(alvo);
+    }
+
+    bool usaCena(const Contexto& c) {
+        return c.ajuste == Ajuste::Cena && (c.fase == Fase::Focando || c.fase == Fase::HoraExtra);
+    }
+
     float Controlador::nivelEm(uint32_t nowMs) const {
         switch (estado_) {
         case Estado::Normal: return 0.0f;
@@ -40,6 +53,8 @@ namespace tempo::modofoco {
         if (estado_ != Estado::Escurecendo && estado_ != Estado::Escuro) return;   // Normal/Acordando: nada a fazer
         rampaNivelInicial_ = nivelEm(nowMs);
         rampaInicioMs_ = nowMs;
+        subidaDaCena_ = ultimoUsaCena_;   // a subida parte do brilho que a cena tinha na tela
+        subidaDe_ = ultimoBrilho_;
         estado_ = rampaNivelInicial_ > 0.0f ? Estado::Acordando : Estado::Normal;
     }
 
@@ -90,9 +105,44 @@ namespace tempo::modofoco {
         if (armando_ && nowMs - acordouMs_ >= kArmarMs) armando_ = false;
 
         const int usuario = std::clamp<int>(c.brilhoUsuario, 1, 100);
-        const int alvo = brilhoEscurecido(static_cast<uint8_t>(usuario), c.minutoDoDia);
-        const float valor = static_cast<float>(usuario) - static_cast<float>(usuario - alvo) * nivel_;
+        float valor;
+        if (usaCena(c) || (estado_ == Estado::Acordando && subidaDaCena_)) {
+            valor = brilhoCenaEm(c, nowMs);
+        } else {   // Escurecer (etapa 0), inalterado
+            const int alvo = brilhoEscurecido(static_cast<uint8_t>(usuario), c.minutoDoDia);
+            valor = static_cast<float>(usuario) - static_cast<float>(usuario - alvo) * nivel_;
+        }
+        ultimoBrilho_ = valor;
+        ultimoUsaCena_ = usaCena(c);
+        ultimoMs_ = nowMs;
         return static_cast<uint8_t>(std::clamp<int>(static_cast<int>(valor + 0.5f), 1, 100));
+    }
+
+    float Controlador::brilhoCenaEm(const Contexto& c, uint32_t nowMs) {
+        const float usuario = static_cast<float>(std::clamp<int>(c.brilhoUsuario, 1, 100));
+        const float mergulho = brilhoEscurecido(static_cast<uint8_t>(usuario), c.minutoDoDia);
+        const float cena = c.cenaVitoria ? usuario : static_cast<float>(brilhoCena(static_cast<uint8_t>(usuario), c.minutoDoDia));
+        const auto lerp = [](float a, float b, float t) { return a + (b - a) * std::clamp(t, 0.0f, 1.0f); };
+        switch (estado_) {
+        case Estado::Normal:
+            return usuario;
+        case Estado::Escurecendo: {   // mergulho: a batalha desce ate o escurecido, troca pela cena, a cena sobe ao brilho dela
+            const float meio = kRampaConsomeAPartirDe;
+            return nivel_ < meio ? lerp(usuario, mergulho, nivel_ / meio)
+                                 : lerp(mergulho, cena, (nivel_ - meio) / (1.0f - meio));
+        }
+        case Estado::Escuro: {        // anda ate o alvo (vitoria = usuario, senao brilho da cena) sem saltar; vale tambem
+                                      // para a pausa do ciclo escurecida que vira foco (escurecido -> cena)
+            const float passo = static_cast<float>(nowMs - ultimoMs_) * 100.0f / static_cast<float>(kTrocaBrilhoCenaMs);
+            const float de = ultimoBrilho_;
+            return de < cena ? std::min(cena, de + passo) : std::max(cena, de - passo);
+        }
+        case Estado::Acordando: {     // do brilho que estava na tela ao do usuario, junto com o nivel
+            if (rampaNivelInicial_ <= 0.0f) return usuario;
+            return usuario - (usuario - subidaDe_) * (nivel_ / rampaNivelInicial_);
+        }
+        }
+        return usuario;
     }
 
 } // namespace tempo::modofoco

@@ -757,6 +757,7 @@ void App::renderScreen(uint32_t nowMs) {
     case screens::Screen::TempoHoje:
     case screens::Screen::TempoBatalha:
     case screens::Screen::TempoVitoria:
+        if (screen_ == screens::Screen::TempoBatalha && desenharCenaFoco(nowMs)) break;   // Modo Foco: cena no lugar
         immediateUi_.beginFrame(static_cast<uint8_t>(screen_), tempoScreen_.surface());
         action = tempoScreen_.draw(immediateUi_, nowMs, screen_,
                                    storage_.mounted() ? &Board::Storage::filesystem() : nullptr);
@@ -1682,11 +1683,68 @@ void App::atualizarBrilho(uint32_t nowMs) {
         const auto agora = tempo::agora(nowMs);
         c.minutoDoDia = agora.valida ? agora.minutoDoDia : -1;
     }
+    // Cena (etapa 1): so na tela 640x172 e enquanto a cena funcionar (sem PSRAM/JPEG ruim = so escurecer). Fora da batalha
+    // com o ajuste Cena, a PSRAM da cena e devolvida e a falha e esquecida.
+    const bool batalhaComCena = interface.focusMode == settings::FocusMode::scene && screen_ == screens::Screen::TempoBatalha
+                                && tempoScreen_.battleActive();
+    if (!batalhaComCena) {
+        cenaFoco_.liberar();
+        cenaFalhou_ = false;
+        quadroCenaValido_ = false;
+    }
+    if (c.ajuste == Ajuste::Cena && (cenaFalhou_ || immediateUi_.width() != ui::cenas::CenaFoco::kLarg
+                                     || immediateUi_.height() != ui::cenas::CenaFoco::kAlt))
+        c.ajuste = Ajuste::Escurecer;
+    roteiroCena_.atualizar(c.fase == Fase::Focando, c.fase == Fase::HoraExtra, cenaNaTela_, nowMs);
+    cenaNaTela_ = false;   // renderScreen marca de novo se desenhar a cena neste quadro
+    c.cenaVitoria = roteiroCena_.vitoria(nowMs);
+    contextoFoco_ = c;
     const uint8_t brilho = modoFoco_.atualizar(c, nowMs);
     if (brilho != brilhoAplicado_) {
         Board::Display::setBrightness(brilho);
         brilhoAplicado_ = brilho;
     }
+}
+
+bool App::desenharCenaFoco(uint32_t nowMs) {
+    using namespace tempo::modofoco;
+    namespace cf = tempo::cenafoco;
+    Contexto c = contextoFoco_;
+    c.fase = tempoScreen_.faseModoFoco();   // a fase pode ter mudado no tick desta volta (ex.: teto -> Reflexao)
+    if (!usaCena(c)) return false;
+    const auto estado = modoFoco_.estado();
+    if (estado != Estado::Escurecendo && estado != Estado::Escuro) return false;
+    const auto& cena = settingsStore_.settings().interface.focusScene == settings::FocusScene::neon ? ui::cenas::kQgNeon
+                                                                                                    : ui::cenas::kQgCidade;
+    // Quadro: no maximo ~1x/s (o mapa e a revelacao andam devagar) ou ja quando o fundo muda (vitoria/amanhecer).
+    cf::Entrada e;
+    e.p = tempoScreen_.progressoFoco();
+    e.horaExtra = c.fase == Fase::HoraExtra;
+    // vitoria: janela do roteiro, ou o inimigo zerou NESTA volta (o tick veio depois do roteiro) com a cena na tela
+    e.vitoria = e.horaExtra && (c.cenaVitoria || (contextoFoco_.fase == Fase::Focando && modoFoco_.mostrarCena(contextoFoco_)));
+    e.minutosPlanejados = tempoScreen_.planejadoMin();
+    e.minutosFocoAntes = tempoScreen_.focoPagoHojeMin(nowMs);
+    const cf::Fundo fundo = e.horaExtra ? (e.vitoria ? cf::Fundo::Vitoria : cf::Fundo::Amanhecer) : cf::Fundo::Noite;
+    if (!quadroCenaValido_ || quadroCenaMs_ == 0 || nowMs - quadroCenaMs_ >= 1000 || quadroCena_.fundo != fundo) {
+        quadroCena_ = cf::calcular(e, cena.ordem);
+        quadroCenaMs_ = nowMs;
+        quadroCenaValido_ = true;
+        ESP_LOGD("cena", "quadro p=%.3f novos=%d antes=%d k=%d fundo=%d", e.p, quadroCena_.novos, quadroCena_.antes,
+                 quadroCena_.tomados, static_cast<int>(quadroCena_.fundo));
+    }
+    // Decodifica ja no comeco da rampa (a batalha ainda esta na tela): a troca na metade fica instantanea.
+    if (!cenaFoco_.preparar(cena, quadroCena_.fundo)) {
+        ESP_LOGW("app", "Modo Foco: cena indisponivel (PSRAM/JPEG); so escurecendo ate sair da batalha");
+        cenaFalhou_ = true;
+        return false;
+    }
+    if (!modoFoco_.mostrarCena(c)) return false;
+    // Tela "propria" para o ui::Context: trocar batalha <-> cena invalida tudo e a outra tela repinta inteira.
+    constexpr uint8_t kTelaCena = 0xFE;
+    immediateUi_.beginFrame(kTelaCena, static_cast<uint8_t>(&cena == &ui::cenas::kQgNeon ? 1 : 2));
+    cenaFoco_.desenhar(immediateUi_, quadroCena_);
+    cenaNaTela_ = true;
+    return true;
 }
 
 void App::sincronizarOrientacaoHabitos() {

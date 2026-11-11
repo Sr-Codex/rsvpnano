@@ -69,7 +69,9 @@ namespace {
             pixels = frame().pixels;
         }
         const bool lit = panel().backlight && !panel().sleeping;
-        const float level = lit ? 0.35f + 0.65f * static_cast<float>(panel().brightnessPercent) / 100.0f : 0.0f;
+        // LUME_SIM_SHOT_RAW=1: pixels exatamente como o firmware os escreveu (sem simular o brilho), para comparar com mockups.
+        static const bool raw = [] { const char* v = std::getenv("LUME_SIM_SHOT_RAW"); return v && *v && *v != '0'; }();
+        const float level = !lit ? 0.0f : raw ? 1.0f : 0.35f + 0.65f * static_cast<float>(panel().brightnessPercent) / 100.0f;
         std::vector<uint8_t> rgb(kViewWidth * kViewHeight * 3);
         for (int vy = 0; vy < kViewHeight; ++vy) {
             for (int vx = 0; vx < kViewWidth; ++vx) {

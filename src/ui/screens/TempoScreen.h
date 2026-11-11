@@ -2,6 +2,7 @@
 
 #include <FS.h>
 
+#include <algorithm>
 #include <array>
 #include <memory>
 #include <optional>
@@ -18,6 +19,7 @@
 #include "tempo/ModoFoco.h"
 #include "tempo/Motor.h"
 #include "tempo/Recarga.h"
+#include "tempo/Relogio.h"
 #include "som/Sintese.h"
 #include "tempo/Sessao.h"
 #include "ui/screens/ModernScreens.h"
@@ -173,6 +175,19 @@ namespace screens {
             }
         }
         bool segurandoFim() const { return fimApertado_; }
+        // Modo Foco, cenas QG (tempo::cenafoco): progresso do foco (0..1, sem contar o overtime), duracao planejada e foco
+        // pago HOJE antes desta sessao (as sessoes anteriores do dia; a batalha em curso so entra ao liquidar). Data do
+        // dia diferente de hoje (ex.: a batalha passou da meia-noite) = 0.
+        double progressoFoco() const {
+            const double plano = double(planejadoMin_) * 60000.0;
+            return plano > 0 ? std::min(1.0, double(cron_.focadoMs) / plano) : 0.0;
+        }
+        int planejadoMin() const { return planejadoMin_; }
+        int focoPagoHojeMin(uint32_t nowMs) const {
+            const auto agora = tempo::agora(nowMs);
+            if (!carregado_ || (agora.valida && !(estado_.dia.data == agora.data))) return 0;
+            return std::max(0, estado_.dia.fochoPagoMin);
+        }
 
     private:
         enum class Fase : uint8_t { Nenhuma, Lutando, Pausada, Descanso, Reflexao };

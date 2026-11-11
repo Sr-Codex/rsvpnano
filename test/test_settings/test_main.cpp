@@ -186,6 +186,24 @@ void test_focus_mode_default_migrates_and_persists() {
     TEST_ASSERT_EQUAL(static_cast<int>(settings::FocusMode::scene), static_cast<int>(cena->interface.focusMode));
 }
 
+void test_focus_scene_default_migrates_and_persists() {
+    // configuracao antiga (sem a chave): padrao = QG Cidade
+    auto old = settings::codec::decodeToml("[interface]\nfocusMode = \"scene\"\n", settings::SettingsSource::Nvs);
+    TEST_ASSERT_TRUE(old.has_value());
+    TEST_ASSERT_EQUAL(static_cast<int>(settings::FocusScene::city), static_cast<int>(old->interface.focusScene));
+    old->interface.focusScene = settings::FocusScene::neon;
+    auto encoded = settings::codec::encodeToml(*old, settings::SettingsSource::Nvs);
+    TEST_ASSERT_TRUE(encoded.has_value());
+    TEST_ASSERT_NOT_NULL(std::strstr(encoded->c_str(), "focusScene = \"neon\""));
+    auto restored = settings::codec::decodeToml(*encoded, settings::SettingsSource::Nvs);
+    TEST_ASSERT_TRUE(restored.has_value());
+    TEST_ASSERT_EQUAL(static_cast<int>(settings::FocusScene::neon), static_cast<int>(restored->interface.focusScene));
+    TEST_ASSERT_EQUAL(static_cast<int>(settings::FocusMode::scene), static_cast<int>(restored->interface.focusMode));
+    // valor desconhecido no cartao: rejeitado (nao vira outra cena em silencio)
+    auto ruim = settings::codec::decodeToml("[interface]\nfocusScene = \"floresta\"\n", settings::SettingsSource::Sd);
+    TEST_ASSERT_FALSE(ruim.has_value());
+}
+
 void test_invalid_input_cannot_mutate_a_live_value() {
     settings::DeviceSettings live;
     live.reading.wpm = 450;
@@ -446,6 +464,7 @@ int main() {
     RUN_TEST(test_onboarding_and_touch_preference_migrate_and_persist);
     RUN_TEST(test_sound_settings_defaults_migrate_clamp_and_persist);
     RUN_TEST(test_focus_mode_default_migrates_and_persists);
+    RUN_TEST(test_focus_scene_default_migrates_and_persists);
     RUN_TEST(test_defaults_round_trip_through_toml_and_companion_json);
     RUN_TEST(test_battery_curve_reaches_full);
     RUN_TEST(test_visibility_toggles_only_selected_state_and_round_trips);

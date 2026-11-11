@@ -13,13 +13,20 @@
 //     +------- Acordando (300 ms) <-+-------------------------------------------------- +
 //   Fora das condicoes (pausado, distraido, Fim segurando, saque/Reflexao, fora da batalha, aviso, em pe, Desligado):
 //   Acordando -> Normal, e os 10 s so comecam a contar quando as condicoes voltam.
+//
+// Ajuste Cena (etapa 1, cenas QG): a MESMA maquina; o App desenha a cena em tela cheia no lugar da batalha quando
+// cenaNaTela() (Escuro, ou rampa passada da metade = o mesmo ponto em que o toque passa a ser consumido). So em focando e
+// hora extra (usaCena); a pausa do ciclo continua so escurecendo. Brilho com a cena ("mergulho" na troca de imagem):
+//   Escurecendo 0..1/2: batalha  usuario -> escurecido (fatores da etapa 0)      | troca para a cena na metade
+//   Escurecendo 1/2..1: cena     escurecido -> brilho da cena (kFatorCena*)
+//   Escuro: cena no brilho da cena; na vitoria (Contexto::cenaVitoria) volta ao brilho do usuario; trocas suaves
+//   Acordando: do brilho que estava na tela ate o do usuario (300 ms)
 
 #include <cstdint>
 
 namespace tempo::modofoco {
 
-    // Ajuste "Modo Foco" (Ajustes > Sons e foco). Cena = etapa 1 (paisagem); ate existir, se comporta como Escurecer e
-    // nao aparece no ajuste.
+    // Ajuste "Modo Foco" (Ajustes > Sons e foco): Desligado / Escurecer / Cena (cena QG em tela cheia; ver acima).
     enum class Ajuste : uint8_t { Desligado, Escurecer, Cena };
 
     // ---- Constantes (chute inicial; calibrar na placa de dia e de noite — revisao, secao 3.8)
@@ -37,6 +44,10 @@ namespace tempo::modofoco {
     // Obs.: como o mapeamento e linear no duty a partir de 102, "40 % do brilho" logico reduz menos a luz real
     // (ex.: 70 % -> 28 % logico = duty ~82 % -> ~56 %). Os fatores acima sao para calibrar olhando a placa.
     inline constexpr uint8_t kPisoPct = 5;
+    // Cena (as cenas QG sao escuras por natureza): brilho proprio, num lugar so. Chute inicial; calibrar na placa.
+    inline constexpr uint8_t kFatorCenaDiaPct = 75;      // cena de dia = 75 % do brilho escolhido
+    inline constexpr uint8_t kFatorCenaNoitePct = 45;    // cena das 22:00 as 06:00 = 45 %
+    inline constexpr uint32_t kTrocaBrilhoCenaMs = 1500; // vitoria <-> amanhecer: o brilho anda no maximo 100 % em 1,5 s
     // Toque durante a rampa de escurecer: ate esta fracao a tela ainda esta clara -> o toque so cancela (vai para o botao
     // normalmente); depois dela a tela ja parece apagada -> o toque e tratado como o "1o toque" (consumido).
     inline constexpr float kRampaConsomeAPartirDe = 0.5f;
@@ -62,6 +73,7 @@ namespace tempo::modofoco {
         bool emPe = false;            // placa em pe (IMU): so escurece deitada
         uint8_t brilhoUsuario = 70;   // brilho escolhido em Ajustes (1..100)
         int minutoDoDia = -1;         // hora local do app (0..1439); -1 = desconhecida (usa o fator de dia)
+        bool cenaVitoria = false;     // cena na tela mostrando a vitoria (~10 s): brilho do usuario
     };
 
     enum class Estado : uint8_t { Normal, Escurecendo, Escuro, Acordando };
@@ -71,6 +83,10 @@ namespace tempo::modofoco {
     bool noite(int minutoDoDia);
     // Brilho alvo escurecido (1..100) para o brilho do usuario e a hora: fator dia/noite, piso kPisoPct, nunca acima do usuario.
     uint8_t brilhoEscurecido(uint8_t brilhoUsuario, int minutoDoDia);
+    // Brilho da cena (1..100): fator kFatorCena* dia/noite, piso kPisoPct, nunca acima do usuario.
+    uint8_t brilhoCena(uint8_t brilhoUsuario, int minutoDoDia);
+    // Ajuste Cena e a fase tem cena (focando ou hora extra)? A pausa do ciclo so escurece.
+    bool usaCena(const Contexto& c);
 
     class Controlador {
     public:
@@ -86,6 +102,13 @@ namespace tempo::modofoco {
         Estado estado() const { return estado_; }
         // 0 = brilho normal, 1 = totalmente escurecido (posicao na rampa), no instante da ultima atualizacao.
         float nivel() const { return nivel_; }
+        // A tela esta "escurecida" (Escuro, ou rampa passada da metade): com o ajuste Cena e o momento de mostrar a cena.
+        // Coincide com o ponto em que um toque passa a ser consumido (so acorda).
+        bool cenaNaTela() const {
+            return estado_ == Estado::Escuro || (estado_ == Estado::Escurecendo && nivel_ >= kRampaConsomeAPartirDe);
+        }
+        // Desenhar a cena agora? (ajuste Cena, focando/hora extra, e a tela escurecida)
+        bool mostrarCena(const Contexto& c) const { return usaCena(c) && cenaNaTela(); }
 
     private:
         float nivelEm(uint32_t nowMs) const;
@@ -99,6 +122,13 @@ namespace tempo::modofoco {
         float nivel_ = 0.0f;
         uint32_t acordouMs_ = 0;
         bool armando_ = false;        // janela de kArmarMs depois de um despertar por toque/botao
+        // Ajuste Cena: ultimo brilho entregue (a subida e a troca vitoria/amanhecer partem dele, sem saltos)
+        float ultimoBrilho_ = 0.0f;
+        bool ultimoUsaCena_ = false;
+        uint32_t ultimoMs_ = 0;
+        float subidaDe_ = 0.0f;       // brilho no instante do despertar (Acordando vindo da cena)
+        bool subidaDaCena_ = false;
+        float brilhoCenaEm(const Contexto& c, uint32_t nowMs);
     };
 
 } // namespace tempo::modofoco

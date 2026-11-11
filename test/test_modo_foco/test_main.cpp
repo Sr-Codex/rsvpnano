@@ -1,5 +1,6 @@
 // Modo Foco etapa 0 (tempo/ModoFoco): escurecer apos 10 s, estados que bloqueiam, 1o toque consumido + armar 300 ms,
-// rampas, dia/noite/piso, toda saida restaura o brilho e ajuste Desligado. Logica pura.
+// rampas, dia/noite/piso, toda saida restaura o brilho e ajuste Desligado. Etapa 1 (ajuste Cena): quando a cena aparece,
+// brilho proprio da cena (dia/noite), vitoria no brilho do usuario, sem saltos, e toda saida restaura. Logica pura.
 #include <unity.h>
 
 #include <initializer_list>
@@ -94,12 +95,135 @@ void test_estados_que_bloqueiam_nunca_escurecem() {
     TEST_ASSERT_TRUE(podeEscurecer(focando()));
 }
 
-void test_cena_ainda_se_comporta_como_escurecer() {
+// ---------------------------------------------------------------- ajuste Cena (etapa 1)
+namespace {
+    constexpr uint8_t kCenaDia = 53;     // 75 % de 70 (52,5 -> 53)
+    constexpr uint8_t kCenaNoite = 32;   // 45 % de 70 (31,5 -> 32)
+
+    Contexto comCena(int minuto = kTarde) {
+        auto c = focando(minuto);
+        c.ajuste = Ajuste::Cena;
+        return c;
+    }
+} // namespace
+
+void test_cena_tem_brilho_proprio_de_dia_e_de_noite() {
+    TEST_ASSERT_EQUAL_UINT8(kCenaDia, brilhoCena(kUsuario, kTarde));
+    TEST_ASSERT_EQUAL_UINT8(kCenaNoite, brilhoCena(kUsuario, 23 * 60));
+    TEST_ASSERT_EQUAL_UINT8(kPisoPct, brilhoCena(5, kTarde));      // piso: nunca abaixo do minimo do usuario
+    TEST_ASSERT_EQUAL_UINT8(3, brilhoCena(3, kTarde));             // nunca acima do usuario
+    for (int minuto : {kTarde, 23 * 60}) {
+        Controlador m;
+        const auto c = comCena(minuto);
+        escurecer(m, c);
+        TEST_ASSERT_TRUE(m.mostrarCena(c));
+        TEST_ASSERT_EQUAL_UINT8(minuto == kTarde ? kCenaDia : kCenaNoite, m.atualizar(c, 20000));
+    }
+}
+
+void test_cena_aparece_na_metade_da_rampa_com_mergulho() {
     Controlador m;
-    auto c = focando();
-    c.ajuste = Ajuste::Cena;
+    const auto c = comCena();
+    rodar(m, c, 1000, 1000 + kOciosoMs);
+    TEST_ASSERT_EQUAL(static_cast<int>(Estado::Escurecendo), static_cast<int>(m.estado()));
+    // 1a metade: ainda a batalha, descendo do usuario ate o escurecido (28)
+    const uint8_t quarto = m.atualizar(c, 1000 + kOciosoMs + kDescerMs / 4);
+    TEST_ASSERT_FALSE(m.mostrarCena(c));
+    TEST_ASSERT_UINT8_WITHIN(1, (kUsuario + kAlvoDia) / 2, quarto);
+    // metade: troca para a cena no ponto mais escuro
+    TEST_ASSERT_UINT8_WITHIN(1, kAlvoDia, m.atualizar(c, 1000 + kOciosoMs + kDescerMs / 2));
+    TEST_ASSERT_TRUE(m.mostrarCena(c));
+    // 2a metade: a cena sobe ate o brilho dela
+    const uint8_t tresQuartos = m.atualizar(c, 1000 + kOciosoMs + 3 * kDescerMs / 4);
+    TEST_ASSERT_UINT8_WITHIN(1, (kAlvoDia + kCenaDia) / 2, tresQuartos);
+    TEST_ASSERT_EQUAL_UINT8(kCenaDia, m.atualizar(c, 1000 + kOciosoMs + kDescerMs));
+    TEST_ASSERT_EQUAL(static_cast<int>(Estado::Escuro), static_cast<int>(m.estado()));
+    // o toque com a cena na tela e consumido (so acorda)
+    TEST_ASSERT_TRUE(m.toque(1000 + kOciosoMs + kDescerMs + 10));
+}
+
+void test_cena_nao_aparece_na_pausa_do_ciclo() {
+    Controlador m;
+    auto c = comCena();
+    c.fase = Fase::PausaCiclo;
     escurecer(m, c);
+    TEST_ASSERT_FALSE(m.mostrarCena(c));   // a pausa do ciclo so escurece (etapa 0)
     TEST_ASSERT_EQUAL_UINT8(kAlvoDia, m.atualizar(c, 20000));
+    // a pausa acabou e a rodada seguinte comecou sem toque: a cena entra, o brilho anda sem saltar
+    c.fase = Fase::Focando;
+    const uint8_t logo = m.atualizar(c, 20010);
+    TEST_ASSERT_TRUE(m.mostrarCena(c));
+    TEST_ASSERT_TRUE(logo <= kAlvoDia + 2);
+    TEST_ASSERT_EQUAL_UINT8(kCenaDia, rodar(m, c, 20020, 20020 + kTrocaBrilhoCenaMs));
+}
+
+void test_vitoria_no_brilho_do_usuario_e_volta_suave_ao_da_cena() {
+    Controlador m;
+    auto c = comCena();
+    uint32_t t = escurecer(m, c);
+    TEST_ASSERT_EQUAL_UINT8(kCenaDia, m.atualizar(c, t += 10));
+    c.fase = Fase::HoraExtra;
+    c.cenaVitoria = true;
+    uint8_t anterior = kCenaDia;
+    for (uint32_t fim = t + kTrocaBrilhoCenaMs; t < fim;) {   // sobe sem saltos
+        const uint8_t b = m.atualizar(c, t += 10);
+        TEST_ASSERT_TRUE(b >= anterior && b - anterior <= 2);
+        anterior = b;
+    }
+    TEST_ASSERT_EQUAL_UINT8(kUsuario, m.atualizar(c, t += 10));
+    TEST_ASSERT_TRUE(m.mostrarCena(c));        // continua a cena (vitoria), so o brilho mudou
+    c.cenaVitoria = false;                     // amanhecer
+    TEST_ASSERT_TRUE(m.atualizar(c, t += 10) > kCenaDia);
+    TEST_ASSERT_EQUAL_UINT8(kCenaDia, rodar(m, c, t + 10, t + 10 + kTrocaBrilhoCenaMs));
+}
+
+void test_acordar_da_cena_sobe_do_brilho_da_cena_sem_mergulhar() {
+    Controlador m;
+    const auto c = comCena();
+    uint32_t t = escurecer(m, c);
+    TEST_ASSERT_EQUAL_UINT8(kCenaDia, m.atualizar(c, t += 10));
+    TEST_ASSERT_TRUE(m.toque(t += 10));
+    TEST_ASSERT_FALSE(m.mostrarCena(c));
+    uint8_t anterior = kCenaDia;
+    for (uint32_t fim = t + kSubirMs; t < fim;) {
+        const uint8_t b = m.atualizar(c, t += 10);
+        TEST_ASSERT_FALSE(m.mostrarCena(c));
+        TEST_ASSERT_TRUE(b >= anterior);       // nunca desce (nao passa pelo escurecido)
+        anterior = b;
+    }
+    TEST_ASSERT_EQUAL_UINT8(kUsuario, m.atualizar(c, t += 10));
+    TEST_ASSERT_EQUAL(static_cast<int>(Estado::Normal), static_cast<int>(m.estado()));
+}
+
+void test_cena_cada_saida_restaura_o_brilho() {
+    struct Saida { const char* nome; void (*aplicar)(Contexto&); };
+    const Saida saidas[] = {
+        {"pausar", [](Contexto& c) { c.fase = Fase::Pausado; }},
+        {"distrai", [](Contexto& c) { c.fase = Fase::Distraido; }},
+        {"teto do overtime / saque / Reflexao", [](Contexto& c) { c.fase = Fase::Fechamento; }},
+        {"batalha cancelada", [](Contexto& c) { c.fase = Fase::Nenhuma; }},
+        {"trocar de app / standby / OTA", [](Contexto& c) { c.telaBatalha = false; }},
+        {"aviso de habito", [](Contexto& c) { c.avisoHabito = true; }},
+        {"em pe", [](Contexto& c) { c.emPe = true; }},
+        {"ajuste Desligado", [](Contexto& c) { c.ajuste = Ajuste::Desligado; }},
+    };
+    for (const auto& s : saidas) {
+        for (bool vitoria : {false, true}) {
+            Controlador m;
+            auto c = comCena();
+            c.cenaVitoria = vitoria;
+            const uint32_t t = escurecer(m, c);
+            rodar(m, c, t, t + kTrocaBrilhoCenaMs);
+            s.aplicar(c);
+            c.cenaVitoria = false;
+            m.atualizar(c, t + kTrocaBrilhoCenaMs + 10);
+            TEST_ASSERT_FALSE_MESSAGE(m.mostrarCena(c), s.nome);
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(kUsuario, rodar(m, c, t + kTrocaBrilhoCenaMs + 20,
+                                                           t + kTrocaBrilhoCenaMs + 20 + kSubirMs), s.nome);
+            TEST_ASSERT_EQUAL_MESSAGE(static_cast<int>(Estado::Normal), static_cast<int>(m.estado()), s.nome);
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(kUsuario, rodar(m, c, t + 4000, t + 3 * kOciosoMs), s.nome);
+        }
+    }
 }
 
 void test_dez_segundos_so_contam_depois_de_voltar_ao_foco() {
@@ -295,7 +419,12 @@ int main(int, char**) {
     RUN_TEST(test_dez_segundos_sem_toque_escurece_com_rampa);
     RUN_TEST(test_hora_extra_e_pausa_do_ciclo_tambem_escurecem);
     RUN_TEST(test_estados_que_bloqueiam_nunca_escurecem);
-    RUN_TEST(test_cena_ainda_se_comporta_como_escurecer);
+    RUN_TEST(test_cena_tem_brilho_proprio_de_dia_e_de_noite);
+    RUN_TEST(test_cena_aparece_na_metade_da_rampa_com_mergulho);
+    RUN_TEST(test_cena_nao_aparece_na_pausa_do_ciclo);
+    RUN_TEST(test_vitoria_no_brilho_do_usuario_e_volta_suave_ao_da_cena);
+    RUN_TEST(test_acordar_da_cena_sobe_do_brilho_da_cena_sem_mergulhar);
+    RUN_TEST(test_cena_cada_saida_restaura_o_brilho);
     RUN_TEST(test_dez_segundos_so_contam_depois_de_voltar_ao_foco);
     RUN_TEST(test_toque_zera_os_dez_segundos);
     RUN_TEST(test_toque_no_comeco_da_rampa_cancela_sem_consumir);

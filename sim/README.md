@@ -64,6 +64,8 @@ Verbos (`@ms` = tempo desde o início): `tap X,Y` · `hold X,Y MS` · `drag X1,Y
 `down X,Y` / `move X,Y` / `up` (dedo apoiado, para capturar no meio de um arrasto) · `press boot|power` · `long boot|power MS` · `pose up|down|a|b` · `shake` · `turn` · `shot ARQ.png` ·
 `imucheck` (autoteste: o `OrientationReader` real classifica cada pose) · `quit`.
 Coordenadas = as da janela (640×172 deitada). Log de depuração: `LUME_SIM_DEBUG=1`.
+As capturas aplicam o brilho do painel (0,35 + 0,65 × %); `LUME_SIM_SHOT_RAW=1` grava os pixels exatamente como o
+firmware os escreveu (sem brilho), para comparar com os mockups.
 
 **Escala de tempo (app Tempo):** `LUME_SIM_TIME_SCALE=60 sim/run.sh` faz o relógio do app Tempo (batalha,
 data/hora) andar 60× mais rápido: 1 min real = 1 h, então uma batalha de 25 min termina em 25 s. Só o
