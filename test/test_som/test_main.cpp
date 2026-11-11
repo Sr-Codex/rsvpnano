@@ -121,12 +121,12 @@ void test_decaimento_termina_perto_de_zero() {
 
 void test_volume_e_ganho() {
     const int base = pico(renderizar(SomId::Bip, ganhoDoVolume(Volume::Medio)));
-    TEST_ASSERT_INT_WITHIN(250, 8191, base);   // 0,25 do fundo de escala (menos o decaimento ate o fim do ataque)
+    TEST_ASSERT_INT_WITHIN(250, int(8191 * kGanhoMedio), base);   // 0,25 do fundo de escala x ganho Medio (menos o decaimento ate o fim do ataque)
     const int baixo = pico(renderizar(SomId::Bip, ganhoDoVolume(Volume::Baixo)));
     const int alto = pico(renderizar(SomId::Bip, ganhoDoVolume(Volume::Alto)));
     TEST_ASSERT_TRUE(baixo < base && base < alto);
-    TEST_ASSERT_FLOAT_WITHIN(0.03f, 0.4f, float(baixo) / float(base));
-    TEST_ASSERT_FLOAT_WITHIN(0.03f, 1.6f, float(alto) / float(base));
+    TEST_ASSERT_FLOAT_WITHIN(0.03f, kGanhoBaixo / kGanhoMedio, float(baixo) / float(base));
+    TEST_ASSERT_FLOAT_WITHIN(0.03f, kGanhoAlto / kGanhoMedio, float(alto) / float(base));
     TEST_ASSERT_TRUE(alto < 32767);   // sem clipping no volume alto
     for (size_t i = 0; i < kNumSons; ++i)   // nenhum som estoura no alto
         TEST_ASSERT_TRUE_MESSAGE(pico(renderizar(static_cast<SomId>(i), ganhoDoVolume(Volume::Alto))) < 32000,
@@ -255,11 +255,11 @@ void test_silencio_lembrete_comum_respeita_medicacao_nao() {
 void test_volume_vai_no_ganho_da_decisao() {
     Config c;
     c.volume = Volume::Baixo;
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.4f, decidir(SomId::Bip, c, 12 * 60).ganho);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, kGanhoBaixo, decidir(SomId::Bip, c, 12 * 60).ganho);
     c.volume = Volume::Alto;
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.6f, decidir(SomId::Bip, c, 12 * 60).ganho);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, kGanhoAlto, decidir(SomId::Bip, c, 12 * 60).ganho);
     c.volume = Volume::Medio;
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, decidir(SomId::Bip, c, 12 * 60).ganho);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, kGanhoMedio, decidir(SomId::Bip, c, 12 * 60).ganho);
 }
 
 void test_escolher_um_som_por_evento_composto() {

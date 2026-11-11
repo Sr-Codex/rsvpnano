@@ -38,7 +38,10 @@ namespace BoardDrivers::Es8311 {
         constexpr uint8_t kGpReg45 = 0x45;
         constexpr uint8_t kChipId1RegFD = 0xFD;
         constexpr uint8_t kChipId2RegFE = 0xFE;
-        constexpr uint8_t kDacVolumeMax = 0xFF;
+        // REG32 = volume digital do DAC: 0x00 = -95,5 dB, passo 0,5 dB, 0xBF = 0 dB, 0xFF = +32 dB.
+        // O upstream usava 0xFF (+32 dB): satura/"estoura" qualquer som (relatado na placa, lume.9). 0 dB = sem clipping;
+        // o volume do usuario fica so no ganho da sintese (som::ganhoDoVolume).
+        constexpr uint8_t kDacVolume0dB = 0xBF;
 
         bool readRegister(Context& context, uint8_t reg, uint8_t& value) {
             context.wire.beginTransmission(context.address);
@@ -140,7 +143,7 @@ namespace BoardDrivers::Es8311 {
             }
 
             dacMute &= 0x9F;
-            return writeRegister(context, kDacReg31, dacMute) && writeRegister(context, kDacReg32, kDacVolumeMax);
+            return writeRegister(context, kDacReg31, dacMute) && writeRegister(context, kDacReg32, kDacVolume0dB);
         }
 
         bool configureCodec(Context& context) {
@@ -190,7 +193,7 @@ namespace BoardDrivers::Es8311 {
             dacMute &= 0x9F;
             writeRegister(context, kDacReg31, dacMute);
         }
-        writeRegister(context, kDacReg32, kDacVolumeMax);
+        writeRegister(context, kDacReg32, kDacVolume0dB);
         return true;
     }
 

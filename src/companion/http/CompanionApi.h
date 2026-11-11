@@ -123,6 +123,8 @@ private:
     companion::api::Result<> putTickTick(httpd_req_t& request);
     companion::api::Result<> putTempoProjects(httpd_req_t& request);
     companion::api::Result<> putTempoHabits(httpd_req_t& request);
+    // Ajuste fino do volume pelo cabo (só USB): toca um som com um ganho qualquer, sem gravar nada.
+    companion::api::Result<> putSomTeste(httpd_req_t& request);
 
     // HTTP transport
     static esp_err_t handleLibrary(httpd_req_t* request);

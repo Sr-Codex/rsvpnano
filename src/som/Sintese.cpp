@@ -77,9 +77,11 @@ namespace som {
 
     float ganhoDoVolume(Volume v) {
         switch (v) {
-        case Volume::Baixo: return 0.4f;
-        case Volume::Alto: return 1.6f;   // pico ~0,4 do fundo de escala: o nivel do bipe antigo (12000/32768)
-        default: return 1.0f;
+        // Com o DAC do ES8311 em 0 dB (antes +32 dB, saturava). Valores provisorios: afinar ouvindo na placa
+        // (rota USB PUT /api/v2/som/teste). Teto: 4,0 (onda de 0,25 do fundo de escala) antes de saturar no digital.
+        case Volume::Baixo: return kGanhoBaixo;
+        case Volume::Alto: return kGanhoAlto;
+        default: return kGanhoMedio;
         }
     }
 

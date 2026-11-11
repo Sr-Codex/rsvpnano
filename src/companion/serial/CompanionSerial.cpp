@@ -573,6 +573,8 @@ void CompanionSerial::dispatchRequest(companion::BufferedRequest& buffered) {
         sendEmpty(api_.putTempoProjects(request));
     else if (method == "PUT" && path == "/api/v2/tempo/habitos")
         sendEmpty(api_.putTempoHabits(request));
+    else if (method == "PUT" && path == "/api/v2/som/teste")   // só USB: roda no laço principal (I2C do codec)
+        sendEmpty(api_.putSomTeste(request));
     else
         failed(api::httpError(HTTP_CODE_NOT_FOUND, "not_found", "API endpoint not found"));
 }

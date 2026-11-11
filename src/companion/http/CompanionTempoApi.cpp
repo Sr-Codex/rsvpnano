@@ -2,7 +2,9 @@
 
 #include <utility>
 
+#include "board/BoardAudio.h"
 #include "board/BoardStorage.h"
+#include "som/Regras.h"
 #include "network/TickTickSync.h"
 #include "storage/tempo/TempoStorage.h"
 #include "tempo/TickTick.h"
@@ -89,6 +91,27 @@ companion::api::Result<> CompanionApi::putTempoHabits(httpd_req_t& request) {
                 return std::unexpected(api::httpError(HTTP_CODE_INTERNAL_SERVER_ERROR, "habits_save_failed",
                                                       "Could not write /tempo/habitos.json"));
             }
+            return {};
+        });
+}
+
+namespace companion::api {
+    struct SomTeste {
+        int som = 1;          // som::SomId (0 = Bip ... 11 = SuaveDescendo)
+        float ganho = 0.5f;   // 0 .. som::kGanhoMaxTeste
+    };
+}
+
+companion::api::Result<> CompanionApi::putSomTeste(httpd_req_t& request) {
+    return readJson<api::SomTeste>(request, 128, "som/teste payload exceeds 128 bytes")
+        .and_then([](api::SomTeste pedido) -> companion::api::Result<> {
+            if (pedido.som < 0 || pedido.som >= static_cast<int>(som::kNumSons) || !(pedido.ganho >= 0.0f)
+                || pedido.ganho > som::kGanhoMaxTeste) {
+                return std::unexpected(api::httpError(HTTP_CODE_UNPROCESSABLE_ENTITY, "invalid_sound",
+                                                      "som 0..11 e ganho 0..4"));
+            }
+            Board::Audio::play(som::Pedido{.som = static_cast<som::SomId>(pedido.som), .ganho = pedido.ganho,
+                                           .classe = som::Classe::Lembrete});
             return {};
         });
 }

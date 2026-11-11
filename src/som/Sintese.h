@@ -62,6 +62,10 @@ namespace som {
 
     // Ganho linear aplicado sobre o nivel de referencia (Medio = 1,0 = exatamente os WAV do usuario).
     enum class Volume : uint8_t { Baixo, Medio, Alto, Count };
+    inline constexpr float kGanhoBaixo = 0.25f;   // -12 dB do nivel dos WAV
+    inline constexpr float kGanhoMedio = 0.5f;    //  -6 dB
+    inline constexpr float kGanhoAlto = 1.0f;     //   0 dB (nivel dos WAV)
+    inline constexpr float kGanhoMaxTeste = 4.0f; // rota de teste: acima disso a onda satura no digital
     float ganhoDoVolume(Volume v);
 
     // Sintetizador em blocos (nao aloca o som inteiro): iniciar() e chamar gerar() ate devolver 0.
