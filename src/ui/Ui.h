@@ -282,6 +282,8 @@ namespace ui {
         void setTouchSource(TouchSource source);
         bool pollTouch(uint32_t nowMs);
         void cancelTouchUntilRelease();
+        // Ha um dedo apoiado (gesto em curso ou ignorado ate soltar): o Modo Foco nao escurece com a mao na tela.
+        bool fingerDown() const { return touchActive_ || touchSuppressed_; }
         bool verticalSlider(Rect rect, int& value, int minimum, int maximum);
         const Touch* touch() const {
             return touchPending_ ? &touchEvent_ : nullptr;

@@ -6,7 +6,8 @@
 
 // Ajustes > Sons (docs/app-tempo/sons.md): volume (baixo/medio/alto), sons de jogo liga/desliga (lembretes sempre
 // tocam), horario de silencio (liga/desliga + inicio/fim em passos de 30 min; lembrete comum respeita, medicacao nao)
-// e "Ouvir" para testar o volume. Textos em pt-BR direto no codigo (como o app Tempo).
+// e "Ouvir" para testar o volume; mais o "Modo Foco" do app Tempo (Desligado / Escurecer: a batalha escurece apos 10 s
+// sem toque). Textos em pt-BR direto no codigo (como o app Tempo).
 namespace screens {
     namespace {
         std::string hora(int minuto) {
@@ -41,7 +42,7 @@ namespace screens {
         using ui::modern::button;
         using ui::modern::Style;
         bool mudou = false;
-        if (modern::header(ui, "Sons", screen, Screen::Settings) == Action::Resume) screen = Screen::Reader;
+        if (modern::header(ui, "Sons e foco", screen, Screen::Settings) == Action::Resume) screen = Screen::Reader;
 
         if (button(ui, {12, 51, 198, 53}, "Volume", Style::Secondary, true, kVolumes[config.soundVolume], 14,
                    ui::TextAlign::Start)) {
@@ -64,8 +65,16 @@ namespace screens {
 
         mudou |= passo(ui, 12, "Início", config.quietStartMinute, config.quietHours);
         mudou |= passo(ui, 221, "Fim", config.quietEndMinute, config.quietHours);
-        if (button(ui, {430, 111, 198, 53}, "Ouvir", Style::Primary, true, "Testa o volume", 14, ui::TextAlign::Start))
+        if (button(ui, {430, 111, 84, 53}, "Ouvir", Style::Primary, true, "Testa", 14, ui::TextAlign::Start))
             testar = true;
+        // Modo Foco (app Tempo): Desligado / Escurecer. "Cena" (etapa 1) ainda nao e oferecida; se vier gravada de um
+        // firmware futuro aparece como Escurecer (e o que ela faz hoje) e o toque volta para Desligado.
+        const bool escurece = config.focusMode != settings::FocusMode::off;
+        if (button(ui, {522, 111, 106, 53}, "Modo Foco", Style::Secondary, true, escurece ? "Escurecer" : "Desligado", 14,
+                   ui::TextAlign::Start)) {
+            config.focusMode = escurece ? settings::FocusMode::off : settings::FocusMode::dim;
+            mudou = true;
+        }
         return mudou;
     }
 

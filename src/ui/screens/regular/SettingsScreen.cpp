@@ -8,8 +8,9 @@ namespace screens {
         if (ui.modernPresentation()) {
             if (auto action = modern::header(ui, ui.text(UiText::Settings), screen); action != Action::None)
                 return action;
-            // Ajustes > Sons: botao no cabecalho (mesmo padrao do "Teste de toque" em Tela), sem apertar os seis atalhos.
-            if (ui::modern::button(ui, {340, 0, 132, 43}, "Sons", ui::modern::Style::Plain, true, {}, 13)) screen = Screen::SonsSettings;
+            // Ajustes > Sons e foco (sons + Modo Foco do Tempo): botao no cabecalho (mesmo padrao do "Teste de toque" em Tela),
+            // sem apertar os seis atalhos.
+            if (ui::modern::button(ui, {340, 0, 132, 43}, "Sons e foco", ui::modern::Style::Plain, true, {}, 13)) screen = Screen::SonsSettings;
             using C=modern::Copy;
             constexpr C names[]{C::Reading,C::Appearance,C::Display,C::Connections,C::Device,C::Help};
             constexpr C details[]{C::ReadingHint,C::AppearanceHint,C::DisplayHint,C::ConnectionsHint,C::DeviceHint,C::HelpHint};

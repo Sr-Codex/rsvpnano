@@ -186,6 +186,12 @@ private:
     std::optional<som::SomId> somDoQuadro_;
     bool focoAtivoAntes_ = false;
     void sincronizarOrientacaoHabitos();              // em pe (IMU) so com os Habitos abertos
+    // Modo Foco etapa 0 (tempo/ModoFoco.h): brilho EFETIVO calculado a cada volta do laco (ajuste do usuario x escurecido)
+    // e enviado ao painel so quando muda. Toda saida da batalha volta ao brilho do usuario por construcao; o valor salvo
+    // em Ajustes nunca e alterado.
+    tempo::modofoco::Controlador modoFoco_;
+    uint8_t brilhoAplicado_ = 0;                      // ultimo valor enviado pelo laco (0 = nenhum ainda)
+    void atualizarBrilho(uint32_t nowMs);
     screens::Screen lastRenderedScreen_ = screens::Screen::Home;
     bool settingsFromHome_ = false;
     OtaUpdater::Offer otaOffer_;

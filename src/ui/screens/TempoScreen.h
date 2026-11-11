@@ -15,6 +15,7 @@
 #include "tempo/FocoLeitor.h"
 #include "tempo/Habitos.h"
 #include "tempo/Lembretes.h"
+#include "tempo/ModoFoco.h"
 #include "tempo/Motor.h"
 #include "tempo/Recarga.h"
 #include "som/Sintese.h"
@@ -160,6 +161,18 @@ namespace screens {
         // Reflexao aberta ou saque com a janela do "Desfazer" ainda aberta (nada gravado no log/resumo): o estado nao pode
         // mudar por fora (sync de habitos, manutencao) nem comecar outra batalha.
         bool emFechamento() const { return fase_ == Fase::Reflexao || (saqueAtivo_ && !confirmado_); }
+        // Modo Foco (etapa 0): a fase da batalha vista pelo escurecimento (tempo::modofoco) e o "Fim · segure" em andamento.
+        tempo::modofoco::Fase faseModoFoco() const {
+            using F = tempo::modofoco::Fase;
+            if (saqueAtivo_ || fase_ == Fase::Reflexao) return F::Fechamento;
+            switch (fase_) {
+            case Fase::Lutando: return overtime_ ? F::HoraExtra : cron_.distraido ? F::Distraido : F::Focando;
+            case Fase::Pausada: return F::Pausado;
+            case Fase::Descanso: return F::PausaCiclo;
+            default: return F::Nenhuma;
+            }
+        }
+        bool segurandoFim() const { return fimApertado_; }
 
     private:
         enum class Fase : uint8_t { Nenhuma, Lutando, Pausada, Descanso, Reflexao };

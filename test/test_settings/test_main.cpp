@@ -2,6 +2,7 @@
 
 #include <glaze/toml.hpp>
 
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -165,6 +166,24 @@ void test_sound_settings_defaults_migrate_clamp_and_persist() {
     TEST_ASSERT_TRUE(fora.has_value());
     TEST_ASSERT_EQUAL_UINT8(2, fora->interface.soundVolume);
     TEST_ASSERT_EQUAL_UINT16(1410, fora->interface.quietStartMinute);
+}
+
+void test_focus_mode_default_migrates_and_persists() {
+    // configuracao antiga (sem a chave): padrao = escurecer
+    auto old = settings::codec::decodeToml("[interface]\nlocale = \"pt-BR\"\n", settings::SettingsSource::Nvs);
+    TEST_ASSERT_TRUE(old.has_value());
+    TEST_ASSERT_EQUAL(static_cast<int>(settings::FocusMode::dim), static_cast<int>(old->interface.focusMode));
+    old->interface.focusMode = settings::FocusMode::off;
+    auto encoded = settings::codec::encodeToml(*old, settings::SettingsSource::Nvs);
+    TEST_ASSERT_TRUE(encoded.has_value());
+    TEST_ASSERT_NOT_NULL(std::strstr(encoded->c_str(), "focusMode = \"off\""));
+    auto restored = settings::codec::decodeToml(*encoded, settings::SettingsSource::Nvs);
+    TEST_ASSERT_TRUE(restored.has_value());
+    TEST_ASSERT_EQUAL(static_cast<int>(settings::FocusMode::off), static_cast<int>(restored->interface.focusMode));
+    // "scene" (etapa 1) ja e lido sem erro (firmware futuro -> este)
+    auto cena = settings::codec::decodeToml("[interface]\nfocusMode = \"scene\"\n", settings::SettingsSource::Sd);
+    TEST_ASSERT_TRUE(cena.has_value());
+    TEST_ASSERT_EQUAL(static_cast<int>(settings::FocusMode::scene), static_cast<int>(cena->interface.focusMode));
 }
 
 void test_invalid_input_cannot_mutate_a_live_value() {
@@ -426,6 +445,7 @@ int main() {
     RUN_TEST(test_pocket_lines_guides_migrate_old_settings_without_reinterpreting_horizontal_gap);
     RUN_TEST(test_onboarding_and_touch_preference_migrate_and_persist);
     RUN_TEST(test_sound_settings_defaults_migrate_clamp_and_persist);
+    RUN_TEST(test_focus_mode_default_migrates_and_persists);
     RUN_TEST(test_defaults_round_trip_through_toml_and_companion_json);
     RUN_TEST(test_battery_curve_reaches_full);
     RUN_TEST(test_visibility_toggles_only_selected_state_and_round_trips);

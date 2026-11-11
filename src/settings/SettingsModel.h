@@ -126,6 +126,16 @@ namespace settings {
         bool operator==(const ReadingSettings&) const = default;
     };
 
+    // Modo Foco do app Tempo (docs/app-tempo/revisao-fable-modo-foco-2026-11-11.md, 3.1): off = desligado, dim = so
+    // escurecer a batalha apos 10 s sem toque (etapa 0), scene = paisagem (etapa 1; ainda nao oferecida no ajuste e,
+    // ate existir, se comporta como dim). Grafia persistida = nomes do TOML/JSON.
+    enum class FocusMode : uint8_t {
+        off,
+        dim,
+        scene,
+        Count,
+    };
+
     struct InterfaceSettings {
         BoundedValue<uint8_t, 5, 100, 5> brightnessPercent{70};
         std::string locale = "en";
@@ -140,6 +150,7 @@ namespace settings {
         bool quietHours = false;
         BoundedValue<uint16_t, 0, 1410, 30> quietStartMinute{1380};
         BoundedValue<uint16_t, 0, 1410, 30> quietEndMinute{420};
+        FocusMode focusMode = FocusMode::dim;
 
         bool operator==(const InterfaceSettings&) const = default;
     };

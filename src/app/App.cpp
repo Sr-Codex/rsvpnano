@@ -289,14 +289,24 @@ void App::update(uint32_t nowMs) {
     Input::ActionMask actions;
     while (Input::poll(actions)) {
         lastActivityMs_ = nowMs;
+        modoFoco_.botao(nowMs);   // BOOT/PWR acordam a tela escurecida e mantem a funcao de sempre
         handleInput(actions, nowMs);
         nowMs = millis();
     }
     while (immediateUi_.pollTouch(nowMs)) {
         lastActivityMs_ = nowMs;
+        const ui::Touch* toque = immediateUi_.touch();
+        if (toque != nullptr && ui::hasTouch(*toque, ui::TouchStart) && modoFoco_.toque(nowMs)) {
+            // Modo Foco: com a tela escurecida o 1o toque so acorda. O gesto inteiro e ignorado ate soltar, entao nunca
+            // aciona o botao sob o dedo (nem "Fim · segure").
+            immediateUi_.cancelTouchUntilRelease();
+            nowMs = millis();
+            continue;
+        }
         if (!handleAvisoTouch(nowMs)) handleTouch(nowMs);
         nowMs = millis();
     }
+    atualizarBrilho(nowMs);   // antes de qualquer retorno antecipado do laco (status, job, standby, companion)
 
     updateBackgroundJob();
     updateTickTickSync(nowMs);
@@ -1649,6 +1659,34 @@ void App::desenharAvisoHabito(uint32_t nowMs) {
     avisoPintar_ = false;
     avisoPintadoMs_ = nowMs;
     screens::desenharAvisoHabito(immediateUi_, avisoHabito_);
+}
+
+void App::atualizarBrilho(uint32_t nowMs) {
+    using namespace tempo::modofoco;
+    const auto& interface = settingsStore_.settings().interface;
+    Contexto c;
+    c.ajuste = interface.focusMode == settings::FocusMode::off     ? Ajuste::Desligado
+             : interface.focusMode == settings::FocusMode::scene ? Ajuste::Cena
+                                                                 : Ajuste::Escurecer;
+    // So a tela da batalha, na frente, sem nada por cima (job bloqueante, companion, USB, pausa do foco do leitor).
+    c.telaBatalha = screen_ == screens::Screen::TempoBatalha && !backgroundJobActive() && !companionApi_.active()
+                    && !serialCompanion_.active() && !usbTransfer_.active() && !focusScreen_.breakVisible();
+    c.fase = tempoScreen_.faseModoFoco();
+    c.segurandoFim = tempoScreen_.segurandoFim();
+    c.dedoNaTela = immediateUi_.fingerDown();
+    c.avisoHabito = avisoAtivo_;   // lembrete no topo: acorda a tela (brilho normal) e os 10 s recomecam depois
+    const auto pose = motionReader_.orientation();
+    c.emPe = pose == focus::Orientation::ShortA || pose == focus::Orientation::ShortB;
+    c.brilhoUsuario = interface.brightnessPercent;   // so leitura: o escurecido nunca e gravado
+    if (c.telaBatalha) {
+        const auto agora = tempo::agora(nowMs);
+        c.minutoDoDia = agora.valida ? agora.minutoDoDia : -1;
+    }
+    const uint8_t brilho = modoFoco_.atualizar(c, nowMs);
+    if (brilho != brilhoAplicado_) {
+        Board::Display::setBrightness(brilho);
+        brilhoAplicado_ = brilho;
+    }
 }
 
 void App::sincronizarOrientacaoHabitos() {
