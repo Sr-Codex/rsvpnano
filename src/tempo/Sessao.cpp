@@ -94,7 +94,7 @@ namespace tempo {
 
     std::string linhaTaxaDoFoco(bool temProjeto, Categoria livre) {
         const Categoria cat = categoriaDoFoco(temProjeto, livre);
-        return std::string{temProjeto ? nomeCategoria(cat) : "sem projeto"} + " · " + textoTaxa(cat);
+        return std::string{temProjeto ? "Projeto" : "sem projeto"} + " · " + textoTaxa(cat);
     }
 
     std::string textoComecar(int rodadaMin, bool ciclo4x, bool horaValida, int minutoDoDia) {
@@ -130,39 +130,33 @@ namespace tempo {
         return t;
     }
 
-    void registrarProjetoRecente(std::vector<std::string>& recentes, const std::string& id) {
-        if (id.empty()) return;
-        recentes.erase(std::remove(recentes.begin(), recentes.end(), id), recentes.end());
-        recentes.insert(recentes.begin(), id);
-        if (recentes.size() > kMaxRecentes) recentes.resize(kMaxRecentes);
+    Categoria categoriaSemProjetoValida(int bruto) {
+        const Categoria c = categoriaLivreValida(bruto);
+        return c == Categoria::Leitura ? Categoria::Trabalho : c;
     }
 
-    std::vector<int> projetosDaPrimeiraPagina(const std::vector<std::string>& recentes, const std::vector<std::string>& ids) {
-        std::vector<int> saida;
-        const auto ja = [&](int i) { return std::find(saida.begin(), saida.end(), i) != saida.end(); };
-        for (const auto& id : recentes) {
-            if (saida.size() >= kProjetosPagina1) break;
-            for (size_t i = 0; i < ids.size(); ++i)
-                if (ids[i] == id && !ja(int(i))) { saida.push_back(int(i)); break; }
-        }
-        for (size_t i = 0; i < ids.size() && saida.size() < std::min(kProjetosPagina1, ids.size()); ++i)
-            if (!ja(int(i))) saida.push_back(int(i));
-        return saida;
+    std::string textoTaxaCurta(Categoria c) {
+        std::string t = textoTaxa(c);
+        const auto espaco = t.find(' ');
+        return espaco == std::string::npos ? t : t.substr(0, espaco);
+    }
+
+    ResolucaoProjeto resolverProjeto(const std::string& id, const std::vector<std::string>& ids, bool listaLida) {
+        ResolucaoProjeto r;
+        if (id.empty() || !listaLida) return r;
+        const auto it = std::find(ids.begin(), ids.end(), id);
+        if (it == ids.end()) r.saiu = true;
+        else r.indice = int(it - ids.begin());
+        return r;
     }
 
     size_t paginasDoSeletor(size_t numProjetos) {
-        if (numProjetos <= kProjetosPagina1) return 1;
-        return 1 + (numProjetos - kProjetosPagina1 + kProjetosPorPagina - 1) / kProjetosPorPagina;
+        return numProjetos <= kProjetosPorPagina ? 1 : (numProjetos + kProjetosPorPagina - 1) / kProjetosPorPagina;
     }
 
-    std::vector<int> projetosDaPagina(size_t pagina, const std::vector<int>& primeira, size_t numProjetos) {
-        if (pagina == 0) return primeira;
-        std::vector<int> resto;
-        for (size_t i = 0; i < numProjetos; ++i)
-            if (std::find(primeira.begin(), primeira.end(), int(i)) == primeira.end()) resto.push_back(int(i));
+    std::vector<int> projetosDaPagina(size_t pagina, size_t numProjetos) {
         std::vector<int> saida;
-        const size_t ini = (pagina - 1) * kProjetosPorPagina;
-        for (size_t i = ini; i < resto.size() && i < ini + kProjetosPorPagina; ++i) saida.push_back(resto[i]);
+        for (size_t i = pagina * kProjetosPorPagina; i < numProjetos && i < (pagina + 1) * kProjetosPorPagina; ++i) saida.push_back(int(i));
         return saida;
     }
 

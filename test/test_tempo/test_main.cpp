@@ -1560,49 +1560,97 @@ void test_v3_categoria_unica_com_projeto_e_livre_sem_projeto() {
     TEST_ASSERT_EQUAL_STRING("0,20 cr/min", textoTaxa(Categoria::Leitura).c_str());
 }
 
-void test_v3_projetos_recentes_e_paginas_do_seletor() {
-    std::vector<std::string> rec;
-    registrarProjetoRecente(rec, "c");
-    registrarProjetoRecente(rec, "a");
-    registrarProjetoRecente(rec, "c");   // repetido: sobe, sem duplicar
-    registrarProjetoRecente(rec, "");    // vazio ignorado
-    TEST_ASSERT_EQUAL(2, int(rec.size()));
-    TEST_ASSERT_EQUAL_STRING("c", rec[0].c_str());
-    TEST_ASSERT_EQUAL_STRING("a", rec[1].c_str());
-    registrarProjetoRecente(rec, "b");
-    TEST_ASSERT_EQUAL(2, int(rec.size()));   // so os 2 ultimos
-    TEST_ASSERT_EQUAL_STRING("b", rec[0].c_str());
-    TEST_ASSERT_EQUAL_STRING("c", rec[1].c_str());
-
-    const std::vector<std::string> ids = {"a", "b", "c", "d", "e", "f", "g"};
-    auto p1 = projetosDaPrimeiraPagina(rec, ids);
-    TEST_ASSERT_EQUAL(2, int(p1.size()));
-    TEST_ASSERT_EQUAL(1, p1[0]);   // b
-    TEST_ASSERT_EQUAL(2, p1[1]);   // c
-    // recentes que sumiram da lista: completa com os primeiros
-    const std::vector<std::string> sumidos = {"x", "y"};
-    p1 = projetosDaPrimeiraPagina(sumidos, ids);
-    TEST_ASSERT_EQUAL(2, int(p1.size()));
-    TEST_ASSERT_EQUAL(0, p1[0]);
-    TEST_ASSERT_EQUAL(1, p1[1]);
-    p1 = projetosDaPrimeiraPagina(rec, ids);
-    // 7 projetos: pagina 1 (2) + 5 restantes em 2 paginas de 3
-    TEST_ASSERT_EQUAL(3, int(paginasDoSeletor(7)));
-    const auto p2 = projetosDaPagina(1, p1, 7);
-    TEST_ASSERT_EQUAL(3, int(p2.size()));
-    TEST_ASSERT_EQUAL(0, p2[0]);   // a
-    TEST_ASSERT_EQUAL(3, p2[1]);   // d (b e c ja estao na pagina 1)
-    TEST_ASSERT_EQUAL(4, p2[2]);
-    const auto p3 = projetosDaPagina(2, p1, 7);
-    TEST_ASSERT_EQUAL(2, int(p3.size()));
-    TEST_ASSERT_EQUAL(5, p3[0]);
-    TEST_ASSERT_EQUAL(6, p3[1]);
+void test_projeto_paginas_do_seletor_2_por_pagina() {
     TEST_ASSERT_EQUAL(1, int(paginasDoSeletor(0)));
+    TEST_ASSERT_EQUAL(1, int(paginasDoSeletor(1)));
     TEST_ASSERT_EQUAL(1, int(paginasDoSeletor(2)));
     TEST_ASSERT_EQUAL(2, int(paginasDoSeletor(3)));
-    TEST_ASSERT_EQUAL(2, int(paginasDoSeletor(5)));
-    TEST_ASSERT_EQUAL(3, int(paginasDoSeletor(6)));
-    TEST_ASSERT_EQUAL(0, int(projetosDaPrimeiraPagina({}, {}).size()));
+    TEST_ASSERT_EQUAL(3, int(paginasDoSeletor(5)));
+    const auto p0 = projetosDaPagina(0, 5);
+    TEST_ASSERT_EQUAL(2, int(p0.size()));
+    TEST_ASSERT_EQUAL(0, p0[0]);
+    TEST_ASSERT_EQUAL(1, p0[1]);
+    const auto p2 = projetosDaPagina(2, 5);
+    TEST_ASSERT_EQUAL(1, int(p2.size()));   // ultima pagina com 1 so
+    TEST_ASSERT_EQUAL(4, p2[0]);
+    TEST_ASSERT_EQUAL(0, int(projetosDaPagina(0, 0).size()));
+}
+
+void test_projeto_resolver_por_id_ordem_mudou_e_saiu() {
+    const std::vector<std::string> ids = {"a", "b", "c"};
+    auto r = resolverProjeto("c", ids, true);
+    TEST_ASSERT_EQUAL(2, r.indice);
+    TEST_ASSERT_FALSE(r.saiu);
+    // ordem mudou na sincronizacao: o mesmo id aponta para o novo indice
+    const std::vector<std::string> nova = {"c", "a", "b"};
+    r = resolverProjeto("c", nova, true);
+    TEST_ASSERT_EQUAL(0, r.indice);
+    TEST_ASSERT_FALSE(r.saiu);
+    // projeto sumiu de AGORA: sem projeto + aviso
+    r = resolverProjeto("c", {"a", "b"}, true);
+    TEST_ASSERT_EQUAL(-1, r.indice);
+    TEST_ASSERT_TRUE(r.saiu);
+    // lista vazia (lida) tambem conta como "saiu"
+    r = resolverProjeto("c", {}, true);
+    TEST_ASSERT_TRUE(r.saiu);
+    // sem projeto lembrado: nada a avisar
+    r = resolverProjeto("", ids, true);
+    TEST_ASSERT_EQUAL(-1, r.indice);
+    TEST_ASSERT_FALSE(r.saiu);
+    // arquivo ilegivel / sync gravando: nao julga (nao avisa, nao esquece)
+    r = resolverProjeto("c", {}, false);
+    TEST_ASSERT_EQUAL(-1, r.indice);
+    TEST_ASSERT_FALSE(r.saiu);
+}
+
+void test_projeto_id_persiste_no_estado() {
+    Estado e = novoEstado();
+    e.projetoId = "6700abc";
+    e.ultimaCategoria = int(Categoria::Estudo);
+    Estado lido;
+    TEST_ASSERT_TRUE(lerEstado(serializarEstado(e), lido));
+    TEST_ASSERT_EQUAL_STRING("6700abc", lido.projetoId.c_str());
+    TEST_ASSERT_EQUAL(int(Categoria::Estudo), lido.ultimaCategoria);
+    // estado antigo (sem o campo): sem projeto lembrado
+    Estado antigo;
+    TEST_ASSERT_TRUE(lerEstado("{\"saldo\":3.0}", antigo));
+    TEST_ASSERT_TRUE(antigo.projetoId.empty());
+}
+
+void test_categoria_sem_projeto_leitura_vira_trabalho() {
+    TEST_ASSERT_TRUE(categoriaSemProjetoValida(int(Categoria::Leitura)) == Categoria::Trabalho);
+    TEST_ASSERT_TRUE(categoriaSemProjetoValida(int(Categoria::Projetos)) == Categoria::Trabalho);
+    TEST_ASSERT_TRUE(categoriaSemProjetoValida(-1) == Categoria::Trabalho);
+    TEST_ASSERT_TRUE(categoriaSemProjetoValida(99) == Categoria::Trabalho);
+    TEST_ASSERT_TRUE(categoriaSemProjetoValida(int(Categoria::Estudo)) == Categoria::Estudo);
+    TEST_ASSERT_TRUE(categoriaSemProjetoValida(int(Categoria::Meditacao)) == Categoria::Meditacao);
+    // o motor continua conhecendo a Leitura (foco do app Leitor)
+    TEST_ASSERT_TRUE(categoriaDoFoco(false, Categoria::Leitura) == Categoria::Leitura);
+    TEST_ASSERT_EQUAL_STRING("0,20", textoTaxaCurta(Categoria::Trabalho).c_str());
+    TEST_ASSERT_EQUAL_STRING("0,40", textoTaxaCurta(Categoria::Estudo).c_str());
+    TEST_ASSERT_EQUAL_STRING("0,20", textoTaxaCurta(Categoria::Meditacao).c_str());
+}
+
+void test_projeto_titulo_limpo_para_a_tela() {
+    TEST_ASSERT_EQUAL_STRING("Lançar o conversor HDMI LapSkill (Raspberry Pi)",
+                             tituloDeProjeto("\xF0\x9F\x93\x9A" "Proj - Lançar o conversor HDMI LapSkill (Raspberry Pi)").c_str());
+    TEST_ASSERT_EQUAL_STRING("Sophia Clinica-SDMed", tituloDeProjeto("\xF0\x9F\x93\x9A\xF0\x9F\x93\x8D" "Proj - Sophia Clinica-SDMed").c_str());
+    TEST_ASSERT_EQUAL_STRING("Plataforma Treinamento (Andamento)",
+                             tituloDeProjeto("\xF0\x9F\x93\x9A\xF0\x9F\x92\x8E Plataforma Treinamento (Andamento)").c_str());
+    // espacos variaveis, sem espaco, maiusculas, meia-risca
+    TEST_ASSERT_EQUAL_STRING("X", tituloDeProjeto("Proj-X").c_str());
+    TEST_ASSERT_EQUAL_STRING("X", tituloDeProjeto("  PROJ   -   X").c_str());
+    TEST_ASSERT_EQUAL_STRING("X", tituloDeProjeto("proj \xE2\x80\x93 X").c_str());
+    // sem prefixo: igual a limparTitulo; "Projeto ..." nao e prefixo
+    TEST_ASSERT_EQUAL_STRING("Projeto Alfa", tituloDeProjeto("Projeto Alfa").c_str());
+    TEST_ASSERT_EQUAL_STRING("Proj Alfa", tituloDeProjeto("Proj Alfa").c_str());
+    TEST_ASSERT_EQUAL_STRING("Revisar Lume", tituloDeProjeto("Revisar Lume").c_str());
+    // so emoji / so o prefixo = vazio
+    TEST_ASSERT_EQUAL_STRING("", tituloDeProjeto("\xF0\x9F\x93\x9A\xF0\x9F\x93\x8D").c_str());
+    TEST_ASSERT_EQUAL_STRING("", tituloDeProjeto("\xF0\x9F\x93\x9A" "Proj - ").c_str());
+    // glifo fora da fonte no meio some (nao vira lixo), o resto fica
+    TEST_ASSERT_EQUAL_STRING("Site novo pronto", tituloDeProjeto("Proj - Site \xF0\x9F\x9A\x80 novo pronto").c_str());
+    TEST_ASSERT_EQUAL_STRING("Café nº 2", tituloDeProjeto("\xF0\x9F\x93\x9A" "Proj - Café nº 2").c_str());
 }
 
 void test_v3_estado_guarda_projetos_recentes_no_json() {
@@ -1906,7 +1954,7 @@ void test_texto_sem_projeto() {
     TEST_ASSERT_EQUAL_STRING("Trabalho · sem projeto", nomeFocoLivre(Categoria::Trabalho).c_str());
     TEST_ASSERT_EQUAL_STRING("sem projeto · 0,20 cr/min", linhaTaxaDoFoco(false, Categoria::Leitura).c_str());
     TEST_ASSERT_EQUAL_STRING("sem projeto · 0,40 cr/min", linhaTaxaDoFoco(false, Categoria::Estudo).c_str());
-    TEST_ASSERT_EQUAL_STRING("Projetos · 0,40 cr/min", linhaTaxaDoFoco(true, Categoria::Leitura).c_str());   // com projeto a categoria e unica
+    TEST_ASSERT_EQUAL_STRING("Projeto · 0,40 cr/min", linhaTaxaDoFoco(true, Categoria::Leitura).c_str());   // com projeto a categoria e unica
 }
 
 void test_v3e2_desfazer_batalha_reverte_tudo() {
@@ -2599,7 +2647,11 @@ int main(int, char**) {
     RUN_TEST(test_v3_cronometro_distrai_cura_o_inimigo);
     RUN_TEST(test_v3_cronometro_estados_do_bonus);
     RUN_TEST(test_v3_categoria_unica_com_projeto_e_livre_sem_projeto);
-    RUN_TEST(test_v3_projetos_recentes_e_paginas_do_seletor);
+    RUN_TEST(test_projeto_paginas_do_seletor_2_por_pagina);
+    RUN_TEST(test_projeto_resolver_por_id_ordem_mudou_e_saiu);
+    RUN_TEST(test_projeto_id_persiste_no_estado);
+    RUN_TEST(test_categoria_sem_projeto_leitura_vira_trabalho);
+    RUN_TEST(test_projeto_titulo_limpo_para_a_tela);
     RUN_TEST(test_v3_estado_guarda_projetos_recentes_no_json);
     RUN_TEST(test_leitor_leitura_da_creditos_e_nunca_por_prazer);
     RUN_TEST(test_leitor_titulo_vazio_e_longo);

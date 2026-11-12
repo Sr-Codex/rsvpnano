@@ -248,7 +248,8 @@ namespace tempo {
         int ultimaDuracaoMin = 25;     // 5..300 (paradas da regua); 0 = livre (parada ∞, sem meta)
         int ultimaDuracaoTimerMin = 25; // ultima duracao de TIMER (5..300); o BOOT do launcher sempre comeca um Timer com ela
         bool ciclopomodoro = false;    // interruptor "ciclo pomodoro 4x"
-        std::vector<std::string> projetosRecentes;   // ids do TickTick dos projetos usados por ultimo (mais novo primeiro, ate 2)
+        std::vector<std::string> projetosRecentes;   // LEGADO (seletor antigo): ids dos projetos usados por ultimo; so lido/gravado por compatibilidade
+        std::string projetoId;         // id do TickTick do projeto escolhido no Inicio (lembrado entre sessoes); "" = sem projeto (vale ultimaCategoria)
         int metaSemanalMin = 900;      // meta de foco da semana no Perfil (padrao 15 h; editavel no estado.json)
     };
 

@@ -97,6 +97,27 @@ namespace tempo {
         return saida;
     }
 
+    std::string tituloDeProjeto(std::string_view titulo) {
+        std::string t = limparTitulo(titulo);
+        std::string_view v = t;
+        const auto ci = [](char a, char b) { return (a | 0x20) == b; };
+        if (v.size() >= 4 && ci(v[0], 'p') && ci(v[1], 'r') && ci(v[2], 'o') && ci(v[3], 'j')) {
+            size_t i = 4;
+            while (i < v.size() && v[i] == ' ') ++i;
+            size_t traco = 0;   // bytes do hifen / meia-risca (U+2013) / travessao (U+2014) / hifen tipografico (U+2010)
+            if (i < v.size() && v[i] == '-') traco = 1;
+            else if (i + 2 < v.size() && static_cast<unsigned char>(v[i]) == 0xE2 && static_cast<unsigned char>(v[i + 1]) == 0x80
+                     && (static_cast<unsigned char>(v[i + 2]) == 0x90 || static_cast<unsigned char>(v[i + 2]) == 0x93
+                         || static_cast<unsigned char>(v[i + 2]) == 0x94)) traco = 3;
+            if (traco != 0) {
+                i += traco;
+                while (i < v.size() && v[i] == ' ') ++i;
+                return std::string{v.substr(i)};
+            }
+        }
+        return t;
+    }
+
     std::string serializarEstado(const Estado& estado) {
         std::string saida;
         if (glz::write_json(estado, saida)) return {};

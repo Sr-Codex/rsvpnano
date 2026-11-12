@@ -48,7 +48,7 @@ namespace tempo {
     std::string formatarRelogio(long long totalSeg);
     // "Estudo · sem projeto": nome do "inimigo" quando nao ha projeto.
     std::string nomeFocoLivre(Categoria c);
-    // 2a linha do cartao do foco no Inicio: "Projetos · 0,40 cr/min" ou "sem projeto · 0,20 cr/min".
+    // 2a linha do cartao do foco no Inicio: "Projeto · 0,40 cr/min" ou "sem projeto · 0,20 cr/min".
     std::string linhaTaxaDoFoco(bool temProjeto, Categoria livre);
     // Sub do botao Comecar: "25 min · ate 14:57" / "4 × 60 · ate 19:02" / "2h30 · ate HH:MM" / "5 h · ate HH:MM"
     // (sem relogio valido: so a duracao). 4x acima de 90 min por rodada e ignorado.
@@ -64,18 +64,24 @@ namespace tempo {
     // Texto "0,40 cr/min" (virgula decimal).
     std::string textoTaxa(Categoria c);
 
-    // Projetos usados por ultimo: guarda ate kMaxRecentes ids (mais novo primeiro, sem repetir).
-    inline constexpr size_t kMaxRecentes = 2;
-    void registrarProjetoRecente(std::vector<std::string>& recentes, const std::string& id);
-    // Indices (em `ids`, a lista de projetos) dos 2 projetos da pagina 1 do seletor: os recentes que ainda existem
-    // e, se faltar, os primeiros da lista. No maximo kMaxRecentes (ou menos se nao ha projetos).
-    std::vector<int> projetosDaPrimeiraPagina(const std::vector<std::string>& recentes, const std::vector<std::string>& ids);
+    // Categoria do "sem projeto" no Tempo (Trabalho, Estudo, Meditacao): valor salvo -> categoria. Leitura (o app Leitor conta a
+    // leitura; a categoria continua no motor), Projetos e valores invalidos viram Trabalho.
+    Categoria categoriaSemProjetoValida(int bruto);
+    // "0,20" (taxa sem a unidade, para o seletor: "sem projeto · 0,20").
+    std::string textoTaxaCurta(Categoria c);
 
-    // Paginacao do seletor (opcao B): pagina 1 = linha de 4 categorias + 2 projetos recentes; demais = 3 projetos por pagina.
-    inline constexpr size_t kProjetosPagina1 = 2;
-    inline constexpr size_t kProjetosPorPagina = 3;
-    size_t paginasDoSeletor(size_t numProjetos);
-    // Indices dos projetos mostrados na pagina `pagina` (0 = primeira). `primeira` = projetosDaPrimeiraPagina().
-    std::vector<int> projetosDaPagina(size_t pagina, const std::vector<int>& primeira, size_t numProjetos);
+    // Projeto lembrado pelo id do TickTick: acha o indice na lista atual (a ordem muda a cada sincronizacao).
+    // `listaLida` = false (arquivo ilegivel / sync gravando): nao julga, mantem o que esta (indice -1, saiu = false).
+    // id lembrado que nao esta mais na lista (lida) = saiu: o Tempo volta para "sem projeto" e avisa.
+    struct ResolucaoProjeto {
+        int indice = -1;     // -1 = sem projeto
+        bool saiu = false;   // havia projeto lembrado e ele nao esta mais na coluna AGORA
+    };
+    ResolucaoProjeto resolverProjeto(const std::string& id, const std::vector<std::string>& ids, bool listaLida);
+
+    // Paginacao do "Trocar ›": 2 projetos por pagina (setas so se houver mais de 2).
+    inline constexpr size_t kProjetosPorPagina = 2;
+    size_t paginasDoSeletor(size_t numProjetos);                       // >= 1
+    std::vector<int> projetosDaPagina(size_t pagina, size_t numProjetos);   // indices da pagina (0 = primeira)
 
 } // namespace tempo

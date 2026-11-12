@@ -47,6 +47,11 @@ namespace tempo {
     // normaliza espacos. Mantem Latin (com acentos), pontuacao geral e simbolos comuns.
     std::string limparTitulo(std::string_view titulo);
 
+    // Titulo de tarefa-projeto do TickTick para a tela: limparTitulo + tira do comeco os prefixos "Proj -" / "Proj-"
+    // (com espacos variaveis; hifen, meia-risca ou travessao; sem diferenciar maiusculas). "📚📍Proj - X" -> "X".
+    // Titulo so com emoji / so com o prefixo -> "" (a tela mostra "(sem título)").
+    std::string tituloDeProjeto(std::string_view titulo);
+
     // ------------------------------------------------------------------- estado
     std::string serializarEstado(const Estado& estado);
     bool lerEstado(std::string_view json, Estado& saida);
