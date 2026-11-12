@@ -43,6 +43,8 @@ ICONES = [
     ("Kanban", "kanban"), ("GraduationCap", "graduation-cap"), ("Briefcase", "briefcase"), ("CaretUp", "caret-up"),
     ("CaretDown", "caret-down"), ("ArrowsClockwise", "arrows-clockwise"), ("CloudSlash", "cloud-slash"),
     ("PauseCircle", "pause-circle"), ("StarFour", "star-four"),
+    # Tempo etapa b (livre): aviso "ainda focando?", ganho ao vivo, aviso "0:40 nao conta"
+    ("BellRinging", "bell-ringing"), ("Coins", "coins"), ("Info", "info"),
 ]
 
 

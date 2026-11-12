@@ -2439,6 +2439,57 @@ void test_regua_valor_mostrado_limites_e_infinito() {
     TEST_ASSERT_EQUAL_INT(5, a.mostrado());
 }
 
+
+// ---- Perfil com sessao livre (resultado "livre"): tempo/cr/XP contam; nao e vitoria nem derrota ----------------------
+void test_perfil_sessao_livre_conta_tempo_mas_nao_vitoria_nem_batalha() {
+    EventoLog livre = bat("2026-11-09", "15:00:00", "Projetos", 72, "Alfa", 0, true);
+    livre.resultado = "livre";
+    livre.planejadoMin = 0;
+    livre.cr = 28.8;
+    livre.xp = 72;
+    // o JSONL novo (e o antigo, sem o campo) le sem quebrar
+    EventoLog lido;
+    TEST_ASSERT_TRUE(lerLinhaLog(linhaLog(livre), lido));
+    TEST_ASSERT_EQUAL_STRING("livre", lido.resultado.c_str());
+    TEST_ASSERT_EQUAL_INT(72, lido.focadoMin);
+    Resumo r;
+    registrarEvento(r, bat("2026-11-09", "10:00:00", "Projetos", 50, "Alfa"), 1);   // 1 vitoria com inimigo
+    registrarEvento(r, lido, 1);
+    TEST_ASSERT_EQUAL_INT(1, r.vitorias);                 // livre nao e vitoria
+    TEST_ASSERT_EQUAL_INT(1, r.batalhas);                 // nem batalha/fuga
+    TEST_ASSERT_EQUAL_INT(1, r.sessoesLivres);
+    TEST_ASSERT_EQUAL_INT(122, r.focoTotalMin);           // o tempo conta no total
+    TEST_ASSERT_EQUAL_INT(1, (int)r.projetos.size());
+    TEST_ASSERT_EQUAL_INT(122, r.projetos[0].minutos);    // ... e no projeto
+    TEST_ASSERT_EQUAL_INT(1, r.projetos[0].vitorias);
+    TEST_ASSERT_EQUAL_INT(1, (int)r.dias.size());
+    TEST_ASSERT_EQUAL_INT(122, r.dias[0].focoMin);        // ... e no dia
+    TEST_ASSERT_EQUAL_INT(1, r.dias[0].batalhas);
+    TEST_ASSERT_EQUAL_INT(1, r.dias[0].perfeitas);        // "Dia perfeito" nao quebra por causa da sessao livre
+    // sem projeto: vai para o foco livre; a conquista "Primeira vitoria" nao e ganha so com sessoes livres
+    Resumo s;
+    EventoLog sem = bat("2026-11-09", "15:00:00", "Estudo", 30);
+    sem.resultado = "livre";
+    registrarEvento(s, sem, 0);
+    TEST_ASSERT_EQUAL_INT(30, s.focoLivreMin);
+    TEST_ASSERT_EQUAL_INT(0, s.vitorias);
+    TEST_ASSERT_FALSE(avaliarConquistas(s, 0)[0].ganha);
+    // semana: o tempo entra no dia e na categoria
+    Semana sw;
+    Data d;
+    lerDataTexto("2026-11-09", d);
+    somarSemana(sw, lido, segundaDaSemana(d));
+    TEST_ASSERT_EQUAL_INT(72, sw.total);
+    TEST_ASSERT_EQUAL_INT(72, sw.porCategoria[(size_t)chipDoEvento(lido)]);
+    // resumo.json serializa e le (inclui o campo novo) e um resumo antigo (sem ele) cai no padrao
+    Resumo volta;
+    TEST_ASSERT_TRUE(lerResumo(serializarResumo(r), volta));
+    TEST_ASSERT_EQUAL_INT(1, volta.sessoesLivres);
+    Resumo antigo;
+    TEST_ASSERT_TRUE(lerResumo("{\"vitorias\":2,\"batalhas\":3}", antigo));
+    TEST_ASSERT_EQUAL_INT(0, antigo.sessoesLivres);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_datas);
@@ -2496,6 +2547,7 @@ int main(int, char**) {
     RUN_TEST(test_regua_marcas_rotulos_e_valor);
     RUN_TEST(test_regua_infinito_posicao_encaixe_e_toque);
     RUN_TEST(test_regua_infinito_arrasto_e_textos);
+    RUN_TEST(test_perfil_sessao_livre_conta_tempo_mas_nao_vitoria_nem_batalha);
     RUN_TEST(test_regua_valor_mostrado_so_muda_quando_a_marca_chega_a_agulha);
     RUN_TEST(test_regua_valor_mostrado_limites_e_infinito);
     RUN_TEST(test_livre_liquidacao_taxa_por_minuto_sem_bonus_e_sem_vitoria);

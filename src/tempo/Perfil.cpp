@@ -12,6 +12,7 @@ namespace tempo {
         bool livre(const EventoLog& e) { return e.projetoId.empty(); }
 
         bool vitoria(const EventoLog& e) { return e.resultado == "vitoria"; }
+        bool sessaoLivre(const EventoLog& e) { return e.resultado == "livre"; }   // sem meta/inimigo: nem vitoria nem derrota
 
         bool perfeita(const EventoLog& e) {
             return e.perfeita || (vitoria(e) && e.distracoes == 0 && e.distraidoMin == 0);
@@ -56,7 +57,8 @@ namespace tempo {
     void registrarEvento(Resumo& r, const EventoLog& e, int streak) {
         if (e.tipo != "batalha") return;
         const int foco = std::max(0, e.focadoMin);
-        ++r.batalhas;
+        if (sessaoLivre(e)) ++r.sessoesLivres;
+        else ++r.batalhas;
         if (vitoria(e)) ++r.vitorias;
         r.focoTotalMin += foco;
         r.maxStreak = std::max(r.maxStreak, streak);
@@ -90,7 +92,7 @@ namespace tempo {
             auto& dia = diaDoResumo(r, diaSerial(data));
             dia.focoMin += foco;
             if (e.categoria == "Meditação") dia.meditacaoMin += foco;
-            ++dia.batalhas;
+            if (!sessaoLivre(e)) ++dia.batalhas;   // o "Dia perfeito" so olha batalhas com inimigo
             if (perfeita(e)) ++dia.perfeitas;
             dia.madrugada = dia.madrugada || madrugada;
             if (r.dias.size() > kMaxDiasResumo) r.dias.erase(r.dias.begin(), r.dias.end() - kMaxDiasResumo);

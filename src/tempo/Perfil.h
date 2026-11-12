@@ -43,7 +43,8 @@ namespace tempo {
     struct Resumo {
         int versao = 1;
         int vitorias = 0;
-        int batalhas = 0;
+        int batalhas = 0;         // batalhas com inimigo (vitoria ou fuga); a sessao livre NAO entra aqui
+        int sessoesLivres = 0;    // sessoes livres (resultado "livre"): tempo e cr/XP contam, mas nao sao vitoria nem derrota
         int focoTotalMin = 0;
         int focoLivreMin = 0;
         int maxStreak = 0;

@@ -1628,9 +1628,10 @@ namespace screens {
                 aviso.suave = true;
                 aviso.borda = 2;
                 aviso.corBorda = c565(kAmbar);
-                aviso.linha(areaRegua.x + 24, areaRegua.y + 36, 420, naoContaTxt_, 28, cTexto);   // Bloco: coordenadas absolutas da tela
+                aviso.linha(areaRegua.x + 52, areaRegua.y + 36, 400, naoContaTxt_, 28, cTexto);   // Bloco: coordenadas absolutas da tela
                 aviso.linha(areaRegua.x + 24, areaRegua.y + 74, 420, "menos de 1 min: nada foi registrado", 17, cMudo);
-                aviso.desenhar();
+                const int xi = areaRegua.x + 34, yi = areaRegua.y + 36;
+                aviso.desenhar([&](Arduino_GFX& g, int, int) { icones::phosphor(g, IconeId::Info, xi, yi, 24, c565(kAmbar), ui.color(SurfaceMuted)); });
             } else {
                 VistaRegua vista;
                 vista.centro = centro;
@@ -2247,7 +2248,7 @@ namespace screens {
             const int y0 = q.linhas.size() > 1 ? 36 : 46;
             for (size_t i = 0; i < q.linhas.size(); ++i) texto.linha(xCol, y0 + int(i) * 20, wCol, q.linhas[i], q.tam, cTexto);
             const int yg = y0 + int(q.linhas.size()) * 20 + 10;
-            icone(IconeId::Star, xCol + 7, yg, 14, cAmbar);
+            icone(IconeId::Coins, xCol + 8, yg, 16, cAmbar);
             texto.linha(xCol + 22, yg, wCol - 22, fmtSinal(est.cr) + " cr · " + fmtSinal(est.xp) + " XP", 15, cAmbar);
         }
         // fileira de blocos (rotulo da hora a esquerda) + rodape
@@ -2354,7 +2355,7 @@ namespace screens {
         const int larg = int(std::lround(448 * std::clamp(feito, 0.0, 1.0)));
         Bloco texto(ui, {0, 0, 468, 172}, Background, 0, 0x4D00U + livre_);
         std::vector<std::function<void(Arduino_GFX&)>> extras;
-        extras.push_back([=](Arduino_GFX& g) { icones::phosphor(g, IconeId::Fire, 18, 14, 18, cLaranja, cBg); });
+        extras.push_back([=](Arduino_GFX& g) { icones::phosphor(g, IconeId::BellRinging, 18, 14, 18, cLaranja, cBg); });
         texto.linha(34, 14, 400, livre_ ? "LIVRE · 90 MIN SEM TOQUE" : "TIMER · 90 MIN SEM TOQUE", 15, cLaranja);
         texto.linha(10, 58, 290, "ainda focando?", 28, cTexto);
         texto.linha(10, 96, 290, "qualquer toque continua", 17, cMudo);
