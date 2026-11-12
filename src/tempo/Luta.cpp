@@ -56,6 +56,8 @@ namespace tempo::luta {
         case Modo::HoraExtra:
             e.azul = e.choque = e.faiscasInimigo = e.animada = true;   // faiscas (azuis) na ponta do extra
             break;
+        case Modo::Resultado:      // saque: a barra parada onde a luta terminou; nada se mexe
+            break;
         }
         return e;
     }

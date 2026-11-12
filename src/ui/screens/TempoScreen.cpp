@@ -2717,53 +2717,96 @@ namespace screens {
                 for (const auto& f : ex) f(g);
             });
         }
-        // ---- aneis (cheio = venceu; encerrada = fracao feita) + marca de vitoria
+        // ---- saque do Timer (mockup tempo-saque1@2x): mesma linguagem da batalha. Em cima: titulo, tempo grande + "de foco",
+        // nome e ganhos; embaixo: a barra de cabo de guerra PARADA onde a luta terminou (cheia = venceu; encerrada = ate onde
+        // voce chegou, com o resto do inimigo apagado); rodape: humor. Os botoes nao mudam.
         const double plano = std::max(1.0, double(r.planejadoMin));
         const double voce = std::floor((r.liq.vitoria ? 1.0 : std::clamp(double(r.focadoMin) / plano, 0.0, 1.0)) * 720) / 720;
         if (!saqueLivre_) {
-            Bloco aneis(ui, {0, 0, 172, 172}, Background, 0, 0x5A00U + r.liq.vitoria);
-            aneis.marca(static_cast<uint32_t>(voce * 720));
-            const Cor fundo = deRole(ui, Background);
-            const bool venceu = r.liq.vitoria;
-            aneis.desenhar([&](Arduino_GFX& g, int dx, int dy) {
-                anel(g, dx, dy, kCx, kCy, kRaioFora, kEspessura, voce, kLaranja, kAmbar, fundo, kLaranja);
-                anel(g, dx, dy, kCx, kCy, kRaioDentro, kEspessura, 0.0, kCarmim, kVinho, fundo, kCarmim);
-                icones::phosphor(g, venceu ? IconeId::Check : IconeId::FlagCheckered, kCx, kCy, 40, venceu ? cVerde : cMudo, cBg);
+            Bloco topo(ui, {0, 0, 468, ui::luta::kTelaY}, Background, 0, 0x5B00U + r.liq.vitoria * 2U + r.liq.perfeita);
+            std::vector<std::function<void(Arduino_GFX&)>> extras;
+            const IconeId icTitulo = r.liq.vitoria ? IconeId::CheckCircle : IconeId::FlagCheckered;
+            extras.push_back([=](Arduino_GFX& g) { icones::phosphor(g, icTitulo, 18, 16, 18, cTitulo, cBg); });
+            topo.linha(34, 16, 430, titulo, 15, cTitulo);
+            // tempo grande: "25" + "min" (ou "1" "h" "12") + "de foco"
+            const auto partes = tempo::livre::partesDoTempo(uint64_t(r.focadoMin) * 60000ULL);
+            int x = 10;
+            bool soMinutos = false;   // "25" + "min de foco" (como no mockup); com horas: "1" "h" "12" + "de foco"
+            for (const auto& p : partes) {
+                if (!p.grande && p.texto == "min") { soMinutos = true; continue; }
+                const uint8_t tam = p.grande ? 66 : 28;
+                const int w = ui::sans::width(p.texto, ui::sans::font(tam)) + 4;
+                topo.textoCor(Rect{int16_t(x), int16_t(p.grande ? 62 - ui::sans::font(66).height / 2 : 80 - ui::sans::font(28).height / 2), int16_t(w),
+                                   int16_t(ui::sans::font(tam).height)},
+                              p.texto, tam, p.grande ? cTexto : cMudo);
+                x += w + (p.grande ? 2 : 6);
+            }
+            topo.linha(x + 6, 84, std::max(60, 232 - x), soMinutos ? "min de foco" : "de foco", 17, cMudo);
+            // coluna do meio: nome, ganhos, detalhe do bonus
+            constexpr int kColX = 236, kColW = 468 - kColX - 8;
+            topo.linha(kColX, 30, kColW, cortarLargura(r.projeto.empty() ? std::string{"Sem projeto"} : r.projeto, kColW, 17), 17, cTexto);
+            const std::string crTxt = fmtSinal(r.liq.cr) + " cr", xpTxt = fmtSinal(r.liq.xp) + " XP";
+            const int wCr = ui::sans::width(crTxt, ui::sans::font(17)) + 24, wXp = ui::sans::width(xpTxt, ui::sans::font(17)) + 24;
+            topo.linha(kColX + 12, 58, wCr, crTxt, 17, cAmbar);
+            topo.linha(kColX + wCr + 8 + 12, 58, wXp, xpTxt, 17, cAmbar);
+            if (r.liq.perfeita) topo.linha(kColX, 86, kColW, "inclui bônus perfeito +25%", 15, cVerde);
+            else if (r.liq.vitoria) topo.linha(kColX, 86, kColW, "sem bônus perfeito", 15, cAmbar);
+            else topo.linha(kColX, 86, kColW, r.abandonou ? "encerrada antes do fim" : "distrações demais", 15, cMudo);
+            topo.marca(uint32_t(r.focadoMin) * 7U + uint32_t(std::lround(r.liq.cr * 10.0)));
+            topo.desenhar([&](Arduino_GFX& g, int, int) {
+                retanguloSuave565(g, kColX, 44, wCr, 28, 14, cPilula, ui.color(Background));
+                retanguloSuave565(g, kColX + wCr + 8, 44, wXp, 28, 14, cPilula, ui.color(Background));
+                for (const auto& f : extras) f(g);
+            });
+
+            // barra parada (tempo::luta::Modo::Resultado: sem faiscas; o inimigo restante apagado)
+            const ui::Rect faixaRect{ui::luta::kTelaX, ui::luta::kTelaY, ui::luta::kLarg, ui::luta::kAlt};
+            uint32_t sigFaixa = ui::Context::combine(0x53415155u, uint32_t(voce * 720));
+            sigFaixa = ui::Context::combine(sigFaixa, uint32_t(r.focadoMin) * 2U + r.liq.vitoria);
+            if (ui.redraw(faixaRect, sigFaixa, true)) {
+                ui::luta::Quadro fq;
+                fq.modo = tempo::luta::Modo::Resultado;
+                fq.frente = float(voce);
+                fq.animar = false;
+                fq.fundo = ui::luta::Cor{float((cBg >> 11 & 31) << 3), float((cBg >> 5 & 63) << 2), float((cBg & 31) << 3)};
+                fq.esq = {"VOCÊ " + fmtCurto(int64_t(r.focadoMin) * 60), ui::luta::Cor{255, 120, 50}, true, icons::phosphor::Id::Sword};
+                if (r.liq.vitoria) fq.dir = {"", ui::luta::Cor{240, 96, 116}, false, icons::phosphor::Id::Skull};
+                else fq.dir = {std::to_string(int(std::lround((1.0 - voce) * 100))) + "% INIMIGO", ui::luta::Cor{240, 96, 116}, true,
+                               icons::phosphor::Id::Skull};
+                if (luta_.garantir()) {
+                    luta_.faixa()->compor(fq);
+                    const uint16_t* pixels = luta_.faixa()->saida();
+                    ui.paint(faixaRect, [&](Arduino_GFX& g, Rect alvo) {
+                        g.draw16bitRGBBitmap(alvo.x, alvo.y, const_cast<uint16_t*>(pixels), ui::luta::kLarg, ui::luta::kAlt);
+                    });
+                } else {   // sem PSRAM: so a barra, sem rotulos
+                    ui.paint(faixaRect, [&](Arduino_GFX& g, Rect alvo) {
+                        g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, cBg);
+                        const int bx = alvo.x + ui::luta::kBarraX0, by = alvo.y + ui::luta::kBarraY0;
+                        retanguloSuave565(g, bx, by, ui::luta::kBarraLarg, ui::luta::kBarraAlt, 12, misturar565(c565(kCarmim), cBg, 0.6), cBg);
+                        const int wl = std::max(24, int(std::lround(voce * ui::luta::kBarraLarg)));
+                        retanguloSuave565(g, bx, by, std::min(wl, ui::luta::kBarraLarg), ui::luta::kBarraAlt, 12, cLaranja, cBg);
+                    });
+                }
+            }
+
+            // rodape: humor
+            Bloco pe(ui, {0, ui::luta::kTelaY + ui::luta::kAlt, 468, 172 - (ui::luta::kTelaY + ui::luta::kAlt)}, Background, 0, 0x5348554DU);
+            std::vector<std::function<void(Arduino_GFX&)>> rostos;
+            if (!saqueDeReflexao_) {
+                pe.linha(8, 161, 456, "humor: só no fim do ciclo", 15, cMudo);
+            } else if (humor_ >= 0 && humor_ <= 4) {
+                pe.linha(32, 161, 432, std::string{"humor salvo: "} + kHumorNome[humor_], 15, cMudo);
+                const int h = humor_;
+                rostos.push_back([=](Arduino_GFX& g) { rostoGrande(g, 17, 161, 9, h, cMudo, cBg); });
+            } else {
+                pe.linha(8, 161, 456, "sem humor", 15, cMudo);
+            }
+            pe.marca(uint32_t(humor_ + 1) * 31U + saqueDeReflexao_);
+            pe.desenhar([&](Arduino_GFX& g, int, int) {
+                for (const auto& f : rostos) f(g);
             });
         }
-
-        // ---- texto central
-        Bloco texto(ui, saqueLivre_ ? Rect{0, 0, 0, 0} : Rect{176, 4, 292, 164}, Background, 0, 0x5B00U + r.liq.vitoria * 2U + r.liq.perfeita);
-        std::vector<std::function<void(Arduino_GFX&)>> extras;
-        const auto icone = [&](IconeId id, int cx, int cy, int lado, uint16_t cor) {
-            extras.push_back([=](Arduino_GFX& g) { icones::phosphor(g, id, cx, cy, lado, cor, cBg); });
-        };
-        icone(r.liq.vitoria ? IconeId::CheckCircle : IconeId::FlagCheckered, 184, 16, 18, cTitulo);
-        texto.linha(198, 16, 270, titulo, 15, cTitulo);
-        const auto q = quebrar(r.projeto.empty() ? std::string{"Sem projeto"} : r.projeto, 282, 21, 17);
-        const int passoNome = q.tam >= 21 ? 25 : 20;
-        for (size_t i = 0; i < q.linhas.size(); ++i) texto.linha(176, 40 + int(i) * passoNome, 292, q.linhas[i], q.tam, cTexto);
-        const std::string crTxt = fmtSinal(r.liq.cr) + " cr", xpTxt = fmtSinal(r.liq.xp) + " XP";
-        const int wCr = ui::sans::width(crTxt, ui::sans::font(17)) + 24, wXp = ui::sans::width(xpTxt, ui::sans::font(17)) + 24;
-        texto.linha(176 + 12, 90, wCr, crTxt, 17, cAmbar);
-        texto.linha(176 + wCr + 8 + 12, 90, wXp, xpTxt, 17, cAmbar);
-        if (r.liq.perfeita) texto.linha(176, 134, 292, "inclui bônus perfeito +25%", 15, cVerde);
-        else if (!r.liq.vitoria) texto.linha(176, 134, 292, r.abandonou ? "encerrada antes do fim" : "distrações demais", 15, cMudo);
-        if (!saqueDeReflexao_) {
-            texto.linha(176, 154, 292, "humor: só no fim do ciclo", 15, cMudo);
-        } else if (humor_ >= 0 && humor_ <= 4) {
-            texto.linha(202, 154, 266, std::string{"humor salvo: "} + kHumorNome[humor_], 15, cMudo);
-            const int h = humor_;
-            extras.push_back([=](Arduino_GFX& g) { rostoGrande(g, 187, 154, 9, h, cMudo, cBg); });
-        } else {
-            texto.linha(176, 154, 292, "sem humor", 15, cMudo);
-        }
-        texto.marca(uint32_t(humor_ + 1) * 31U + saqueDeReflexao_);
-        if (!saqueLivre_) texto.desenhar([&](Arduino_GFX& g, int, int) {
-            retanguloSuave565(g, 176, 76, wCr, 28, 14, cPilula, ui.color(Background));
-            retanguloSuave565(g, 176 + wCr + 8, 76, wXp, 28, 14, cPilula, ui.color(Background));
-            for (const auto& f : extras) f(g);
-        });
         // ---- botoes: proximo passo (primario) + Desfazer (8 s) ou "Mais uma rodada"
         const int minutos = tempo::minutosProximoPasso(proximo_, ciclo_);
         const bool pausa = proximo_ != tempo::ProximoPasso::VoltarInicio;

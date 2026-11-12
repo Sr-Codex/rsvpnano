@@ -201,7 +201,7 @@ namespace ui::luta {
         if (r.texto.empty() && !r.temIcone) return;
         const Tela t{mem_.rgb};
         const Cor cor = misturarCor(r.cor, fundo, apagado);
-        constexpr int kYc = 8;   // centro da linha (tela: y 106)
+        constexpr int kYc = 10;  // centro da linha (tela: y 108); em 8 o acento de "VOCÊ" saía cortado no topo da faixa
         if (!aDireita) {
             if (r.temIcone) desenharIcone(t, r.icone, 17, kYc, 16, cor);
             desenharTexto(t, r.texto, 15, r.temIcone ? 30 : 8, kYc, cor);
@@ -227,7 +227,7 @@ namespace ui::luta {
             const float xs = X1 - float(kPedacoPx);
             xd = xs + (X1 - xs) * tempo::luta::frenteDoGolpe(q.golpe);
         }
-        const float apL = fx.apagado, apR = q.modo == Modo::Distraido ? 0.0f : fx.apagado;
+        const float apL = fx.apagado, apR = q.modo == Modo::Distraido ? 0.0f : q.modo == Modo::Resultado ? 0.6f : fx.apagado;
 
         for (int x = kBarraX0; x < kBarraX1; ++x) {
             const float px = float(x) + 0.5f;
@@ -291,7 +291,8 @@ namespace ui::luta {
         bool disco = true;
         switch (q.modo) {
         case Modo::Focando:
-        case Modo::GolpeFinal: break;
+        case Modo::GolpeFinal:
+        case Modo::Resultado: break;   // Resultado nao tem frente acesa (sai antes, sem choque/divisoria)
         case Modo::FimSegurando:
             linha = esc(kQuente, 0.75f);
             halo = esc(kAmbar, 0.40f);
@@ -530,7 +531,7 @@ namespace ui::luta {
         const float apRot = (q.modo == Modo::FimSegurando || q.modo == Modo::Pausado) ? fx.apagado
                             : (q.modo == Modo::HoraExtra && q.tregua) ? 0.5f : 0.0f;
         rotulo(q.esq, false, apRot, q.fundo);
-        if (q.modo != Modo::GolpeFinal || !camadaPronta_) rotulo(q.dir, true, apRot, q.fundo);
+        if (q.modo != Modo::GolpeFinal || !camadaPronta_) rotulo(q.dir, true, q.modo == Modo::Resultado ? 0.45f : apRot, q.fundo);
         barra(q);
         if (q.modo == Modo::GolpeFinal && fx.poeira) poeira(q);
         luzes(q);

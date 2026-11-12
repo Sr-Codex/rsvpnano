@@ -26,7 +26,8 @@ namespace tempo::luta {
     double voltaExtra(const Cronometro& c);
 
     // ------------------------------------------------------------------ estado -> aparencia
-    enum class Modo : uint8_t { Focando, FimSegurando, Distraido, Pausado, PausaCiclo, GolpeFinal, HoraExtra };
+    enum class Modo : uint8_t { Focando, FimSegurando, Distraido, Pausado, PausaCiclo, GolpeFinal, HoraExtra,
+                                Resultado };   // Resultado: barra parada do saque (sem efeitos; o inimigo restante apagado)
 
     struct EntradaModo {
         bool descanso = false;      // pausa do ciclo 4x
