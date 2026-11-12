@@ -16,6 +16,7 @@
 #include "tempo/Parametros.h"
 #include "tempo/Regua.h"
 #include "tempo/Sessao.h"
+#include "ui/FormaSuaveGfx.h"
 #include "ui/ReguaSuave.h"
 #include "ui/AnelSuave.h"
 #include "ui/luta/Faixa.h"
@@ -109,12 +110,7 @@ namespace screens {
         // Retangulo arredondado com borda suavizada (cantos pixel a pixel; retas por fillRect). `fundo` = cor por tras.
         void retanguloSuave565(Arduino_GFX& g, int x, int y, int w, int h, int r, uint16_t cor, uint16_t fundo, int borda = 0,
                                uint16_t corBorda = 0) {
-            g.startWrite();
-            ui::regua::retanguloSuave(
-                [&](int px, int py, uint16_t c) { g.writePixel(int16_t(px), int16_t(py), c); },
-                [&](int rx, int ry, int rw, int rh, uint16_t c) { if (rw > 0 && rh > 0) g.writeFillRect(int16_t(rx), int16_t(ry), int16_t(rw), int16_t(rh), c); },
-                x, y, w, h, r, ui::regua::deRgb565(cor), ui::regua::deRgb565(fundo), borda, ui::regua::deRgb565(corBorda));
-            g.endWrite();
+            ui::forma::retanguloArredondado(g, x, y, w, h, r, cor, fundo, borda, corBorda);
         }
 
         // Bloco (cartao ou linha) com texto proprio sobre fundo uniforme.
@@ -131,7 +127,7 @@ namespace screens {
             std::vector<Item> itens;
             int32_t corFixa = -1;    // >= 0: fundo RGB565 proprio (ex.: linha selecionada) no lugar do papel
             bool apertado = false;   // dedo em cima (estado "apertado"): fundo mais claro + contorno
-            bool suave = false;      // cantos e contorno com borda suavizada (Inicio v4)
+            bool suave = true;       // cantos e contorno com borda suavizada (todo o Tempo)
             int borda = 0;           // suave: contorno fixo (px) na cor `corBorda`
             uint16_t corBorda = 0;
 
@@ -166,12 +162,7 @@ namespace screens {
                     if (suave && raio > 0) {
                         retanguloSuave565(g, alvo.x, alvo.y, alvo.w, alvo.h, raio, cor, ui.color(Background),
                                           apertado ? 2 : borda, apertado ? uint16_t(0xFFFF) : corBorda);
-                    } else if (raio > 0) g.fillRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, raio, cor);
-                    else g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, cor);
-                    if (apertado && raio > 0 && !suave) {
-                        g.drawRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, raio, 0xFFFF);
-                        g.drawRoundRect(alvo.x + 1, alvo.y + 1, alvo.w - 2, alvo.h - 2, raio - 1, 0xFFFF);
-                    }
+                    } else g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, cor);
                     if (extra) {
                         icones::Origem origem(alvo.x - area.x, alvo.y - area.y);
                         extra(g, alvo.x - area.x, alvo.y - area.y);
@@ -257,11 +248,7 @@ namespace screens {
                 const auto layout = ui.prepareText(r, texto, tamanho, TextAlign::Center, 1);
                 ui.paint(r, [&](Arduino_GFX& g, Rect alvo) {
                     g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, ui.color(Background));
-                    g.fillRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, 10, fundo);
-                    if (temContorno) {
-                        g.drawRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, 10, contorno);
-                        g.drawRoundRect(alvo.x + 1, alvo.y + 1, alvo.w - 2, alvo.h - 2, 9, contorno);
-                    }
+                    retanguloSuave565(g, alvo.x, alvo.y, alvo.w, alvo.h, 10, fundo, ui.color(Background), temContorno ? 2 : 0, contorno);
                     ui.drawText(g, layout, tinta, alvo.x - r.x, alvo.y - r.y, fundo);
                 });
             }
@@ -287,41 +274,9 @@ namespace screens {
             uint16_t corContorno = 0;     // 0 = mesma da tinta
             uint16_t tintaIcone = 0;      // 0 = mesma da tinta
             bool check = false;           // selecionado: check-circle laranja no canto
-            bool suave = false;           // cantos e contorno com borda suavizada (Inicio v4)
+            bool suave = true;            // cantos e contorno com borda suavizada (todo o Tempo)
             int raio = 16;                // raio do canto
         };
-
-        // Contorno de retangulo arredondado enchendo no sentido horario a partir do meio do topo (frac 0..1).
-        void contornoQueEnche(Arduino_GFX& g, int x, int y, int w, int h, int r, double frac, uint16_t cor) {
-            struct Pt { double x, y; };
-            std::vector<Pt> pts;
-            constexpr double kRad = 3.14159265358979 / 180.0;
-            pts.push_back({x + w / 2.0, double(y)});
-            pts.push_back({x + w - r + 0.0, double(y)});
-            const double cantos[4][3] = {{double(x + w - r), double(y + r), -90.0}, {double(x + w - r), double(y + h - r), 0.0},
-                                         {double(x + r), double(y + h - r), 90.0}, {double(x + r), double(y + r), 180.0}};
-            for (const auto& c : cantos)
-                for (int k = 0; k <= 8; ++k) {
-                    const double a = (c[2] + 90.0 * k / 8) * kRad;
-                    pts.push_back({c[0] + r * std::cos(a), c[1] + r * std::sin(a)});
-                }
-            pts.push_back({x + w / 2.0, double(y)});
-            double total = 0;
-            for (size_t i = 0; i + 1 < pts.size(); ++i) total += std::hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
-            double alvo = total * std::clamp(frac, 0.0, 1.0), acc = 0;
-            for (size_t i = 0; i + 1 < pts.size() && acc < alvo; ++i) {
-                const double seg = std::hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
-                const int passos = std::max(1, int(std::ceil(seg / 1.5)));
-                for (int k = 0; k <= passos; ++k) {
-                    const double d = seg * k / passos;
-                    if (acc + d > alvo) break;
-                    const double t = seg > 0 ? d / seg : 0;
-                    g.fillCircle(int(std::lround(pts[i].x + (pts[i + 1].x - pts[i].x) * t)),
-                                 int(std::lround(pts[i].y + (pts[i + 1].y - pts[i].y) * t)), 1, cor);
-                }
-                acc += seg;
-            }
-        }
 
         bool botao3(ui::Context& ui, Rect r, const Btn& b) {
             const bool apertado = b.habilitado && ui.pressed(r);
@@ -363,17 +318,17 @@ namespace screens {
                     g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, ui.color(Background));
                     const bool contorno = b.selecionado || apertado;
                     const uint16_t cc = b.selecionado ? (b.corContorno != 0 ? b.corContorno : tinta) : uint16_t(0xFFFF);   // apertado = contorno branco
+                    // Fim · segure: o trilho (faixa de 3 px, branco apagado) e o traco laranja de pontas redondas que o percorre
+                    // (ui/FormaSuave::tracoPerimetro), no lugar do contorno branco duro.
+                    const bool trilhoProgresso = b.progresso64 >= 0;
+                    const uint16_t corTrilho = misturar565(fundo, 0xFFFF, 0.30);
                     if (b.suave) {
-                        retanguloSuave565(g, alvo.x, alvo.y, alvo.w, alvo.h, b.raio, fundo, ui.color(Background), contorno ? 2 : 0, cc);
-                    } else {
-                        g.fillRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, 16, fundo);
-                        if (contorno) {
-                            g.drawRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, 16, cc);
-                            g.drawRoundRect(alvo.x + 1, alvo.y + 1, alvo.w - 2, alvo.h - 2, 15, cc);
-                        }
-                    }
-                    if (b.progresso64 >= 0)
-                        contornoQueEnche(g, alvo.x, alvo.y, alvo.w, alvo.h, 16, b.progresso64 / 64.0, c565(kLaranja));
+                        retanguloSuave565(g, alvo.x, alvo.y, alvo.w, alvo.h, b.raio, fundo, ui.color(Background),
+                                          trilhoProgresso ? 3 : contorno ? 2 : 0, trilhoProgresso ? corTrilho : cc);
+                    } else g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, fundo);
+                    if (trilhoProgresso)
+                        ui::forma::tracoDoPerimetro(g, alvo.x, alvo.y, alvo.w, alvo.h, b.raio, 3, b.progresso64 / 64.0, c565(kLaranja),
+                                                    ui.color(Background), corTrilho);
                     if (b.comIcone) {
                         icones::Origem o(dx, dy);
                         icones::phosphor(g, b.icone, xIcone, yIcone, lado, b.tintaIcone != 0 ? b.tintaIcone : tinta, fundo);
@@ -2533,16 +2488,19 @@ namespace screens {
             const bool pequeno = r < 16;   // versao miniatura (linha "humor salvo"): tracos de 2 px
             const float traco = pequeno ? 2.0f : 3.0f;   // contorno = anel cheio de cor unica, borda suavizada
             desenharAnelSuave(g, cx, cy, float(r) - traco / 2.0f, traco, 1.0, cor, cor, fundo, cor);
-            const auto ponto = [&](int x, int y, int raio) {
-                if (pequeno) g.fillRect(x - 1, y - 1, 2, 2, cor);
-                else g.fillCircle(x, y, raio, cor);
-            };
-            for (const int ex : {-1, 1}) ponto(cx + int(std::lround(ex * r * 0.36)), cy - int(std::lround(r * 0.22)), 3);
+            for (const int ex : {-1, 1}) {
+                const int ox = cx + int(std::lround(ex * r * 0.36)), oy = cy - int(std::lround(r * 0.22));
+                if (pequeno) g.fillRect(ox - 1, oy - 1, 2, 2, cor);
+                else ui::forma::disco(g, ox, oy, 3, cor, fundo);   // olho com borda suavizada
+            }
             const double curva = (humor - 2) / 2.0 * (pequeno ? 2.4 : 1.0);   // miniatura: boca exagerada para ler o humor
+            float bx[41], by[41];
             for (int k = 0; k <= 40; ++k) {
                 const double u = -0.5 + k / 40.0;
-                ponto(cx + int(std::lround(u * r * 1.1)), cy + int(std::lround((0.28 + curva * (0.18 - 0.7 * u * u)) * r)), 1);
+                bx[k] = float(cx + std::lround(u * r * 1.1)) + 0.5f;
+                by[k] = float(cy + std::lround((0.28 + curva * (0.18 - 0.7 * u * u)) * r)) + 0.5f;
             }
+            ui::forma::polilinha(g, bx, by, 41, pequeno ? 2.0f : 3.0f, cor, fundo);   // boca: traco suave de pontas redondas
         }
 
         // Corta com reticencias para caber em `larg` px.
@@ -2595,11 +2553,7 @@ namespace screens {
                 ui.paint(caixa, [&](Arduino_GFX& g, Rect alvo) {
                     const uint16_t fundo = apertado ? misturar565(cPainel, 0xFFFF, 0.2) : cPainel;
                     g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, cBg);
-                    g.fillRoundRect(caixa.x, caixa.y, caixa.w, caixa.h, 16, fundo);
-                    if (apertado) {
-                        g.drawRoundRect(caixa.x, caixa.y, caixa.w, caixa.h, 16, 0xFFFF);
-                        g.drawRoundRect(caixa.x + 1, caixa.y + 1, caixa.w - 2, caixa.h - 2, 15, 0xFFFF);
-                    }
+                    retanguloSuave565(g, caixa.x, caixa.y, caixa.w, caixa.h, 16, fundo, cBg, apertado ? 2 : 0, 0xFFFF);
                     rostoGrande(g, caixa.x + 60, caixa.y + 28, 25, i, cTexto, fundo);
                     ui.drawText(g, rotulo, cTexto, alvo.x - caixa.x, alvo.y - caixa.y, fundo);
                 });
@@ -2707,8 +2661,8 @@ namespace screens {
             t.linha(10 + wc + 8 + 12, 154, wx, xpT, 17, cAmbar);
             t.marca(uint32_t(r.focadoMin) * 5U);
             t.desenhar([&](Arduino_GFX& g, int, int) {
-                g.fillRoundRect(10, 140, wc, 28, 14, cPilula);
-                g.fillRoundRect(10 + wc + 8, 140, wx, 28, 14, cPilula);
+                retanguloSuave565(g, 10, 140, wc, 28, 14, cPilula, ui.color(Background));
+                retanguloSuave565(g, 10 + wc + 8, 140, wx, 28, 14, cPilula, ui.color(Background));
                 for (const auto& f : ex) f(g);
             });
         }
@@ -2755,8 +2709,8 @@ namespace screens {
         }
         texto.marca(uint32_t(humor_ + 1) * 31U + saqueDeReflexao_);
         if (!saqueLivre_) texto.desenhar([&](Arduino_GFX& g, int, int) {
-            g.fillRoundRect(176, 76, wCr, 28, 14, cPilula);
-            g.fillRoundRect(176 + wCr + 8, 76, wXp, 28, 14, cPilula);
+            retanguloSuave565(g, 176, 76, wCr, 28, 14, cPilula, ui.color(Background));
+            retanguloSuave565(g, 176 + wCr + 8, 76, wXp, 28, 14, cPilula, ui.color(Background));
             for (const auto& f : extras) f(g);
         });
         // ---- botoes: proximo passo (primario) + Desfazer (8 s) ou "Mais uma rodada"
