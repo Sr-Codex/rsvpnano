@@ -297,6 +297,7 @@ namespace screens {
         bool pedidoSync_ = false;            // "Sincronizar" tocado no seletor vazio
         bool fimApertado_ = false;           // dedo em "Fim · segure"
         uint32_t fimInicioMs_ = 0;           // quando o dedo apoiou em "Fim · segure"
+        uint32_t fimEncerraEmMs_ = 0;        // 100 % em "Fim · segure": instante em que encerra de fato (0 = nao agendado)
         uint32_t fimDicaAteMs_ = 0;          // "segure para encerrar" visivel ate (apos toque curto)
         uint64_t pausaInicioMs_ = 0;         // inicio da pausa em curso (Pausar)
         uint32_t sincPedidaMs_ = 0;          // "Sincronizar" tocado ha pouco (0 = nao)

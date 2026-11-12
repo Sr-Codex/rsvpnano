@@ -225,6 +225,26 @@ void test_fim_enche_nivel_e_cor_do_texto() {
     for (int y = 100; y < 156; ++y) TEST_ASSERT_TRUE(fim::textoEscuro(y, n1));
 }
 
+void test_fim_encerrando_dura_450ms_e_se_descarta_se_esquecido() {
+    namespace fim = ui::fim;
+    unsigned quando = 0;
+    TEST_ASSERT_FALSE(fim::agendado(quando));
+    TEST_ASSERT_FALSE(fim::hora(1000, quando));            // nada agendado: nunca encerra
+    quando = fim::agendar(1000);
+    TEST_ASSERT_TRUE(fim::agendado(quando));
+    TEST_ASSERT_EQUAL_UINT(1450, quando);
+    TEST_ASSERT_FALSE(fim::hora(1000, quando));
+    TEST_ASSERT_FALSE(fim::hora(1449, quando));            // ainda mostrando "encerrando"
+    TEST_ASSERT_TRUE(fim::hora(1450, quando));             // 450 ms depois: encerra
+    TEST_ASSERT_TRUE(fim::hora(1600, quando));
+    TEST_ASSERT_FALSE(fim::vencido(1600, quando));
+    TEST_ASSERT_TRUE(fim::vencido(1450 + fim::kVencidoMs + 1, quando));   // esquecido (saiu da batalha): descarta
+    const unsigned perto = 0xFFFFFFFFu - 100;               // virada do contador de ms
+    const unsigned q2 = fim::agendar(perto);
+    TEST_ASSERT_FALSE(fim::hora(perto + 400, q2));
+    TEST_ASSERT_TRUE(fim::hora(perto + 450, q2));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_cobertura_canto_fora_dentro_borda);
@@ -237,5 +257,6 @@ int main(int, char**) {
     RUN_TEST(test_progresso_perimetro_0_meio_1);
     RUN_TEST(test_progresso_monotono);
     RUN_TEST(test_fim_enche_nivel_e_cor_do_texto);
+    RUN_TEST(test_fim_encerrando_dura_450ms_e_se_descarta_se_esquecido);
     return UNITY_END();
 }

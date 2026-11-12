@@ -1924,7 +1924,10 @@ namespace screens {
         const Rect rectFim = fimMini ? rectFimMini : rectFimLargo;
         const bool temFim = !descanso && !bonus;
         double progFim = -1.0;
-        if (temFim) progFim = progressoFim(ui.pressed(rectFim), nowMs);
+        if (!temFim || ui::fim::vencido(nowMs, fimEncerraEmMs_)) fimEncerraEmMs_ = 0;
+        const bool travado = ui::fim::agendado(fimEncerraEmMs_);   // 100 % alcancado: "encerrando" por ~450 ms, outros toques ignorados
+        if (travado) progFim = 1.0;
+        else if (temFim) progFim = progressoFim(ui.pressed(rectFim), nowMs);
         const bool segurando = progFim >= 0.0;
         const bool dicaFim = segurando || (fimDicaAteMs_ != 0 && int32_t(fimDicaAteMs_ - nowMs) > 0);
 
@@ -2195,6 +2198,9 @@ namespace screens {
         };
         const auto verificarFim = [&]() {
             if (segurando && progFim >= 1.0) {
+                if (!ui::fim::agendado(fimEncerraEmMs_)) fimEncerraEmMs_ = ui::fim::agendar(nowMs);   // mostra o "encerrando" antes
+                if (!ui::fim::hora(nowMs, fimEncerraEmMs_)) return false;
+                fimEncerraEmMs_ = 0;
                 ui.cancelTouchUntilRelease();
                 encerrarPeloFim(nowMs, screen);
                 return true;
@@ -2208,7 +2214,7 @@ namespace screens {
             b.tam = 17;
             b.fundo = cAgua;
             b.tinta = cBg;
-            if (botao3(ui, Rect{472, 8, 160, 92}, b)) encerrarDescanso(nowMs);
+            if (botao3(ui, Rect{472, 8, 160, 92}, b) && !travado) encerrarDescanso(nowMs);
         } else if (bonus) {
             Btn c;
             c.texto = "Concluir";
@@ -2217,7 +2223,7 @@ namespace screens {
             c.icone = IconeId::Check;
             c.fundo = cLaranja;
             c.tinta = cBg;
-            if (botao3(ui, Rect{472, 8, 160, 92}, c)) {
+            if (botao3(ui, Rect{472, 8, 160, 92}, c) && !travado) {
                 finalizar(nowMs, false, fs_);
                 screen = Screen::TempoVitoria;
                 return Action::None;
@@ -2229,7 +2235,7 @@ namespace screens {
             p.icone = IconeId::Pause;
             p.fundo = cTonal;
             p.tinta = cTexto;
-            if (botao3(ui, Rect{472, 108, 160, 56}, p)) pausarOuRetomar(nowMs);
+            if (botao3(ui, Rect{472, 108, 160, 56}, p) && !travado) pausarOuRetomar(nowMs);
         } else if (pausada) {
             Btn c;
             c.texto = "Continuar";
@@ -2238,7 +2244,7 @@ namespace screens {
             c.icone = IconeId::Play;
             c.fundo = cLaranja;
             c.tinta = cBg;
-            if (botao3(ui, Rect{472, 8, 160, 92}, c)) pausarOuRetomar(nowMs);
+            if (botao3(ui, Rect{472, 8, 160, 92}, c) && !travado) pausarOuRetomar(nowMs);
             botaoFim(rectFimLargo, false);
             if (verificarFim()) return Action::None;
         } else if (distr) {
@@ -2249,7 +2255,7 @@ namespace screens {
             c.icone = IconeId::Check;
             c.fundo = cClaro;
             c.tinta = cBg;
-            if (botao3(ui, Rect{472, 8, 160, 92}, c)) alternarDistracao(nowMs);
+            if (botao3(ui, Rect{472, 8, 160, 92}, c) && !travado) alternarDistracao(nowMs);
             botaoFim(rectFimLargo, false);
             if (verificarFim()) return Action::None;
         } else {
@@ -2261,7 +2267,7 @@ namespace screens {
             p.fundo = segurando ? cFundoApagado : cLaranja;
             p.tinta = segurando ? cTintaApagada : cBg;
             p.habilitado = !segurando;
-            if (botao3(ui, Rect{472, 8, 160, 80}, p)) pausarOuRetomar(nowMs);
+            if (botao3(ui, Rect{472, 8, 160, 80}, p) && !travado) pausarOuRetomar(nowMs);
             Btn d;
             d.texto = "Distraí";
             d.tam = 15;
@@ -2271,7 +2277,7 @@ namespace screens {
             d.fundo = cTonal;
             d.tinta = segurando ? rgb565(110, 112, 110) : cTexto;
             d.habilitado = !segurando;
-            if (botao3(ui, Rect{472, 96, 76, 72}, d)) alternarDistracao(nowMs);
+            if (botao3(ui, Rect{472, 96, 76, 72}, d) && !travado) alternarDistracao(nowMs);
             botaoFim(rectFimMini, true);
             if (verificarFim()) return Action::None;
         }

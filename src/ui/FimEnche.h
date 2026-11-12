@@ -40,4 +40,14 @@ namespace ui::fim {
         return c == Camada::Cheia || (c == Camada::Transicao && n.cobertura >= 0.5f);
     }
 
+    // Ao chegar a 100 % o botao fica todo laranja com o check "encerrando" por kEncerrandoMs antes de encerrar de fato.
+    inline constexpr unsigned kEncerrandoMs = 450;
+    inline constexpr int kVencidoMs = 2000;   // estado esquecido (a tela saiu da batalha no meio): descarta
+
+    // `quando` = instante em que o encerramento deve ocorrer (0 = nao agendado).
+    inline bool agendado(unsigned quando) { return quando != 0; }
+    inline unsigned agendar(unsigned agoraMs) { const unsigned q = agoraMs + kEncerrandoMs; return q == 0 ? 1u : q; }
+    inline bool hora(unsigned agoraMs, unsigned quando) { return quando != 0 && int(agoraMs - quando) >= 0; }
+    inline bool vencido(unsigned agoraMs, unsigned quando) { return quando != 0 && int(agoraMs - quando) > kVencidoMs; }
+
 } // namespace ui::fim
