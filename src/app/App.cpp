@@ -1714,6 +1714,16 @@ void App::atualizarBrilho(uint32_t nowMs) {
     c.cenaVitoria = roteiroCena_.vitoria(nowMs);
     contextoFoco_ = c;
     const uint8_t brilho = modoFoco_.atualizar(c, nowMs);
+    {   // Batalha em cabo de guerra: a animacao da faixa para com a tela escurecida, a cena na tela ou a placa em pe; fora da
+        // batalha a PSRAM da faixa volta.
+        tempo::luta::ContextoAnimacao anim;
+        anim.telaBatalha = c.telaBatalha;
+        anim.escurecida = modoFoco_.estado() == Estado::Escurecendo || modoFoco_.estado() == Estado::Escuro;
+        anim.cenaNaTela = modoFoco_.mostrarCena(c);
+        anim.emPe = c.emPe;
+        tempoScreen_.definirAnimacao(tempo::luta::deveAnimar(anim));
+        if (screen_ != screens::Screen::TempoBatalha) tempoScreen_.liberarAnimacao();
+    }
     if (brilho != brilhoAplicado_) {
         Board::Display::setBrightness(brilho);
         brilhoAplicado_ = brilho;

@@ -7,13 +7,18 @@
 #include <cstdio>
 #include <functional>
 
+#include <esp_log.h>
+#include <esp_timer.h>
+
 #include "storage/tempo/TempoStorage.h"
 #include "som/Regras.h"
+#include "tempo/Luta.h"
 #include "tempo/Parametros.h"
 #include "tempo/Regua.h"
 #include "tempo/Sessao.h"
 #include "ui/ReguaSuave.h"
 #include "ui/AnelSuave.h"
+#include "ui/luta/Faixa.h"
 #include "ui/SansFont.h"
 #include "ui/screens/HabitosIcones.h"
 #include "tempo/Progressao.h"
@@ -1135,6 +1140,8 @@ namespace screens {
         avisoDesenhadoMs_ = 0;
         cron_.zerar(livre ? 0 : planejadoMin_);
         overtime_ = false;
+        golpeVisivel_ = false;
+        poeiraPronta_ = false;
         arrastando_ = false;
         fimApertado_ = false;
         fimDicaAteMs_ = 0;
@@ -1497,6 +1504,10 @@ namespace screens {
         }
         if (!overtime_ && restanteMs() == 0) {   // inimigo derrotado: nao encerra, segue em overtime
             overtime_ = true;
+            golpeVisivel_ = true;   // golpe final: o inimigo vira po por ~1,5 s (tempo::luta::kGolpeFinalMs)
+            ESP_LOGD("luta", "golpe final comecou em nowMs=%u", static_cast<unsigned>(nowMs));
+            golpeDesdeMs_ = nowMs;
+            poeiraPronta_ = false;
             pedirSom(som::SomId::Vitoria);   // inimigo derrotado (os creditos/moeda vem ao concluir)
             return true;
         }
@@ -1900,11 +1911,16 @@ namespace screens {
             std::snprintf(t, sizeof t, "%d:%02d", int(totalSeg / 60), int(totalSeg % 60));
             return t;
         }
+        // m:ss ("0:42", "10:02", "25:00"); h:mm:ss a partir de 1 h. Relogio curto da batalha (distracao, hora extra, rotulos da barra).
+        std::string fmtCurto(int64_t totalSeg) {
+            return totalSeg >= 3600 ? fmtRelogio(totalSeg) : fmtMS(totalSeg);
+        }
     } // namespace
 
     // ====================================================================== Batalha v3
-    // Layout 640x172: aneis a esquerda (0..172), texto no meio (176..468), botoes a direita (472..632).
-    // Estados: normal, "Fim · segure" apertado, distraido, pausado, overtime (e a pausa do ciclo).
+    // Layout 640x172 (etapa c, cabo de guerra): relogio grande + nome a esquerda (0..468, y 0..98), faixa animada com os rotulos
+    // VOCE x INIMIGO e a barra (0..468, y 98..152), rodape (y 152..172), botoes a direita (472..632).
+    // Estados: focando, "Fim · segure" apertado, distraido, pausado, golpe final, hora extra (e a pausa do ciclo).
     Action TempoScreen::drawBatalha(ui::Context& ui, uint32_t nowMs, Screen& screen) {
         if (fase_ == Fase::Reflexao || (saqueAtivo_ && !confirmado_)) { screen = Screen::TempoVitoria; return Action::None; }
         if (fase_ == Fase::Nenhuma) { screen = Screen::TempoHoje; return Action::None; }
@@ -1915,66 +1931,13 @@ namespace screens {
         const bool bonus = overtime_ && !descanso;
         const bool distr = cron_.distraido && !pausada;
         const std::string nome = nomeBatalha_.empty() ? std::string{"Sem projeto"} : nomeBatalha_;
-        const int64_t planoMs = int64_t(planejadoMin_) * 60000;
         const auto agora = tempo::agora(nowMs);
 
         const uint16_t cLaranja = c565(kLaranja), cAmbar = c565(kAmbar), cAgua = c565(kAgua);
         const uint16_t cMudo = ui.color(Muted), cTexto = ui.color(Foreground), cBg = ui.color(Background);
         const uint16_t cTonal = c565(kTonal), cClaro = c565(kClaro), cVerde = c565(Cor{60, 200, 110});
         const uint16_t cAzulClaro = c565(Cor{150, 205, 255}), cAgua2 = c565(Cor{140, 232, 222});
-
-        // ---- numeros dos aneis
-        double voce = 0.0, inimigo = 1.0;
-        std::string centro, rotulo;
-        int64_t restDescanso = 0;
-        if (descanso) {
-            restDescanso = std::max<int64_t>(0, descansoMs_ - (int64_t(tempo::ms(nowMs)) - int64_t(descansoInicioMs_)));
-            voce = 1.0 - double(restDescanso) / double(descansoMs_);
-            inimigo = 0.0;
-            centro = fmtRelogio((restDescanso + 999) / 1000);
-            rotulo = "pausa";
-        } else if (bonus) {
-            voce = 1.0 + std::fmod(double(overtimeMs()) / double(planoMs), 1.0);   // 2a volta cheia recomeca (sem teto)
-            inimigo = 0.0;
-            centro = "+" + fmtMS(overtimeMs() / 1000);
-            rotulo = "extra";
-        } else {
-            voce = std::min(1.0, double(cron_.focadoMs) / double(planoMs));
-            inimigo = std::min(1.0, double(restanteMs()) / double(planoMs));
-            centro = fmtRelogio((restanteMs() + 999) / 1000);
-            rotulo = pausada ? "parado" : "faltam";
-        }
-        voce = std::floor(voce * 720) / 720;      // quantiza: anel so e redesenhado quando o valor muda
-        inimigo = std::floor(inimigo * 720) / 720;
-
-        // ---- aneis + centro
-        {
-            Bloco aneis(ui, {0, 0, 172, 172}, Background, 0, 20 + surface());
-            const bool longo = centro.size() > 5;   // "H:MM:SS" (a partir de 1 h): fonte 21 e caixa mais larga para caber no miolo
-            aneis.linha(longo ? kCx - 42 : kCx - 40, 82, longo ? 84 : 80, centro, bonus || longo ? 21 : 26, bonus ? cAzulClaro : cTexto,
-                        TextAlign::Center);
-            aneis.linha(kCx - 40, 106, 80, rotulo, 13, cMudo, TextAlign::Center);
-            aneis.marca(static_cast<uint32_t>(voce * 720) * 1031U + static_cast<uint32_t>(inimigo * 720));
-            const Cor fundo = deRole(ui, Background);
-            const double escuro = pausada ? 0.35 : 0.0;
-            aneis.desenhar([&](Arduino_GFX& g, int dx, int dy) {
-                const auto esc = [&](Cor c) { return mistura(c, kPreto, escuro); };
-                if (descanso) {
-                    anel(g, dx, dy, kCx, kCy, kRaioFora, kEspessura, voce, kAgua, kAgua2, fundo, kAgua);
-                    anel(g, dx, dy, kCx, kCy, kRaioDentro, kEspessura, 0.0, kCarmim, kVinho, fundo, kCarmim);
-                } else if (bonus) {
-                    const Cor b0 = esc(kLaranja), b1 = esc(kAmbar);
-                    anel(g, dx, dy, kCx, kCy, kRaioFora, kEspessura, voce, esc(kAzul2), esc(kAzul), fundo, kAzul, &b0, &b1);
-                    anel(g, dx, dy, kCx, kCy, kRaioDentro, kEspessura, 0.0, kCarmim, kVinho, fundo, kCarmim);
-                } else if (distr) {   // neutro: o foco "esta fora"
-                    anel(g, dx, dy, kCx, kCy, kRaioFora, kEspessura, voce, kCinzaA, kCinzaB, fundo, kCinzaA);
-                    anel(g, dx, dy, kCx, kCy, kRaioDentro, kEspessura, inimigo, kVinhoApagado, kVinhoApagado2, fundo, kVinhoApagado);
-                } else {
-                    anel(g, dx, dy, kCx, kCy, kRaioFora, kEspessura, voce, esc(kLaranja), esc(kAmbar), fundo, kLaranja);
-                    anel(g, dx, dy, kCx, kCy, kRaioDentro, kEspessura, inimigo, esc(kCarmim), esc(kVinho), fundo, kCarmim);
-                }
-            });
-        }
+        const uint16_t cRosa = c565(Cor{240, 96, 116}), cCinzaRel = misturar565(cTexto, cBg, 0.35);
 
         // ---- "Fim · segure": estado do dedo (calculado antes de pintar o texto)
         const Rect rectFimLargo{472, 108, 160, 56}, rectFimMini{556, 96, 76, 72};
@@ -1986,102 +1949,234 @@ namespace screens {
         const bool segurando = progFim >= 0.0;
         const bool dicaFim = segurando || (fimDicaAteMs_ != 0 && int32_t(fimDicaAteMs_ - nowMs) > 0);
 
-        // ---- texto central
+        // ---- modo da luta (tempo::luta) e numeros da barra
+        const bool golpe = bonus && !pausada && golpeVisivel_ && tempo::luta::golpeFinalAtivo(nowMs - golpeDesdeMs_);
+        tempo::luta::EntradaModo entradaModo;
+        entradaModo.descanso = descanso;
+        entradaModo.pausada = pausada;
+        entradaModo.distraido = distr;
+        entradaModo.horaExtra = bonus;
+        entradaModo.golpeFinal = golpe;
+        entradaModo.fimSegurando = segurando;
+        const auto modo = tempo::luta::modoDe(entradaModo);
+        const auto fx = tempo::luta::efeitos(modo);
+        int64_t restDescanso = 0;
+        if (descanso) restDescanso = std::max<int64_t>(0, descansoMs_ - (int64_t(tempo::ms(nowMs)) - int64_t(descansoInicioMs_)));
+        const int pontosVida = cron_.pontosDeVida();
+
+        // ---- relogio grande (fonte de 66 px; h:mm:ss a partir de 1 h; "+" na hora extra)
+        std::string relogio;
+        uint16_t cRelogio = cTexto;
+        if (descanso) {
+            relogio = fmtRelogio((restDescanso + 999) / 1000);
+        } else if (bonus) {
+            relogio = golpe ? std::string{"0:00"} : "+" + fmtCurto(overtimeMs() / 1000);
+            cRelogio = golpe ? cTexto : cAzulClaro;
+            if (pausada) cRelogio = misturar565(cRelogio, cBg, 0.35);
+        } else if (distr) {
+            relogio = fmtCurto(int64_t(cron_.distracaoAtualMs / 1000));
+            cRelogio = cClaro;
+        } else {
+            relogio = fmtRelogio((restanteMs() + 999) / 1000);
+            if (pausada) cRelogio = cCinzaRel;
+        }
+        const int wRelogio = ui::sans::width(relogio, ui::sans::font(66));
+        const int xCol = std::min(8 + wRelogio + 18, 300);
+        const int wCol = 466 - xCol;
+
+        // ---- texto (cabecalho, relogio, coluna do nome) acima da faixa animada
         const auto est = estimar();
         const std::string cr = fmtSinal(est.cr) + " cr", xp = fmtSinal(est.xp) + " XP";
-        const bool curto = rotulo.empty();
-        (void)curto;
-        Bloco texto(ui, {176, 4, 292, 164}, Background, 0, 40 + surface());
+        Bloco texto(ui, {0, 0, 468, ui::luta::kTelaY}, Background, 0, 40 + surface());
         std::vector<std::function<void(Arduino_GFX&)>> icones;   // icones (logicos) pintados no desenho extra
         const auto icone = [&](IconeId id, int cx, int cy, int lado, uint16_t cor) {
             icones.push_back([=](Arduino_GFX& g) { icones::phosphor(g, id, cx, cy, lado, cor, cBg); });
         };
-        const int rodada = ciclo_.ativo ? ciclo_.rodada : 1, rodadas = ciclo_.ativo ? tempo::kCicloRodadas : 1;
-        const std::string rodadaTxt = "RODADA " + std::to_string(rodada) + " DE " + std::to_string(rodadas);
+        const int rodada = ciclo_.ativo ? ciclo_.rodada : 1;
+        const std::string rodadaTxt = "RODADA " + std::to_string(rodada) + " DE " + std::to_string(tempo::kCicloRodadas);
+        std::string timerTxt = "TIMER · ";
+        {
+            const std::string dur = tempo::regua::textoDuracao(planejadoMin_);   // "45 min", "2h30", "5 h"
+            for (const char ch : dur) timerTxt += ch >= 'a' && ch <= 'z' ? char(ch - 32) : ch;
+        }
         std::string termina;
         if (agora.valida && !pausada && !descanso) {
             const int extra = ciclo_.ativo ? (tempo::kCicloRodadas - ciclo_.rodada) * (ciclo_.focoMin + ciclo_.pausaMin) : 0;
             termina = " · TERMINA " + fmtHoraRelogio(agora.minutoDoDia + int((restanteMs() + 59999) / 60000) + extra);
         }
+        const bool comAlvo = !projetoBatalhaId_.empty();   // batalha de um projeto do TickTick: 🎯 como no cartao do foco
+        // Nome do foco em ate 2 linhas na coluna ao lado do relogio; devolve o y logo abaixo da ultima linha.
         const auto nomeLinhas = [&](int y0, uint8_t tamA, uint8_t tamB, uint16_t cor) {
-            const auto q = quebrar(nome, 282, tamA, tamB);
-            const int passo = q.tam >= 21 ? 25 : 20;
-            for (size_t i = 0; i < q.linhas.size(); ++i) texto.linha(176, y0 + int(i) * passo, 292, q.linhas[i], q.tam, cor);
+            const int dx = comAlvo ? 24 : 0;
+            const auto q = quebrar(nome, wCol - dx, tamA, tamB, 2);
+            for (size_t i = 0; i < q.linhas.size(); ++i) texto.linha(xCol + dx, y0 + int(i) * 20, wCol - dx, q.linhas[i], q.tam, cor);
+            if (comAlvo) {
+                const int cy = y0 + int(q.linhas.size() - 1) * 10;
+                icones.push_back([=](Arduino_GFX& g) { icones::emoji(g, icons::emoji::Id::Bullseye, xCol + 10, cy, 20, cBg); });
+            }
+            return y0 + int(q.linhas.size()) * 20;
         };
         const auto linhaBonus = [&](int yc) {
             switch (cron_.bonus()) {
             case tempo::BonusPerfeito::Disponivel:
-                icone(IconeId::Fire, 184, yc, 16, cAmbar);
-                texto.linha(198, yc, 270, "sem distrações · bônus +25%", 15, cAmbar);
+                icone(IconeId::Fire, xCol + 8, yc, 16, cAmbar);
+                texto.linha(xCol + 22, yc, wCol - 22, "sem distrações · +25%", 15, cAmbar);
                 break;
             case tempo::BonusPerfeito::Mantido:
-                icone(IconeId::Fire, 184, yc, 16, cAmbar);
-                texto.linha(198, yc, 270, "distração curta · bônus mantido", 15, cAmbar);
+                icone(IconeId::Fire, xCol + 8, yc, 16, cAmbar);
+                texto.linha(xCol + 22, yc, wCol - 22, "distração curta · mantido", 15, cAmbar);
                 break;
             case tempo::BonusPerfeito::Perdido:
-                icone(IconeId::Fire, 184, yc, 16, rgb565(110, 112, 110));
-                texto.linha(198, yc, 270, "bônus perfeito perdido", 15, cMudo);
+                icone(IconeId::Fire, xCol + 8, yc, 16, rgb565(110, 112, 110));
+                texto.linha(xCol + 22, yc, wCol - 22, "bônus perfeito perdido", 15, cMudo);
                 break;
             default: break;
             }
         };
+        const std::string bonusRodape = (cron_.bonus() == tempo::BonusPerfeito::Disponivel || cron_.bonus() == tempo::BonusPerfeito::Mantido)
+                                            ? " · bônus +25%" : std::string{};
+        std::string rodape;
+        uint16_t cRodape = cMudo;
 
         if (descanso) {
             const int pausaMin = int(descansoMs_ / 60000);
             const bool longa = ciclo_.ativo && ciclo_.passo == tempo::PassoCiclo::PausaLonga;
-            icone(IconeId::PauseCircle, 184, 16, 16, cAgua);
-            texto.linha(198, 16, 270, ciclo_.ativo ? "PAUSA · RODADA " + std::to_string(ciclo_.rodada) + " DE " + std::to_string(tempo::kCicloRodadas)
-                                                   : std::string{"PAUSA"}, 15, cAgua);
-            texto.linha(176, 46, 292, std::string{longa ? "Pausa longa de " : "Pausa de "} + std::to_string(pausaMin) + " min", 21, cTexto);
-            texto.linha(176, 84, 292, "respire; um bipe avisa quando acabar", 15, cMudo);
-            texto.linha(176, 108, 292,
-                        ciclo_.ativo ? (longa ? std::string{"depois o ciclo termina"}
-                                              : "depois: rodada " + std::to_string(ciclo_.rodada + 1) + " de " + std::to_string(tempo::kCicloRodadas))
-                                     : "depois você volta ao Início", 15, cMudo);
-            texto.linha(176, 148, 292, "hoje: " + fmtHoraMin(estado_.dia.fochoPagoMin) + " de foco", 15, cMudo);
+            icone(IconeId::PauseCircle, 17, 16, 17, cAgua);
+            texto.linha(32, 16, 430, ciclo_.ativo ? "PAUSA · " + rodadaTxt : std::string{"PAUSA"}, 15, cAgua);
+            texto.linha(xCol, 50, wCol, std::string{longa ? "Pausa longa de " : "Pausa de "} + std::to_string(pausaMin) + " min", 21, cTexto);
+            texto.linha(xCol, 76, wCol, "um bipe avisa quando acabar", 15, cMudo);
+            rodape = ciclo_.ativo ? (longa ? std::string{"depois o ciclo termina"}
+                                           : "depois: rodada " + std::to_string(ciclo_.rodada + 1) + " de " + std::to_string(tempo::kCicloRodadas))
+                                  : std::string{"depois você volta ao Início"};
         } else if (pausada) {
-            icone(IconeId::PauseCircle, 184, 16, 18, cAgua);
-            texto.linha(198, 16, 270, "PAUSADO · " + fmtMS((int64_t(tempo::ms(nowMs)) - int64_t(pausaInicioMs_)) / 1000), 15, cAgua);
-            nomeLinhas(44, 21, 17, cTexto);
-            texto.linha(176, 110, 292, "o inimigo não se cura", 17, cAgua2);
-            texto.linha(176, 136, 292, "o relógio parou · sem perda de bônus", 15, cMudo);
-            if (dicaFim) {
-                icone(IconeId::FlagCheckered, 186, 158, 16, cLaranja);
-                texto.linha(202, 158, 266, "segure para encerrar", 15, cTexto);
-            }
+            icone(IconeId::PauseCircle, 17, 16, 18, cAgua);
+            texto.linha(32, 16, 430, "PAUSADO · " + fmtMS((int64_t(tempo::ms(nowMs)) - int64_t(pausaInicioMs_)) / 1000), 15, cAgua);
+            texto.linha(xCol, 50, wCol, "parado", 21, cAgua2);
+            texto.linha(xCol, 76, wCol, "o inimigo não se cura", 15, cAgua2);
+            rodape = dicaFim ? std::string{"segure o botão Fim para encerrar"} : std::string{"o relógio parou · sem perda de bônus"};
         } else if (bonus) {
-            icone(IconeId::StarFour, 184, 16, 16, cAzulClaro);
-            texto.linha(198, 16, 270, "TEMPO EXTRA · INIMIGO DERROTADO", 15, cAzulClaro);
-            nomeLinhas(44, 21, 17, cTexto);
-            icone(IconeId::CheckCircle, 186, 112, 20, cVerde);
-            texto.linha(202, 112, 266, cr + " · " + xp + " já garantidos", 15, cVerde);
-            texto.linha(176, 140, 292, "cada minuto extra conta", 15, cMudo);
+            if (golpe) {
+                icone(IconeId::Lightning, 17, 16, 17, cAmbar);
+                texto.linha(32, 16, 430, "GOLPE FINAL", 15, cAmbar);
+            } else {
+                icone(IconeId::StarFour, 17, 16, 17, cAzulClaro);
+                texto.linha(32, 16, 430, "HORA EXTRA · INIMIGO DERROTADO", 15, cAzulClaro);
+            }
+            const int yb = nomeLinhas(44, 17, 15, cTexto) + 4;
+            icone(IconeId::CheckCircle, xCol + 8, yb, 16, cVerde);
+            texto.linha(xCol + 22, yb, wCol - 22, golpe ? std::string{"inimigo derrotado"} : cr + " · " + xp + " garantidos", 15, cVerde);
+            if (golpe) {
+                rodape = cr + " · " + xp + bonusRodape;
+                cRodape = cAmbar;
+            } else {
+                rodape = "cada minuto extra conta · você decide quando parar";
+            }
         } else if (distr) {
-            icone(IconeId::HandPalm, 184, 16, 16, cClaro);
-            texto.linha(198, 16, 270, rodadaTxt + " · FORA DO FOCO", 15, cClaro);
-            texto.linha(176, 46, 292, "distraído há " + fmtMS(int64_t(cron_.distracaoAtualMs / 1000)), 26, cTexto);
-            nomeLinhas(80, 17, 17, cMudo);
-            texto.linha(176, 128, 292, "o inimigo se cura enquanto durar", 15, cMudo);
+            icone(IconeId::HandPalm, 17, 16, 17, cClaro);
+            texto.linha(32, 16, 430, (ciclo_.ativo ? rodadaTxt : std::string{"TIMER"}) + " · FORA DO FOCO", 15, cClaro);
+            texto.linha(xCol, 50, wCol, "distraído", 21, cTexto);
+            texto.linha(xCol, 76, wCol, "o inimigo está se recuperando", 15, cRosa);
             switch (cron_.bonus()) {
-            case tempo::BonusPerfeito::EmRisco: texto.linha(176, 150, 292, "até 1 min não perde o bônus perfeito", 15, cMudo); break;
-            case tempo::BonusPerfeito::Perdido: texto.linha(176, 150, 292, "bônus perfeito perdido", 15, cMudo); break;
-            default: texto.linha(176, 150, 292, "volte ao foco e o anel vermelho esvazia", 15, cMudo); break;
+            case tempo::BonusPerfeito::EmRisco: rodape = "até 1 min não perde o bônus +25%"; break;
+            case tempo::BonusPerfeito::Perdido: rodape = "bônus perfeito perdido"; break;
+            default: rodape = "volte ao foco e a frente avança de novo"; break;
             }
         } else {
-            texto.linha(176, 16, 292, rodadaTxt + termina, 15, cMudo);
-            nomeLinhas(40, 21, 17, cTexto);
-            linhaBonus(112);
+            icone(IconeId::HourglassMedium, 17, 16, 17, cMudo);
+            texto.linha(32, 16, 430, (ciclo_.ativo ? rodadaTxt : timerTxt) + termina, 15, cMudo);
+            const int yb = nomeLinhas(44, 17, 15, cTexto) + 4;
             if (dicaFim) {
-                icone(IconeId::FlagCheckered, 186, 140, 20, cLaranja);
-                texto.linha(202, 140, 266, "segure para encerrar", 17, cTexto);
+                icone(IconeId::FlagCheckered, xCol + 9, yb, 18, cLaranja);
+                texto.linha(xCol + 24, yb, wCol - 24, "segure para encerrar", 15, cTexto);
+                rodape = "encerrar agora paga só o tempo focado, sem bônus";
             } else {
-                texto.linha(176, 140, 292, "ao vencer: " + cr + " · " + xp, 15, cMudo);
+                linhaBonus(yb);
+                rodape = "ao vencer: " + cr + " · " + xp;
             }
         }
-        texto.marca(dicaFim * 4U + segurando * 2U + uint32_t(cron_.bonus()) * 8U);
+        texto.linha(8, 70, wRelogio + 8, relogio, 66, cRelogio);
+        texto.marca(dicaFim * 4U + segurando * 2U + uint32_t(cron_.bonus()) * 8U + golpe * 64U);
         texto.desenhar([&](Arduino_GFX& g, int, int) {
             for (const auto& f : icones) f(g);
         });
+
+        // ---- faixa animada: rotulos VOCE x INIMIGO + barra de cabo de guerra (ui/luta/Faixa, composta na PSRAM)
+        {
+            namespace lt = tempo::luta;
+            using ui::luta::Cor;
+            const Cor fLaranja{255, 120, 50}, fRosa{240, 96, 116}, fAzul2{150, 205, 255}, fAgua{50, 200, 188};
+            ui::luta::Quadro fq;
+            fq.modo = modo;
+            if (pausada && bonus) {   // pausou na hora extra: a barra da hora extra em tregua
+                fq.modo = tempo::luta::Modo::HoraExtra;
+                fq.tregua = true;
+            }
+            fq.fundo = Cor{float((cBg >> 11 & 31) << 3), float((cBg >> 5 & 63) << 2), float((cBg & 31) << 3)};   // Background (na grade do RGB565)
+            fq.animar = animarLuta_ && !fq.tregua;
+            fq.frente = float(lt::frente(cron_));
+            fq.extra = float(lt::voltaExtra(cron_));
+            fq.pausa = descanso && descansoMs_ > 0 ? float(double(restDescanso) / double(descansoMs_)) : 1.0f;
+            const uint32_t quadroIdx = fq.animar && fx.animada ? lt::indiceDoQuadro(nowMs) : 0U;
+            fq.quadro = quadroIdx;
+            fq.pulso = lt::pulso(quadroIdx, fq.animar);
+            fq.golpe = golpe ? (animarLuta_ ? lt::progressoGolpe(nowMs - golpeDesdeMs_) : lt::kProgGolpe) : 0.0f;
+            const int64_t vocePlano = bonus ? int64_t(cron_.focadoMs) - overtimeMs() : int64_t(cron_.focadoMs);   // hora extra: o foco quando o inimigo caiu
+            fq.esq = {"VOCÊ " + fmtCurto(vocePlano / 1000), fLaranja, true, icons::phosphor::Id::Sword};
+            fq.dir = {std::to_string(pontosVida) + "% INIMIGO", fRosa, true, icons::phosphor::Id::Skull};
+            if (golpe) fq.dir = {"INIMIGO", fRosa, true, icons::phosphor::Id::Skull};
+            if (bonus && !golpe) fq.dir = {"EXTRA +" + fmtCurto(overtimeMs() / 1000), fAzul2, false, icons::phosphor::Id::Skull};
+            if (descanso) {
+                fq.esq = {"PAUSA", fAgua, true, icons::phosphor::Id::PauseCircle};
+                fq.dir = {"faltam " + fmtCurto((restDescanso + 999) / 1000), fAgua, false, icons::phosphor::Id::Skull};
+            }
+            const bool memoria = luta_.garantir();
+            if (memoria && golpe && !poeiraPronta_) {   // particulas do golpe final: seed fixa, geradas uma vez
+                poeiraPronta_ = true;
+                if (luta_.garantirPoeira()) {
+                    const int64_t t0 = esp_timer_get_time();
+                    const bool ok = luta_.faixa()->prepararPoeira(fq.dir, 0xC0FFEEu, fq.fundo);
+                    ESP_LOGD("luta", "poeira preparada em %lld us (%u particulas, ok=%d)", static_cast<long long>(esp_timer_get_time() - t0),
+                             static_cast<unsigned>(luta_.faixa()->numParticulas()), ok ? 1 : 0);
+                }
+            }
+            uint32_t sig = ui::Context::combine(0x4C555441u, uint32_t(modo));
+            const auto q16 = [](float v, float k) { return uint32_t(std::lround(std::clamp(v, 0.0f, 1.0f) * k)); };
+            sig = ui::Context::combine(sig, q16(fq.frente, 8.0f * ui::luta::kBarraLarg));
+            sig = ui::Context::combine(sig, q16(fq.extra, 8.0f * ui::luta::kBarraLarg));
+            sig = ui::Context::combine(sig, q16(fq.pausa, 8.0f * ui::luta::kBarraLarg));
+            sig = ui::Context::combine(sig, q16(fq.golpe / lt::kProgGolpe, 400.0f));
+            sig = ui::Context::combine(sig, quadroIdx * 2U + (fq.animar ? 1U : 0U) + (fq.tregua ? 0x100U : 0U));
+            sig = ui::Context::combine(sig, uint32_t(poeiraPronta_ && luta_.temPoeira()) + (memoria ? 2U : 0U));
+            sig = ui::Context::signature(fq.esq.texto, sig);
+            sig = ui::Context::signature(fq.dir.texto, sig);
+            const ui::Rect faixaRect{ui::luta::kTelaX, ui::luta::kTelaY, ui::luta::kLarg, ui::luta::kAlt};
+            if (ui.redraw(faixaRect, sig, true)) {
+                if (memoria) {
+                    const int64_t t0 = esp_timer_get_time();
+                    luta_.faixa()->compor(fq);
+                    ESP_LOGD("luta", "faixa composta em %lld us (modo %d, quadro %u)", static_cast<long long>(esp_timer_get_time() - t0),
+                             static_cast<int>(modo), static_cast<unsigned>(quadroIdx));
+                    const uint16_t* pixels = luta_.faixa()->saida();
+                    ui.paint(faixaRect, [&](Arduino_GFX& g, Rect alvo) {
+                        g.draw16bitRGBBitmap(alvo.x, alvo.y, const_cast<uint16_t*>(pixels), ui::luta::kLarg, ui::luta::kAlt);
+                    });
+                } else {   // sem PSRAM: so a barra, sem efeitos
+                    ui.paint(faixaRect, [&](Arduino_GFX& g, Rect alvo) {
+                        g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, cBg);
+                        const int bx = alvo.x + ui::luta::kBarraX0, by = alvo.y + ui::luta::kBarraY0;
+                        retanguloSuave565(g, bx, by, ui::luta::kBarraLarg, ui::luta::kBarraAlt, 12, c565(kCarmim), cBg);
+                        const int wl = std::max(24, int(std::lround(fq.frente * ui::luta::kBarraLarg)));
+                        retanguloSuave565(g, bx, by, std::min(wl, ui::luta::kBarraLarg), ui::luta::kBarraAlt, 12, cLaranja, cBg);
+                    });
+                }
+            }
+        }
+        // ---- rodape
+        {
+            Bloco pe(ui, {0, ui::luta::kTelaY + ui::luta::kAlt, 468, 172 - (ui::luta::kTelaY + ui::luta::kAlt)}, Background, 0, 0x524F4450U);
+            pe.linha(8, 161, 456, rodape, 15, cRodape);
+            pe.desenhar();
+        }
 
         // ---- botoes
         const uint16_t cFundoApagado = c565(Cor{70, 42, 26}), cTintaApagada = c565(Cor{150, 100, 70});

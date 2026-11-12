@@ -17,6 +17,7 @@
 #include "tempo/Habitos.h"
 #include "tempo/Livre.h"
 #include "tempo/Lembretes.h"
+#include "tempo/Luta.h"
 #include "tempo/ModoFoco.h"
 #include "tempo/Motor.h"
 #include "tempo/Recarga.h"
@@ -24,6 +25,7 @@
 #include "tempo/Relogio.h"
 #include "som/Sintese.h"
 #include "tempo/Sessao.h"
+#include "ui/luta/FaixaPsram.h"
 #include "ui/screens/ModernScreens.h"
 
 namespace screens {
@@ -187,6 +189,10 @@ namespace screens {
             }
         }
         bool segurandoFim() const { return fimApertado_; }
+        // Batalha em cabo de guerra (etapa c): o App diz se a animacao pode correr (tela clara, batalha na frente, placa deitada;
+        // tempo::luta::deveAnimar) e devolve a PSRAM da faixa quando a tela sai da batalha.
+        void definirAnimacao(bool animar) { animarLuta_ = animar; }
+        void liberarAnimacao() { luta_.liberar(); }
         // Modo Foco, cenas QG (tempo::cenafoco): progresso do foco (0..1, sem contar o overtime), duracao planejada e foco
         // pago HOJE antes desta sessao (as sessoes anteriores do dia; a batalha em curso so entra ao liquidar). Data do
         // dia diferente de hoje (ex.: a batalha passou da meia-noite) = 0.
@@ -311,6 +317,11 @@ namespace screens {
         uint64_t ultimoMs_ = 0;
         tempo::Cronometro cron_;             // foco / distracao / pausa (regras das decisoes 18 e 19; src/tempo/Cronometro.h)
         bool overtime_ = false;              // inimigo derrotado, seguindo no bonus
+        bool golpeVisivel_ = false;          // golpe final em curso/recente (inicio em golpeDesdeMs_, relogio do laco)
+        uint32_t golpeDesdeMs_ = 0;          // nowMs em que o inimigo zerou (tick)
+        bool poeiraPronta_ = false;          // particulas do golpe final geradas
+        bool animarLuta_ = true;             // vem do App (tempo::luta::deveAnimar)
+        ui::luta::FaixaPsram luta_;          // memoria (PSRAM) da faixa animada da batalha
         int ultimoBipeFocoMin_ = 0;          // ultimo multiplo de 10 min de foco ja avisado
         bool avisoFimDado_ = false;
         bool arrastando_ = false;            // dedo no anel do preparo
