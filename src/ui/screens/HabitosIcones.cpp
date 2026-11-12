@@ -150,6 +150,30 @@ namespace screens::icones {
         }
     }
 
+    void emoji(Arduino_GFX& g, icons::emoji::Id id, int cx, int cy, int lado, uint16_t fundo, unsigned opacidade) {
+        const icons::emoji::Sprite* melhor = nullptr;
+        for (const auto& s : icons::emoji::kSprites) {
+            if (s.id != id) continue;
+            if (!melhor || std::abs(int(s.lado) - lado) < std::abs(int(melhor->lado) - lado)) melhor = &s;
+        }
+        if (!melhor) return;
+        const int x0 = cx - melhor->lado / 2 + gDx, y0 = cy - melhor->lado / 2 + gDy;
+        const unsigned fr = (fundo >> 11) & 31, fg = (fundo >> 5) & 63, fb = fundo & 31;
+        for (int y = 0; y < melhor->lado; ++y) {
+            for (int x = 0; x < melhor->lado; x++) {
+                const size_t i = size_t(y) * melhor->lado + size_t(x);
+                const unsigned a = (unsigned(melhor->alfa[i]) * std::min(255u, opacidade) + 127) / 255;
+                if (a == 0) continue;
+                const uint16_t c = melhor->rgb[i];
+                if (a >= 255) { g.drawPixel(x0 + x, y0 + y, c); continue; }
+                const unsigned r = (((c >> 11) & 31) * a + fr * (255 - a) + 127) / 255;
+                const unsigned gg = (((c >> 5) & 63) * a + fg * (255 - a) + 127) / 255;
+                const unsigned b = ((c & 31) * a + fb * (255 - a) + 127) / 255;
+                g.drawPixel(x0 + x, y0 + y, uint16_t((r << 11) | (gg << 5) | b));
+            }
+        }
+    }
+
     void visto(Arduino_GFX& g, int cx, int cy, int s, uint16_t cor, uint16_t fundo) {
         phosphor(g, Id::Check, cx, cy, 2 * s, cor, fundo);
     }

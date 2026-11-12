@@ -8,6 +8,7 @@
 #include <cstdint>
 
 #include "tempo/HabitosVista.h"
+#include "ui/icons/EmojiSprites.generated.h"
 #include "ui/icons/PhosphorIcons.generated.h"
 
 namespace screens::icones {
@@ -44,6 +45,11 @@ namespace screens::icones {
     // alfa e feito em RGB565 pixel a pixel). `lado` = lado desejado em px; usa o tamanho gerado mais proximo.
     void phosphor(Arduino_GFX& g, icons::phosphor::Id id, int cx, int cy, int lado, uint16_t cor, uint16_t fundo);
     uint16_t misturarAlfa(uint16_t cor, uint16_t fundo, unsigned alfa4);   // alfa 0..15
+
+    // Emoji colorido (Fluent, MIT; src/ui/icons/EmojiSprites.generated.*): sprite RGB565 + alfa 8 bits misturado com `fundo` (cor opaca
+    // sob o icone) pixel a pixel, entao a borda sai suavizada. `lado` = lado desejado; usa o tamanho gerado mais proximo.
+    // `opacidade` 0..255 (255 = normal; menor = esmaecido sobre o fundo, ex.: estado vazio).
+    void emoji(Arduino_GFX& g, icons::emoji::Id id, int cx, int cy, int lado, uint16_t fundo, unsigned opacidade = 255);
 
     // Icone do habito centrado em (cx, cy); s = meia largura (12 -> 24 px). `fundo` = cor sob o icone. So peso fill.
     void habito(Arduino_GFX& g, tempo::IconeHabito icone, int cx, int cy, int s, uint16_t cor, uint16_t fundo);
