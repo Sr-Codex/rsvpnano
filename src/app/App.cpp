@@ -1773,7 +1773,11 @@ bool App::desenharCenaFoco(uint32_t nowMs) {
     // Tela "propria" para o ui::Context: trocar batalha <-> cena invalida tudo e a outra tela repinta inteira.
     constexpr uint8_t kTelaCena = 0xFE;
     immediateUi_.beginFrame(kTelaCena, static_cast<uint8_t>(&cena == &ui::cenas::kQgNeon ? 1 : 2));
-    cenaFoco_.desenhar(immediateUi_, quadroCena_);
+    // v2: relogio na cena (foco: restante; vitoria: 00:00; hora extra: +m:ss; livre: decorrido) e animacoes a 8 quadros/s
+    auto entradaRelogio = tempoScreen_.entradaRelogioCena();
+    entradaRelogio.horaExtra = quadroCena_.fundo != cf::Fundo::Noite;
+    entradaRelogio.vitoria = quadroCena_.fundo == cf::Fundo::Vitoria;
+    cenaFoco_.desenhar(immediateUi_, quadroCena_, tempo::cenaviva::relogio(entradaRelogio), nowMs);
     cenaNaTela_ = true;
     return true;
 }

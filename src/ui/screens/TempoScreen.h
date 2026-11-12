@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "tempo/CenaViva.h"
 #include "tempo/Codec.h"
 #include "tempo/Cronometro.h"
 #include "tempo/Fechamento.h"
@@ -206,6 +207,17 @@ namespace screens {
             const auto agora = tempo::agora(nowMs);
             if (!carregado_ || (agora.valida && !(estado_.dia.data == agora.data))) return 0;
             return std::max(0, estado_.dia.fochoPagoMin);
+        }
+        // Modo Foco v2: dados do relogio da cena (tempo::cenaviva::relogio). Vitoria = o App (fundo da cena).
+        tempo::cenaviva::EntradaRelogio entradaRelogioCena() const {
+            tempo::cenaviva::EntradaRelogio e;
+            e.livre = livre_;
+            e.horaExtra = overtime_;
+            e.restanteMs = restanteMs();
+            e.overtimeMs = overtimeMs();
+            e.focadoMs = cron_.focadoMs;
+            e.planoMs = int64_t(planejadoMin()) * 60000;
+            return e;
         }
 
     private:
