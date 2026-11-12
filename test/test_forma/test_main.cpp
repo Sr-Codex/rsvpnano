@@ -62,6 +62,16 @@ void test_cheio_cantos_suaves_e_miolo_rapido() {
     TEST_ASSERT_EQUAL_UINT16(t.at(1, 1), t.at(1, 38));
 }
 
+void test_miolo_fora_da_grade_sem_pontilhado() {
+    // cor fora da grade do RGB565: todo pixel 100 % dentro (inclusive nos cantos) sai igual, sem manchas de pontilhado
+    const Rgb fora{230, 230, 222};
+    Tela t;
+    f::retanguloSuave([&](int x, int y, uint16_t c) { t.pixel(x, y, c); },
+                      [&](int x, int y, int w, int h, uint16_t c) { t.rect(x, y, w, h, c); }, 0, 0, 60, 40, 12, fora, kFundo);
+    for (int y = 6; y < 12; ++y)
+        for (int x = 6; x < 12; ++x) TEST_ASSERT_EQUAL_UINT16(c565(fora), t.at(x, y));
+}
+
 void test_contorno_so_toca_a_faixa() {
     Tela t;
     f::contornoSuave([&](int x, int y, uint16_t c) { t.pixel(x, y, c); },
@@ -181,6 +191,7 @@ int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_cobertura_canto_fora_dentro_borda);
     RUN_TEST(test_cheio_cantos_suaves_e_miolo_rapido);
+    RUN_TEST(test_miolo_fora_da_grade_sem_pontilhado);
     RUN_TEST(test_contorno_so_toca_a_faixa);
     RUN_TEST(test_disco_e_anel);
     RUN_TEST(test_triangulo);

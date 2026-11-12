@@ -30,6 +30,14 @@ namespace ui::forma {
     inline uint16_t para565(const Rgb& c, int x, int y) { return ui::anel::Anel::para565(c, x, y); }
     inline uint16_t chapada565(const Rgb& c) { return ui::anel::Anel::para565(ui::anel::Anel::grade(c)); }
 
+    // Mistura a->b em t; nos extremos devolve a cor chapada na grade do RGB565 (sem pontilhado: um miolo de cor fora da grade
+    // ficaria com manchas de pontilhado diferentes do resto do preenchimento), no meio usa o pontilhado ordenado.
+    inline uint16_t mistura565(const Rgb& a, const Rgb& b, float t, int x, int y) {
+        if (t <= 0.001f) return chapada565(a);
+        if (t >= 0.999f) return chapada565(b);
+        return para565(mistura(a, b, t), x, y);
+    }
+
     // Distancia com sinal (negativa dentro) do ponto ate um retangulo arredondado [x, x+w) x [y, y+h) de raio r.
     inline float distanciaRetanguloArredondado(float px, float py, float x, float y, float w, float h, float r) {
         const float hw = w * 0.5f, hh = h * 0.5f;
@@ -69,17 +77,17 @@ namespace ui::forma {
                     for (int cx = xs[i]; cx < xs[i] + r; ++cx) {
                         const float px = cx + 0.5f, py = cy + 0.5f;
                         const float fora = coberturaRetanguloArredondado(px, py, float(x), float(y), float(w), float(h), float(r));
-                        Rgb c = fundo;
                         if (borda > 0) {
-                            c = mistura(c, corBorda, fora);
                             const float dentro = coberturaRetanguloArredondado(px, py, float(x + borda), float(y + borda),
                                                                                float(w - 2 * borda), float(h - 2 * borda),
                                                                                float(std::max(0, r - borda)));
-                            c = mistura(c, fill, dentro);
+                            if (dentro >= 0.999f) pixel(cx, cy, cFill);
+                            else if (fora <= 0.001f) pixel(cx, cy, chapada565(fundo));
+                            else if (fora >= 0.999f && dentro <= 0.001f) pixel(cx, cy, cBorda);
+                            else pixel(cx, cy, para565(mistura(mistura(fundo, corBorda, fora), fill, dentro), cx, cy));
                         } else {
-                            c = mistura(c, fill, fora);
+                            pixel(cx, cy, mistura565(fundo, fill, fora, cx, cy));
                         }
-                        pixel(cx, cy, para565(c, cx, cy));
                     }
     }
 
@@ -108,8 +116,8 @@ namespace ui::forma {
                                                                            float(w - 2 * esp), float(h - 2 * esp), float(ri));
                         if (fora <= 0.0f) continue;      // fora do canto: nao toca
                         if (dentro >= 1.0f) continue;    // miolo: nao toca
-                        const Rgb c = mistura(mistura(fundoFora, cor, fora), fundoDentro, dentro);
-                        pixel(cx, cy, para565(c, cx, cy));
+                        if (fora >= 0.999f && dentro <= 0.001f) { pixel(cx, cy, cCor); continue; }
+                        pixel(cx, cy, para565(mistura(mistura(fundoFora, cor, fora), fundoDentro, dentro), cx, cy));
                     }
     }
 
@@ -129,7 +137,7 @@ namespace ui::forma {
                 if (std::abs(i) <= imax) continue;
                 const float cob = std::clamp(R + 0.5f - std::hypot(float(i), float(j)), 0.0f, 1.0f);
                 if (cob <= 0.0f) continue;
-                pixel(cx + i, cy + j, para565(mistura(fundo, cor, cob), cx + i, cy + j));
+                pixel(cx + i, cy + j, mistura565(fundo, cor, cob, cx + i, cy + j));
             }
         }
     }
@@ -145,6 +153,7 @@ namespace ui::forma {
                 const float d = std::hypot(float(i), float(j));
                 const float fora = std::clamp(Ro + 0.5f - d, 0.0f, 1.0f), dentro = std::clamp(Ri + 0.5f - d, 0.0f, 1.0f);
                 if (fora <= 0.0f || dentro >= 1.0f) continue;
+                if (fora >= 0.999f && dentro <= 0.001f) { pixel(cx + i, cy + j, chapada565(cor)); continue; }
                 pixel(cx + i, cy + j, para565(mistura(mistura(fundoFora, cor, fora), fundoDentro, dentro), cx + i, cy + j));
             }
     }
@@ -312,7 +321,7 @@ namespace ui::forma {
             if (cob <= 0.0f) return;
             const float baixo = coberturaRetanguloArredondado(px, py, float(x), float(y), float(w), float(h), float(r));
             const Rgb sob = mistura(fundoFora, fundoDentro, baixo);
-            pixel(cx, cy, para565(mistura(sob, cor, cob), cx, cy));
+            pixel(cx, cy, cob >= 0.999f ? chapada565(cor) : para565(mistura(sob, cor, cob), cx, cy));
         };
         for (int cy = y; cy < y + h; ++cy) {
             if (cy < y + faixa || cy >= y + h - faixa) {
