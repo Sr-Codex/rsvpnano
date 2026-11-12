@@ -4,6 +4,7 @@
 #include <cmath>
 #include <vector>
 
+#include "ui/FormaSuaveGfx.h"
 #include "ui/Rgb565.h"
 #include "ui/icons/PhosphorIcons.generated.h"
 
@@ -12,30 +13,35 @@ namespace screens::icones {
     namespace {
         constexpr double kPi = 3.14159265358979323846;
         int gDx = 0, gDy = 0;   // deslocamento logico -> buffer de pintura (ver Bloco::desenhar: extra(g, dx, dy))
-        void o_fillCircle(Arduino_GFX& g, int x, int y, int r, uint16_t c) { g.fillCircle(x + gDx, y + gDy, r, c); }
-        void o_fillTriangle(Arduino_GFX& g, int x0, int y0, int x1, int y1, int x2, int y2, uint16_t c) {
-            g.fillTriangle(x0 + gDx, y0 + gDy, x1 + gDx, y1 + gDy, x2 + gDx, y2 + gDy, c);
-        }
+        // Cor por tras do que se desenha (a borda suavizada se mistura com ela): a do Bloco (Origem) ou a do marcador em curso.
+        uint16_t gFundo = ui::themes::rgb565(21, 20, 19);
+        // Todas as formas curvas saem com borda suavizada (ui/FormaSuave): disco, anel, retangulo arredondado, traco de pontas redondas.
+        void o_fillCircle(Arduino_GFX& g, int x, int y, int r, uint16_t c) { ui::forma::disco(g, x + gDx, y + gDy, r, c, gFundo); }
         void o_drawLine(Arduino_GFX& g, int x0, int y0, int x1, int y1, uint16_t c) { g.drawLine(x0 + gDx, y0 + gDy, x1 + gDx, y1 + gDy, c); }
-        void o_drawCircle(Arduino_GFX& g, int x, int y, int r, uint16_t c) { g.drawCircle(x + gDx, y + gDy, r, c); }
-        void o_drawRoundRect(Arduino_GFX& g, int x, int y, int w, int h, int r, uint16_t c) { g.drawRoundRect(x + gDx, y + gDy, w, h, r, c); }
+        // Escopo que troca a cor de fundo assumida pelas primitivas.
+        struct EscopoFundo {
+            uint16_t antes;
+            explicit EscopoFundo(uint16_t f) : antes(gFundo) { gFundo = f; }
+            ~EscopoFundo() { gFundo = antes; }
+        };
         void o_drawFastHLine(Arduino_GFX& g, int x, int y, int w, uint16_t c) { g.drawFastHLine(x + gDx, y + gDy, w, c); }
 
         inline int arred(double v) { return int(std::lround(v)); }
 
-        void quad(Arduino_GFX& g, double x0, double y0, double x1, double y1, double x2, double y2, double x3, double y3, uint16_t cor) {
-            o_fillTriangle(g, arred(x0), arred(y0), arred(x1), arred(y1), arred(x2), arred(y2), cor);
-            o_fillTriangle(g, arred(x0), arred(y0), arred(x2), arred(y2), arred(x3), arred(y3), cor);
-        }
-
     } // namespace
 
-    Origem::Origem(int dx, int dy) : antesDx_(gDx), antesDy_(gDy) { gDx = dx; gDy = dy; }
-    Origem::~Origem() { gDx = antesDx_; gDy = antesDy_; }
+    Origem::Origem(int dx, int dy) : antesDx_(gDx), antesDy_(gDy), antesFundo_(gFundo) { gDx = dx; gDy = dy; }
+    Origem::Origem(int dx, int dy, uint16_t fundo) : Origem(dx, dy) { gFundo = fundo; }
+    Origem::~Origem() { gDx = antesDx_; gDy = antesDy_; gFundo = antesFundo_; }
 
     int deslocX() { return gDx; }
     int deslocY() { return gDy; }
-    void preencherRR(Arduino_GFX& g, int x, int y, int w, int h, int raio, uint16_t cor) { g.fillRoundRect(x + gDx, y + gDy, w, h, raio, cor); }
+    void preencherRR(Arduino_GFX& g, int x, int y, int w, int h, int raio, uint16_t cor) {
+        ui::forma::retanguloArredondado(g, x + gDx, y + gDy, w, h, raio, cor, gFundo);
+    }
+    void preencherRR(Arduino_GFX& g, int x, int y, int w, int h, int raio, uint16_t cor, uint16_t fundo) {
+        ui::forma::retanguloArredondado(g, x + gDx, y + gDy, w, h, raio, cor, fundo);
+    }
     void preencherRetangulo(Arduino_GFX& g, int x, int y, int w, int h, uint16_t cor) { g.fillRect(x + gDx, y + gDy, w, h, cor); }
     void disco(Arduino_GFX& g, int cx, int cy, int raio, uint16_t cor) { o_fillCircle(g, cx, cy, raio, cor); }
 
@@ -57,18 +63,9 @@ namespace screens::icones {
             o_drawLine(g, arred(x0), arred(y0), arred(x1), arred(y1), cor);
             return;
         }
-        const double dx = x1 - x0, dy = y1 - y0, len = std::hypot(dx, dy);
-        if (len < 0.01) {
-            o_fillCircle(g, arred(x0), arred(y0), std::max(1, arred(w / 2)), cor);
-            return;
-        }
-        const double nx = -dy / len * w / 2, ny = dx / len * w / 2;
-        quad(g, x0 + nx, y0 + ny, x1 + nx, y1 + ny, x1 - nx, y1 - ny, x0 - nx, y0 - ny, cor);
-        if (w >= 2.5) {   // pontas arredondadas
-            const int r = std::max(1, arred(w / 2 - 0.2));
-            o_fillCircle(g, arred(x0), arred(y0), r, cor);
-            o_fillCircle(g, arred(x1), arred(y1), r, cor);
-        }
+        // traco grosso com pontas redondas e borda suavizada (cobertura pela distancia ao segmento)
+        const float xs[2] = {float(x0 + gDx) + 0.5f, float(x1 + gDx) + 0.5f}, ys[2] = {float(y0 + gDy) + 0.5f, float(y1 + gDy) + 0.5f};
+        ui::forma::polilinha(g, xs, ys, 2, float(w), cor, gFundo);
     }
 
     void polilinha(Arduino_GFX& g, const double* p, int n, double w, uint16_t cor, bool fechada) {
@@ -77,12 +74,12 @@ namespace screens::icones {
     }
 
     void contorno(Arduino_GFX& g, int x, int y, int w, int h, int raio, int espessura, uint16_t cor) {
-        for (int i = 0; i < espessura && w - 2 * i > 2 && h - 2 * i > 2; ++i)
-            o_drawRoundRect(g, x + i, y + i, w - 2 * i, h - 2 * i, std::max(0, raio - i), cor);
+        ui::forma::contornoArredondado(g, x + gDx, y + gDy, w, h, raio, cor, gFundo, gFundo, espessura);
     }
 
-    void aro(Arduino_GFX& g, int cx, int cy, int r, int espessura, uint16_t cor) {
-        for (int i = 0; i < std::max(1, espessura) && r - i > 0; ++i) o_drawCircle(g, cx, cy, r - i, cor);
+    void aro(Arduino_GFX& g, int cx, int cy, int r, int espessura, uint16_t cor) { aro(g, cx, cy, r, espessura, cor, gFundo); }
+    void aro(Arduino_GFX& g, int cx, int cy, int r, int espessura, uint16_t cor, uint16_t dentro) {
+        ui::forma::circulo(g, cx + gDx, cy + gDy, r, cor, gFundo, dentro, std::max(1, espessura));
     }
 
     namespace {
@@ -197,6 +194,7 @@ namespace screens::icones {
     uint16_t de888(uint32_t rgb) { return rgb565(uint8_t(rgb >> 16), uint8_t(rgb >> 8), uint8_t(rgb)); }
 
     void marcador(Arduino_GFX& g, tempo::IconeHabito ic, int cx, int cy, int r, Marca m, uint16_t fundo, int32_t tom) {
+        const EscopoFundo escopo(fundo);   // as formas do marcador se misturam com a cor sob ele
         switch (m) {
         case Marca::Feito:
             o_fillCircle(g, cx, cy, r, verde());
@@ -204,12 +202,12 @@ namespace screens::icones {
             break;
         case Marca::Atual:
             o_fillCircle(g, cx, cy, r, fundoLaranja());
-            aro(g, cx, cy, r, std::max(2, r / 6), laranja());
+            aro(g, cx, cy, r, std::max(2, r / 6), laranja(), fundoLaranja());
             habito(g, ic, cx, cy, std::max(6, arred(r * 0.58)), laranja(), fundoLaranja());
             break;
         case Marca::Atrasado:
             o_fillCircle(g, cx, cy, r, fundoCarmim());
-            aro(g, cx, cy, r, std::max(2, r / 6), carmim());
+            aro(g, cx, cy, r, std::max(2, r / 6), carmim(), fundoCarmim());
             habito(g, ic, cx, cy, std::max(6, arred(r * 0.58)), carmim(), fundoCarmim());
             break;
         case Marca::Perdido: {
@@ -236,13 +234,13 @@ namespace screens::icones {
     }
 
     void ponto(Arduino_GFX& g, int cx, int cy, int r, Marca m, uint16_t fundo) {
-        (void)fundo;
+        const EscopoFundo escopo(fundo);
         switch (m) {
         case Marca::Feito: o_fillCircle(g, cx, cy, r, verde()); break;
         case Marca::Atual:
         case Marca::Atrasado: {
             const uint16_t c = m == Marca::Atual ? laranja() : carmim();
-            aro(g, cx, cy, r + 2, 3, c);
+            aro(g, cx, cy, r + 2, 3, c, fundo);
             o_fillCircle(g, cx, cy, std::max(1, r - 3), c);
             break;
         }

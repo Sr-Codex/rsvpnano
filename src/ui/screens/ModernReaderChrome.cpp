@@ -1,4 +1,5 @@
 #include "ui/screens/ModernReaderChrome.h"
+#include "ui/FormaSuaveGfx.h"
 #include "ui/screens/OnboardingCopy.h"
 
 namespace screens::modern {
@@ -31,8 +32,8 @@ namespace screens::modern {
             gfx.fillRect(badge.x,badge.y,badge.w,badge.h,ui.color(Background));
             if(view.backward){
                 const int16_t cy=badge.y+badge.h/2;
-                gfx.fillTriangle(badge.x+2,cy,badge.x+14,cy-7,badge.x+14,cy+7,ui.color(Accent));
-                gfx.fillTriangle(badge.x+12,cy,badge.x+24,cy-7,badge.x+24,cy+7,ui.color(Accent));
+                ui::forma::triangulo(gfx,badge.x+2,cy,badge.x+14,cy-7,badge.x+14,cy+7,ui.color(Accent),ui.color(Background));
+                ui::forma::triangulo(gfx,badge.x+12,cy,badge.x+24,cy-7,badge.x+24,cy+7,ui.color(Accent),ui.color(Background));
             }
         }
         ui.label({40,136,84,34},view.backward?"voltando":"",11,Accent,ui::TextAlign::Start);

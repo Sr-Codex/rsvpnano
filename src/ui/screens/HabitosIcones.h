@@ -18,17 +18,21 @@ namespace screens::icones {
     class Origem {
     public:
         Origem(int dx, int dy);
+        Origem(int dx, int dy, uint16_t fundo);   // fundo = cor sob o que se desenha (a borda suavizada se mistura com ela)
         ~Origem();
         Origem(const Origem&) = delete;
         Origem& operator=(const Origem&) = delete;
 
     private:
         int antesDx_, antesDy_;
+        uint16_t antesFundo_;
     };
 
     int deslocX();
     int deslocY();
+    // Retangulo arredondado cheio com borda suavizada; `fundo` = cor sob ele (padrao: a da Origem corrente).
     void preencherRR(Arduino_GFX& g, int x, int y, int w, int h, int raio, uint16_t cor);
+    void preencherRR(Arduino_GFX& g, int x, int y, int w, int h, int raio, uint16_t cor, uint16_t fundo);
     void preencherRetangulo(Arduino_GFX& g, int x, int y, int w, int h, uint16_t cor);
     void disco(Arduino_GFX& g, int cx, int cy, int raio, uint16_t cor);
 
@@ -40,6 +44,7 @@ namespace screens::icones {
     void contorno(Arduino_GFX& g, int x, int y, int w, int h, int raio, int espessura, uint16_t cor);
     // Disco + anel (contorno) com espessura.
     void aro(Arduino_GFX& g, int cx, int cy, int raio, int espessura, uint16_t cor);
+    void aro(Arduino_GFX& g, int cx, int cy, int raio, int espessura, uint16_t cor, uint16_t dentro);   // dentro = cor sob o miolo
 
     // Mascara alfa Phosphor (src/ui/icons/PhosphorIcons.generated.*) pintada com `cor` sobre `fundo` (cor sob o icone: o blend
     // alfa e feito em RGB565 pixel a pixel). `lado` = lado desejado em px; usa o tamanho gerado mais proximo.

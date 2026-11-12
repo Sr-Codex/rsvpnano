@@ -1,4 +1,5 @@
 #include "ui/PocketLines.h"
+#include "ui/FormaSuaveGfx.h"
 #include "ui/screens/OnboardingScreen.h"
 #include "ui/screens/ModernScreens.h"
 #include "ui/screens/OnboardingCopy.h"
@@ -255,12 +256,13 @@ void OnboardingScreen::buttons(ui::Context& ui){
     const ui::Rect area{12,44,370,128};
     if(ui.redraw(area,button_))ui.paint(area,[&](Arduino_GFX& gfx,ui::Rect r){
         const auto edge=ui.color(Outline),ink=ui.color(Muted),active=ui.color(Accent);
-        gfx.drawRoundRect(r.x+5,r.y+16,300,106,9,edge);
-        gfx.drawRoundRect(r.x+27,r.y+34,256,69,3,edge);
-        gfx.drawRoundRect(r.x+305,r.y+61,22,15,5,ink);
+        const auto bg=ui.color(Background);
+        ui::forma::contornoArredondado(gfx,r.x+5,r.y+16,300,106,9,edge,bg,bg);
+        ui::forma::contornoArredondado(gfx,r.x+27,r.y+34,256,69,3,edge,bg,bg);
+        ui::forma::contornoArredondado(gfx,r.x+305,r.y+61,22,15,5,ink,bg,bg);
         for(int i=0;i<3;++i){const int x=r.x+218+i*25;
-            gfx.fillRoundRect(x,r.y+11,14,6,2,button_==i+1?active:ink);
-            gfx.drawCircle(x+7,r.y+5,4,button_==i+1?active:ink);
+            ui::forma::retanguloArredondado(gfx,x,r.y+11,14,6,2,button_==i+1?active:ink,bg);
+            ui::forma::circulo(gfx,x+7,r.y+5,4,button_==i+1?active:ink,bg,bg);
         }
     });
     ui.label({40,92,244,38},"Nano",26,Muted,ui::TextAlign::Center);

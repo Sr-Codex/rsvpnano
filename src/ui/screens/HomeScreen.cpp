@@ -1,4 +1,5 @@
 #include "ui/screens/HomeScreen.h"
+#include "ui/FormaSuaveGfx.h"
 
 #include <algorithm>
 #include <cmath>
@@ -51,7 +52,7 @@ namespace screens {
                 const uint16_t cor = ui.color(fundo);
                 ui.paint(area, [&](Arduino_GFX& g, Rect alvo) {
                     g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, ui.color(Background));
-                    if (raio > 0) g.fillRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, raio, cor);
+                    if (raio > 0) ui::forma::retanguloArredondado(g, alvo.x, alvo.y, alvo.w, alvo.h, raio, cor, ui.color(Background));
                     if (extra) extra(g, alvo.x - area.x, alvo.y - area.y);
                     for (const auto& item : itens) ui.drawText(g, item.layout, item.cor, alvo.x - area.x, alvo.y - area.y, cor);
                 });
@@ -82,16 +83,15 @@ namespace screens {
             }
         }
 
-        void iconeAjustes(Arduino_GFX& g, int cx, int cy, uint16_t c) {
+        void iconeAjustes(Arduino_GFX& g, int cx, int cy, uint16_t c, uint16_t fundo) {
             constexpr double kRad = 3.14159265358979 / 180.0;
             for (int i = 0; i < 8; ++i) {
                 const double a = i * 45 * kRad;
                 grossa(g, cx + int(std::lround(7 * std::cos(a))), cy + int(std::lround(7 * std::sin(a))),
                        cx + int(std::lround(11.5 * std::cos(a))), cy + int(std::lround(11.5 * std::sin(a))), c);
             }
-            g.drawCircle(cx, cy, 9, c);
-            g.drawCircle(cx, cy, 8, c);
-            g.fillCircle(cx, cy, 3, c);
+            ui::forma::circulo(g, cx, cy, 9, c, fundo, fundo, 2);
+            ui::forma::disco(g, cx, cy, 3, c, fundo);
         }
 
         // Habitos: anel de progresso do dia (verde) com visto no centro.
@@ -163,7 +163,7 @@ namespace screens {
         void iconeBateria(Arduino_GFX& g, int x, int y, int pct, bool carregando, uint16_t contorno, uint16_t fundo) {
             pct = std::clamp(pct, 0, 100);
             const uint16_t nivel = carregando ? kAmbar : pct < 15 ? rgb565(235, 50, 90) : kVerdeBat;
-            g.drawRoundRect(x, y, 26, 14, 3, contorno);
+            ui::forma::contornoArredondado(g, x, y, 26, 14, 3, contorno, fundo, fundo);
             g.fillRect(x + 26, y + 4, 2, 6, contorno);
             const int w = std::max(pct > 0 ? 2 : 0, 20 * pct / 100);
             if (w > 0) g.fillRect(x + 3, y + 3, w, 8, nivel);
@@ -192,12 +192,12 @@ namespace screens {
             const uint16_t fundo = ui.color(Background);
             barra.desenhar([&](Arduino_GFX& g, int dx, int dy) {
                 if (info.sincronizando) {   // ponto ambar (sync do TickTick em curso), ao lado do Wi-Fi
-                    g.fillCircle(466 + dx, 12 + dy, 4, kAmbar);
-                    g.drawCircle(466 + dx, 12 + dy, 6, rgb565(110, 84, 36));
+                    ui::forma::disco(g, 466 + dx, 12 + dy, 4, kAmbar, fundo);
+                    ui::forma::circulo(g, 466 + dx, 12 + dy, 6, rgb565(110, 84, 36), fundo, fundo);
                 }
                 iconeWifi(g, 480 + dx, 19 + dy, info.wifi, cTexto, rgb565(70, 72, 70), rgb565(235, 50, 90));
                 if (info.bateriaPresente) iconeBateria(g, 558 + dx, 5 + dy, info.bateriaPct, info.carregando, cTexto, fundo);
-                iconeAjustes(g, 618 + dx, 12 + dy, cMudo);   // Ajustes: engrenagem no topo direito (toque abaixo, depois dos blocos)
+                iconeAjustes(g, 618 + dx, 12 + dy, cMudo, fundo);   // Ajustes: engrenagem no topo direito (toque abaixo, depois dos blocos)
             });
         }
 
@@ -240,7 +240,7 @@ namespace screens {
             const Rect areaBotao{114, 124, 172, 30};
             const auto layoutBotao = ui.prepareText(areaBotao, botao, 13, TextAlign::Center, 1);
             bloco.desenhar([&](Arduino_GFX& g, int dx, int dy) {
-                g.fillRoundRect(areaBotao.x + dx, areaBotao.y + dy, areaBotao.w, areaBotao.h, 10, kLaranja);
+                ui::forma::retanguloArredondado(g, areaBotao.x + dx, areaBotao.y + dy, areaBotao.w, areaBotao.h, 10, kLaranja, ui.color(SurfaceMuted));
                 ui.drawText(g, layoutBotao, kTinta, dx, dy, kLaranja);
                 if (habito) {
                     iconeHabitos(g, cartao.x + dx + 54, cartao.y + dy + 75, r.habTotal > 0 ? double(r.habFeitas) / r.habTotal : 0.0,

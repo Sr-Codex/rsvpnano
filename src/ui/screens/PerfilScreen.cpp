@@ -1,4 +1,5 @@
 #include "ui/screens/PerfilScreen.h"
+#include "ui/FormaSuaveGfx.h"
 
 #include <algorithm>
 #include <cmath>
@@ -68,7 +69,7 @@ namespace screens {
                 const uint16_t cor = ui.color(fundo);
                 ui.paint(area, [&](Arduino_GFX& g, Rect alvo) {
                     g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, ui.color(Background));
-                    if (raio > 0) g.fillRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, raio, cor);
+                    if (raio > 0) ui::forma::retanguloArredondado(g, alvo.x, alvo.y, alvo.w, alvo.h, raio, cor, ui.color(Background));
                     if (extra) extra(g, alvo.x - area.x, alvo.y - area.y);
                     for (const auto& item : itens) ui.drawText(g, item.layout, item.cor, alvo.x - area.x, alvo.y - area.y, cor);
                 });
@@ -106,23 +107,23 @@ namespace screens {
         }
 
         // ------------------------------------------------------------ desenho
-        void barra(Arduino_GFX& g, int x, int y, int w, double frac, uint16_t cor, int h = 7) {
-            g.fillRoundRect(x, y, w, h, h / 2, kLinha);
-            if (frac > 0) g.fillRoundRect(x, y, std::max(h, int(w * std::min(frac, 1.0))), h, h / 2, cor);
+        void barra(Arduino_GFX& g, int x, int y, int w, double frac, uint16_t cor, uint16_t fundo, int h = 7) {
+            ui::forma::retanguloArredondado(g, x, y, w, h, h / 2, kLinha, fundo);
+            if (frac > 0) ui::forma::retanguloArredondado(g, x, y, std::max(h, int(w * std::min(frac, 1.0))), h, h / 2, cor, kLinha);
         }
 
         // Coracao: estado 0 vazio, 1 meio (metade esquerda), 2 cheio.
-        void coracao(Arduino_GFX& g, int x, int y, int estado) {
-            const auto inteiro = [&](uint16_t c) {
-                g.fillCircle(x + 4, y + 4, 4, c);
-                g.fillCircle(x + 10, y + 4, 4, c);
-                g.fillTriangle(x, y + 6, x + 14, y + 6, x + 7, y + 14, c);
+        void coracao(Arduino_GFX& g, int x, int y, int estado, uint16_t fundo) {
+            const auto inteiro = [&](uint16_t c, uint16_t sob) {
+                ui::forma::disco(g, x + 4, y + 4, 4, c, sob);
+                ui::forma::disco(g, x + 10, y + 4, 4, c, sob);
+                ui::forma::triangulo(g, x, y + 6, x + 14, y + 6, x + 7, y + 14, c, sob);
             };
-            inteiro(kLinha);
-            if (estado == 2) inteiro(kCarmim);
+            inteiro(kLinha, fundo);
+            if (estado == 2) inteiro(kCarmim, kLinha);
             else if (estado == 1) {
-                g.fillCircle(x + 4, y + 4, 4, kCarmim);
-                g.fillTriangle(x, y + 6, x + 7, y + 6, x + 7, y + 14, kCarmim);
+                ui::forma::disco(g, x + 4, y + 4, 4, kCarmim, kLinha);
+                ui::forma::triangulo(g, x, y + 6, x + 7, y + 6, x + 7, y + 14, kCarmim, kLinha);
                 g.fillRect(x + 4, y + 2, 4, 5, kCarmim);
             }
         }
@@ -229,7 +230,7 @@ namespace screens {
             pontos.desenhar([&](Arduino_GFX& g, int dx, int dy) {
                 for (int i = 0; i < kPaginas; ++i) {
                     const int cx = 320 + int(std::lround((i - (kPaginas - 1) / 2.0) * 11)) + dx;
-                    g.fillCircle(cx, 166 + dy, 3, i == pagina_ ? kLaranja : kLinha);
+                    ui::forma::disco(g, cx, 166 + dy, 3, i == pagina_ ? kLaranja : kLinha, ui.color(Background));
                 }
             });
             if (const auto* t = ui.touch(); t != nullptr && hasTouch(*t, ui::TouchTap)
@@ -290,10 +291,10 @@ namespace screens {
             desenharAnelXp(ui, g, 80 + dx, 84 + dy, 62, 16, frac, Background);
             for (int i = 0; i < totalCor; ++i) {
                 const int estado = meios >= 2 * (i + 1) ? 2 : meios == 2 * i + 1 ? 1 : 0;
-                coracao(g, 166 + i * 18 + dx, 45 + dy, estado);
+                coracao(g, 166 + i * 18 + dx, 45 + dy, estado, ui.color(Background));
             }
             for (size_t i = 0; i < tempo::kNumAtributos; ++i)
-                barra(g, 226 + dx, 74 + int(i) * 22 + dy, 200, niveis[i] / 20.0, cores[i]);
+                barra(g, 226 + dx, 74 + int(i) * 22 + dy, 200, niveis[i] / 20.0, cores[i], ui.color(Background));
         });
 
         Painel p(ui, 11);
@@ -348,7 +349,7 @@ namespace screens {
         }
         if (semana_.perdidoMin > 0) p.b.texto({502, 120, 124, 14}, "perdido: " + horaMin(semana_.perdidoMin), 10, kCarmim);
         p.b.desenhar([&](Arduino_GFX& g, int dx, int dy) {
-            for (int i = 0; i < int(tempo::kNumChips); ++i) g.fillRoundRect(502 + dx, 18 + i * 20 + dy, 10, 10, 3, kCorChip[i]);
+            for (int i = 0; i < int(tempo::kNumChips); ++i) ui::forma::retanguloArredondado(g, 502 + dx, 18 + i * 20 + dy, 10, 10, 3, kCorChip[i], ui.color(SurfaceMuted));
         });
     }
 
@@ -382,7 +383,7 @@ namespace screens {
             for (int i = 0; i < kVisiveis && rolagem_ + i < total; ++i)
                 icones::emoji(g, icons::emoji::Id::Bullseye, 24, 26 + i * 33 + 9, 16, ui.color(Background));
             for (int i = 0; i < kVisiveis && rolagem_ + i < total; ++i)
-                barra(g, 16 + dx, 26 + i * 33 + 19 + dy, 330, double(lista[size_t(rolagem_ + i)]->minutos) / maxMin, kLaranja, 6);
+                barra(g, 16 + dx, 26 + i * 33 + 19 + dy, 330, double(lista[size_t(rolagem_ + i)]->minutos) / maxMin, kLaranja, ui.color(Background), 6);
         });
 
         const int faixa = tempo::faixaMaisFocada(resumo_);
@@ -425,12 +426,8 @@ namespace screens {
                 const auto& c = conquistas_[size_t(i)];
                 const int cx = 16 + (i % 3) * 156 + dx, cy = 24 + linha * 66 + dy;
                 const uint16_t cor = kCorConquista[c.cor % 6];
-                g.fillRoundRect(cx, cy, 148, 60, 10, painel);
-                if (c.ganha) {
-                    g.drawRoundRect(cx, cy, 148, 60, 10, cor);
-                    g.drawRoundRect(cx + 1, cy + 1, 146, 58, 9, cor);
-                }
-                g.fillCircle(cx + 23, cy + 30, 13, c.ganha ? cor : kLinha);
+                ui::forma::retanguloArredondado(g, cx, cy, 148, 60, 10, painel, ui.color(Background), c.ganha ? 2 : 0, cor);
+                ui::forma::disco(g, cx + 23, cy + 30, 13, c.ganha ? cor : kLinha, painel);
                 if (c.ganha) visto(g, cx + 23, cy + 30, ui.color(Background));
             }
         });
@@ -447,7 +444,7 @@ namespace screens {
             p.b.texto({502, 106, 124, 14}, "faltam " + std::to_string(c.meta - c.atual), 10, cMudo);
             p.b.marca(uint32_t(c.atual) * 31U + uint32_t(prox));
             p.b.desenhar([&](Arduino_GFX& g, int dx, int dy) {
-                barra(g, 502 + dx, 90 + dy, 112, double(c.atual) / c.meta, cor);
+                barra(g, 502 + dx, 90 + dy, 112, double(c.atual) / c.meta, cor, ui.color(SurfaceMuted));
             });
         } else {
             p.b.texto({502, 34, 124, 20}, "Todas!", 15, kVerde);

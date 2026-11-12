@@ -1,4 +1,5 @@
 #include "ui/screens/LibraryScreen.h"
+#include "ui/FormaSuaveGfx.h"
 
 #include <algorithm>
 #include <array>
@@ -251,7 +252,8 @@ namespace screens {
                 const int shown = int(std::min<size_t>(pages, 12));
                 for (int i = 0; i < shown; ++i) {
                     const int cx = 320 + (i * 2 - (shown - 1)) * 6;
-                    gfx.fillCircle(cx, dots.y + 7, 3, ui.color(size_t(i) == shelfPage_ % 12 ? ui::themes::Accent : ui::themes::ProgressTrack));
+                    ui::forma::disco(gfx, cx, dots.y + 7, 3, ui.color(size_t(i) == shelfPage_ % 12 ? ui::themes::Accent : ui::themes::ProgressTrack),
+                                     ui.color(ui::themes::Background));
                 }
             });
         }

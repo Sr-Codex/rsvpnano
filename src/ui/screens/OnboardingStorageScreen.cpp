@@ -1,4 +1,5 @@
 #include "ui/screens/OnboardingScreen.h"
+#include "ui/FormaSuaveGfx.h"
 #include "ui/screens/ModernScreens.h"
 #include "ui/screens/OnboardingCopy.h"
 
@@ -63,7 +64,7 @@ Action OnboardingScreen::storageCheck(ui::Context& ui,uint32_t nowMs){
         if(ui.redraw(marker,signature))ui.paint(marker,[&](Arduino_GFX& gfx,ui::Rect r){
             gfx.fillRect(r.x,r.y,r.w,r.h,ui.color(Background));
             const auto colour=ui.color(passed||error||working?Accent:Muted);
-            gfx.drawCircle(r.x+9,r.y+9,8,colour);
+            ui::forma::circulo(gfx,r.x+9,r.y+9,8,colour,ui.color(Background),ui.color(Background));
             if(passed){gfx.drawLine(r.x+5,r.y+9,r.x+8,r.y+12,colour);gfx.drawLine(r.x+8,r.y+12,r.x+13,r.y+5,colour);}
             else if(error){gfx.drawFastVLine(r.x+9,r.y+4,7,colour);gfx.drawPixel(r.x+9,r.y+14,colour);}
             else if(working)gfx.fillCircle(r.x+6+int(signature-3)*2,r.y+9,2,colour);

@@ -1,4 +1,5 @@
 #include "logging/Logger.h"
+#include "ui/FormaSuaveGfx.h"
 #include "ui/screens/ScreenCommon.h"
 
 #include <algorithm>
@@ -70,7 +71,8 @@ namespace screens {
                         ui.color(writable_ ? ui::themes::ColorRole::Accent : ui::themes::ColorRole::Muted);
                     const int16_t centerX = static_cast<int16_t>(cell.x + cell.w / 2);
                     const int16_t centerY = static_cast<int16_t>(cell.y + cell.h / 2);
-                    ui.gfx().drawCircle(centerX, centerY, 21, ink);
+                    ui::forma::circulo(ui.gfx(), centerX, centerY, 21, ink, ui.color(ui::themes::ColorRole::Background),
+                                       ui.color(ui::themes::ColorRole::Background));
                     ui.gfx().fillRect(static_cast<int16_t>(centerX - 1), static_cast<int16_t>(centerY - 8), 3, 17, ink);
                     ui.gfx().fillRect(static_cast<int16_t>(centerX - 8), static_cast<int16_t>(centerY - 1), 17, 3, ink);
                 }
@@ -111,8 +113,10 @@ namespace screens {
                              16},
                             timer.name, titleSize, ink, ui::TextAlign::Center);
                 ui.gfx().fillRect(left, top, glassWidth, chamberHeight, focusSand);
-                ui.gfx().fillTriangle(left, topRectBottom, right, topRectBottom, centerX, waist, focusSand);
-                ui.gfx().fillTriangle(centerX, waist, left, bottomRectTop, right, bottomRectTop, breakSand);
+                ui::forma::triangulo(ui.gfx(), left, topRectBottom, right, topRectBottom, centerX, waist, focusSand,
+                                     ui.color(ui::themes::ColorRole::Background));
+                ui::forma::triangulo(ui.gfx(), centerX, waist, left, bottomRectTop, right, bottomRectTop, breakSand,
+                                     ui.color(ui::themes::ColorRole::Background));
                 ui.gfx().fillRect(left, bottomRectTop, glassWidth, chamberHeight, breakSand);
                 ui.gfx().fillRect(static_cast<int16_t>(left - baseOverhang), static_cast<int16_t>(top - baseHeight),
                                   static_cast<int16_t>(glassWidth + baseOverhang * 2), baseHeight, base);

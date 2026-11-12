@@ -1,4 +1,5 @@
 #include "ui/screens/ChaptersScreen.h"
+#include "ui/FormaSuaveGfx.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -169,16 +170,18 @@ namespace screens {
                                                   : ui.blend(ui::themes::ColorRole::SurfaceMuted, alpha);
                 const uint16_t outline = centered ? ui.color(ui::themes::ColorRole::Outline)
                                                   : ui.blend(ui::themes::ColorRole::Outline, alpha);
-                gfx.fillRoundRect(x, top, width, height, 5, surface);
+                ui::forma::retanguloArredondado(gfx, x, top, width, height, 5, surface, background);
                 if (index == readingIndex) {
                     const int16_t tailLeft = static_cast<int16_t>(right - notch - 6);
                     gfx.fillRect(tailLeft, top, static_cast<int16_t>(right - tailLeft + 1), height,
                                  centered ? ui.color(ui::themes::ColorRole::Accent)
                                           : ui.blend(ui::themes::ColorRole::Accent, alpha));
                 }
-                gfx.drawRoundRect(x, top, width, height, 5, outline);
-                gfx.fillTriangle(static_cast<int16_t>(right - notch), y, right, top, right,
-                                 static_cast<int16_t>(top + height - 1), background);
+                ui::forma::contornoArredondado(gfx, x, top, width, height, 5, outline, background, surface);
+                ui::forma::triangulo(gfx, right - notch, y, right, top, right, top + height - 1, background,
+                                     index == readingIndex ? (centered ? ui.color(ui::themes::ColorRole::Accent)
+                                                                       : ui.blend(ui::themes::ColorRole::Accent, alpha))
+                                                           : surface);
                 gfx.drawLine(static_cast<int16_t>(right - notch), y, right, top, outline);
                 gfx.drawLine(static_cast<int16_t>(right - notch), y, right, static_cast<int16_t>(top + height - 1),
                              outline);
@@ -226,11 +229,11 @@ namespace screens {
             caption += " · " + std::to_string(resume.percent) + "%";
             if (ui.redraw(rect, ui::Context::signature(caption, resume.wordIndex))) {
                 Arduino_GFX& gfx = ui.gfx();
-                gfx.fillRoundRect(rect.x, rect.y, rect.w, rect.h, 5, ui.color(SurfaceActive));
-                gfx.drawRoundRect(rect.x, rect.y, rect.w, rect.h, 5, ui.color(Accent));
-                gfx.drawRoundRect(rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2, 4, ui.color(Accent));
+                ui::forma::retanguloArredondado(gfx, rect.x, rect.y, rect.w, rect.h, 5, ui.color(SurfaceActive), ui.color(Background),
+                                                2, ui.color(Accent));
                 const int16_t cy = rect.y + rect.h / 2;
-                gfx.fillTriangle(rect.x + 10, cy, rect.x + 22, cy - 9, rect.x + 22, cy + 9, ui.color(Accent));
+                ui::forma::triangulo(gfx, rect.x + 10, cy, rect.x + 22, cy - 9, rect.x + 22, cy + 9, ui.color(Accent),
+                                     ui.color(SurfaceActive));
                 ui.drawText({static_cast<int16_t>(rect.x + 32), static_cast<int16_t>(rect.y + 2),
                              static_cast<int16_t>(rect.w - 40), 20},
                             "Voltar para onde parei", 14, ui.color(Foreground), ui::TextAlign::Start);
@@ -299,8 +302,8 @@ namespace screens {
                 state = ui::Context::combine(state, selected);
                 if (ui.redraw(rect, state)) {
                     Arduino_GFX& gfx = ui.gfx();
-                    gfx.fillRoundRect(rect.x, rect.y, rect.w, rect.h, 4,
-                                      ui.color(selected ? SurfaceActive : SurfaceMuted));
+                    ui::forma::retanguloArredondado(gfx, rect.x, rect.y, rect.w, rect.h, 4,
+                                                    ui.color(selected ? SurfaceActive : SurfaceMuted), ui.color(Background));
                     ui.drawText({static_cast<int16_t>(rect.x + 10), rect.y, static_cast<int16_t>(rect.w - 150), rect.h},
                                 title, 14, ui.color(Foreground), ui::TextAlign::Start, 1,
                                 reader.metadata.localeAt(chapters[index].wordIndex));
@@ -328,7 +331,7 @@ namespace screens {
             uint32_t state = ui::Context::combine(static_cast<uint32_t>(marks.size()), static_cast<uint32_t>(bmFirst_));
             for (const auto& mark : marks) state = ui::Context::combine(state, mark.wordIndex);
             if (ui.redraw(panel, state)) {
-                ui.gfx().fillRoundRect(panel.x, panel.y, panel.w, panel.h, 6, ui.color(SurfaceMuted));
+                ui::forma::retanguloArredondado(ui.gfx(), panel.x, panel.y, panel.w, panel.h, 6, ui.color(SurfaceMuted), ui.color(Background));
                 std::string head = "MARCADORES";
                 if (marks.size() > 3)
                     head += "  " + std::to_string(bmFirst_ + 1) + "-" + std::to_string(bmFirst_ + 3) + "/"

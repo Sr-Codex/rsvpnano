@@ -10,6 +10,7 @@
 #include "tempo/HabitosVista.h"
 #include "tempo/Parametros.h"
 #include "tempo/Relogio.h"
+#include "ui/FormaSuaveGfx.h"
 #include "ui/Rgb565.h"
 #include "ui/SansFont.h"
 #include "ui/screens/HabitosIcones.h"
@@ -84,10 +85,10 @@ namespace screens {
                 if (!ui.redraw(area, sig, true)) return;
                 ui.paint(area, [&](Arduino_GFX& g, Rect alvo) {
                     g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, ui.color(Background));
-                    if (raio > 0) g.fillRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, raio, cor);
+                    if (raio > 0) ui::forma::retanguloArredondado(g, alvo.x, alvo.y, alvo.w, alvo.h, raio, cor, ui.color(Background));
                     else g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, cor);
                     if (extra) {
-                        ic::Origem origem(alvo.x - area.x, alvo.y - area.y);
+                        ic::Origem origem(alvo.x - area.x, alvo.y - area.y, cor);
                         extra(g, alvo.x - area.x, alvo.y - area.y);
                     }
                     for (const auto& item : itens) ui.drawText(g, item.layout, item.cor, alvo.x - area.x, alvo.y - area.y, item.fundo);
@@ -159,15 +160,14 @@ namespace screens {
         }
 
         // Anel (contorno) e pilula do aviso de lembrete (mantidos da v1).
-        void anelAviso(Arduino_GFX& g, int cx, int cy, int r, uint16_t cor) {
-            g.drawCircle(cx, cy, r, cor);
-            g.drawCircle(cx, cy, r - 1, cor);
+        void anelAviso(Arduino_GFX& g, int cx, int cy, int r, uint16_t cor, uint16_t fundo) {
+            ui::forma::circulo(g, cx, cy, r, cor, fundo, fundo, 2);
         }
 
-        void pilulaAviso(Arduino_GFX& g, int cx, int cy, double s, uint16_t cor) {
+        void pilulaAviso(Arduino_GFX& g, int cx, int cy, double s, uint16_t cor, uint16_t fundo) {
             const int w = int(14 * s), h = std::max(4, int(7 * s)), x0 = cx - w / 2, y0 = cy - h / 2;
-            g.drawRoundRect(x0, y0, w, h, h / 2, cor);
-            g.fillRoundRect(cx, y0, w - w / 2, h, h / 2, cor);
+            ui::forma::contornoArredondado(g, x0, y0, w, h, h / 2, cor, fundo, fundo);
+            ui::forma::retanguloArredondado(g, cx, y0, w - w / 2, h, h / 2, cor, fundo);
             g.fillRect(cx, y0, w / 4, h, cor);
         }
 
@@ -775,8 +775,8 @@ namespace screens {
                     ic::preencherRR(g, 6, ln.y + 1, 628, kPasso - 4, 12, ln.foco ? kFundoLaranja : kPainelFundo);
                     if (ln.foco) {
                         // contorno laranja (2 px)
-                        g.drawRoundRect(6 + ic::deslocX(), ln.y + 1 + ic::deslocY(), 628, kPasso - 4, 12, kLaranja);
-                        g.drawRoundRect(7 + ic::deslocX(), ln.y + 2 + ic::deslocY(), 626, kPasso - 6, 11, kLaranja);
+                        ui::forma::contornoArredondado(g, 6 + ic::deslocX(), ln.y + 1 + ic::deslocY(), 628, kPasso - 4, 12, kLaranja,
+                                                       cFundo, kFundoLaranja, 2);
                     }
                     ic::marcador(g, tempo::IconeHabito(ln.v->icone), 38, ln.y + kPasso / 2 - 1, 18, ln.marca,
                                  ln.foco ? kFundoLaranja : kPainelFundo, ln.v->cor);
@@ -947,8 +947,7 @@ namespace screens {
             for (size_t gi = 0; gi < grupos.size(); ++gi) {
                 if (!grupos[gi].temFoco) continue;
                 ic::preencherRR(g, 58, pos[gi] - 24, 108, 48, 10, kFundoLaranja);
-                g.drawRoundRect(58 + dx, pos[gi] - 24 + dy, 108, 48, 10, kLaranja);
-                g.drawRoundRect(59 + dx, pos[gi] - 23 + dy, 106, 46, 9, kLaranja);
+                ui::forma::contornoArredondado(g, 58 + dx, pos[gi] - 24 + dy, 108, 48, 10, kLaranja, cFundo, kFundoLaranja, 2);
             }
             for (size_t gi = 0; gi < grupos.size(); ++gi) {
                 const auto& rep = c.vistas[grupos[gi].representante];
@@ -1066,25 +1065,26 @@ namespace screens {
                     const int y = kTopo + ln.y - rol;
                     if (y + ln.h <= kTopo || y >= kFim) continue;
                     const bool foco = c.foco && *c.foco == ln.i;
-                    ic::preencherRR(g, 4, y + 1, 164, ln.h - 4, 12, foco ? kFundoLaranja : kPainelFundo);
+                    const uint16_t cartaoCor = foco ? kFundoLaranja : kPainelFundo;
+                    ic::preencherRR(g, 4, y + 1, 164, ln.h - 4, 12, cartaoCor);
                     if (foco) {
-                        g.drawRoundRect(4 + ic::deslocX(), y + 1 + ic::deslocY(), 164, ln.h - 4, 12, kLaranja);
-                        g.drawRoundRect(5 + ic::deslocX(), y + 2 + ic::deslocY(), 162, ln.h - 6, 11, kLaranja);
+                        ui::forma::contornoArredondado(g, 4 + ic::deslocX(), y + 1 + ic::deslocY(), 164, ln.h - 4, 12, kLaranja,
+                                                       cFundo, kFundoLaranja, 2);
                     }
                     ic::marcador(g, tempo::IconeHabito(v.icone), 26, y + 27, 16, marcaDe(v.fase, foco), foco ? kFundoLaranja : kPainelFundo, v.cor);
                     if (ln.acionavel) {
                         if (ln.med) {
-                            ic::preencherRR(g, 8, y + 58, 156, 46, 12, kCarmim);
-                            ic::preencherRR(g, 8, y + 108, 156, 40, 12, kPainel);
+                            ic::preencherRR(g, 8, y + 58, 156, 46, 12, kCarmim, cartaoCor);
+                            ic::preencherRR(g, 8, y + 108, 156, 40, 12, kPainel, cartaoCor);
                         } else {
                             const uint16_t corF = ln.cart.modo == ModoCartao::Atrasado ? kCarmim : kLaranja;
                             if (ln.cart.podeFeito) {
-                                ic::preencherRR(g, 8, y + 58, 100, 42, 12, corF);
+                                ic::preencherRR(g, 8, y + 58, 100, 42, 12, corF, cartaoCor);
                                 ic::visto(g, 26, y + 79, 9, ln.cart.modo == ModoCartao::Atrasado ? cTexto : kTinta, corF);
                             } else {
-                                ic::preencherRR(g, 8, y + 58, 100, 42, 12, kPainel);
+                                ic::preencherRR(g, 8, y + 58, 100, 42, 12, kPainel, cartaoCor);
                             }
-                            ic::preencherRR(g, 112, y + 58, 52, 42, 12, kPainel);
+                            ic::preencherRR(g, 112, y + 58, 52, 42, 12, kPainel, cartaoCor);
                             ic::pular(g, 138, y + 79, 9, cMudo, kPainel);
                         }
                     }
@@ -1174,13 +1174,12 @@ namespace screens {
         const auto dica = ui.prepareText({int16_t(r.x + r.w - 120), int16_t(r.y + 10), 110, 16}, "tocar para abrir", 10, TextAlign::Right, 1);
         ui.paint(r, [&](Arduino_GFX& g, Rect alvo) {
             const int dx = alvo.x - r.x, dy = alvo.y - r.y;
-            g.fillRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, 12, cor);
-            g.fillRoundRect(alvo.x + 2, alvo.y + 2, alvo.w - 4, alvo.h - 4, 10, fundo);
+            ui::forma::retanguloArredondado(g, alvo.x, alvo.y, alvo.w, alvo.h, 12, fundo, ui.color(Background), 2, cor);
             const int cy = r.y + r.h / 2 + dy;
-            if (med) pilulaAviso(g, r.x + 20 + dx, cy, 1.0, kCarmim);
+            if (med) pilulaAviso(g, r.x + 20 + dx, cy, 1.0, kCarmim, fundo);
             else {
-                anelAviso(g, r.x + 20 + dx, cy, 8, kLaranja);
-                g.fillCircle(r.x + 20 + dx, cy, 3, kLaranja);
+                anelAviso(g, r.x + 20 + dx, cy, 8, kLaranja, fundo);
+                ui::forma::disco(g, r.x + 20 + dx, cy, 3, kLaranja, fundo);
             }
             ui.drawText(g, layout, ui.color(Foreground), dx, dy, fundo);
             if (!estreito) ui.drawText(g, dica, ui.color(Muted), dx, dy, fundo);
