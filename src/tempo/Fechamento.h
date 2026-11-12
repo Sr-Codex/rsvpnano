@@ -37,7 +37,8 @@ namespace tempo {
     // Depois de liquidar a rodada do ciclo `c` (ainda no passo de foco): pausa curta, longa (apos a 4a rodada) ou nada
     // (sessao unica / ciclo encerrado).
     ProximoPasso proximoPassoDoSaque(const Ciclo& c);
-    int minutosProximoPasso(ProximoPasso p);   // 0 = VoltarInicio
+    int minutosProximoPasso(ProximoPasso p);   // 0 = VoltarInicio (pausa curta padrao: 5 min)
+    int minutosProximoPasso(ProximoPasso p, const Ciclo& c);   // idem, com a pausa curta do ciclo (4x sobre a regua)
 
     // ---- Desfazer da batalha
     struct AssinaturaBatalha {

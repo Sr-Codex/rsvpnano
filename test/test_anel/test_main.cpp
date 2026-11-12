@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "ui/AnelSuave.h"
+#include "ui/ReguaSuave.h"
 
 using ui::anel::Anel;
 using ui::anel::Params;
@@ -172,8 +173,60 @@ void test_para565() {
     TEST_ASSERT_EQUAL_HEX16(0xF800, Anel::para565({255, 0, 0}));
 }
 
+
+// ---- ui/ReguaSuave: retangulo arredondado, marca, agulha ------------------------------------------------------
+void test_regua_retangulo_cobertura() {
+    namespace rg = ui::regua;
+    // interior = 1, fora = 0, canto cortado = parcial e simetrico
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, rg::coberturaRetanguloArredondado(50.5f, 50.5f, 10, 10, 100, 60, 16));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, rg::coberturaRetanguloArredondado(5.5f, 5.5f, 10, 10, 100, 60, 16));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, rg::coberturaRetanguloArredondado(10.5f, 10.5f, 10, 10, 100, 60, 16));   // ponta do canto
+    const float a = rg::coberturaRetanguloArredondado(14.5f, 14.5f, 10, 10, 100, 60, 16);
+    const float b = rg::coberturaRetanguloArredondado(105.5f, 65.5f, 10, 10, 100, 60, 16);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, a, b);
+    TEST_ASSERT_TRUE(a > 0.0f && a < 1.0f);
+}
+
+void test_regua_retangulo_pinta_cantos_suaves() {
+    namespace rg = ui::regua;
+    const Rgb fundo{16, 20, 16}, fill{40, 36, 32}, borda{248, 120, 48};
+    int parciais = 0, cheios = 0, cantoOrigem = -1;
+    uint16_t retas = 0;
+    rg::retanguloSuave([&](int x, int y, uint16_t c) {
+                           if (x == 0 && y == 0) cantoOrigem = c;
+                           if (c != ui::anel::Anel::para565(ui::anel::Anel::grade(fundo)) && c != ui::anel::Anel::para565(ui::anel::Anel::grade(fill))) ++parciais; else ++cheios;
+                       },
+                       [&](int, int, int w, int h, uint16_t c) { retas = c; (void)w; (void)h; },
+                       0, 0, 60, 40, 16, fill, fundo);
+    TEST_ASSERT_TRUE(parciais > 8);     // bordas do canto suavizadas (tons intermediarios)
+    TEST_ASSERT_EQUAL_INT(ui::anel::Anel::para565(ui::anel::Anel::grade(fundo)), cantoOrigem);   // ponta do canto = fundo
+    TEST_ASSERT_EQUAL_UINT16(ui::anel::Anel::para565(ui::anel::Anel::grade(fill)), retas);
+    (void)cheios; (void)borda;
+}
+
+void test_regua_marca_e_agulha_cobertura() {
+    namespace rg = ui::regua;
+    // traco de 3 px centrado em 100: pixels 99 e 101 com 1/2... (a faixa [98.5, 101.5])
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f, rg::coberturaFaixa(98.5f, 101.5f, 98));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, rg::coberturaFaixa(98.5f, 101.5f, 99));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, rg::coberturaFaixa(98.5f, 101.5f, 100));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f, rg::coberturaFaixa(98.5f, 101.5f, 101));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, rg::coberturaFaixa(98.5f, 101.5f, 102));
+    // triangulo da agulha: meio = 1, bordas inclinadas = parcial, fora = 0
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, rg::coberturaTriangulo(100, 44, 93, 44, 107, 44, 100, 52));
+    const float lado = rg::coberturaTriangulo(94, 45, 93, 44, 107, 44, 100, 52);
+    TEST_ASSERT_TRUE(lado > 0.0f && lado < 1.0f);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, rg::coberturaTriangulo(80, 44, 93, 44, 107, 44, 100, 52));
+    // brilho: soma da gaussiana na faixa central e maior que nas pontas
+    TEST_ASSERT_TRUE(rg::gaussFaixa(-4.5f, 4.5f, 4.0f) > rg::gaussFaixa(8.0f, 17.0f, 4.0f));
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, rg::gaussFaixa(-100.0f, 100.0f, 4.0f));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
+    RUN_TEST(test_regua_retangulo_cobertura);
+    RUN_TEST(test_regua_retangulo_pinta_cantos_suaves);
+    RUN_TEST(test_regua_marca_e_agulha_cobertura);
     RUN_TEST(test_meio_da_faixa_cor_cheia);
     RUN_TEST(test_borda_de_fora_e_intermediaria);
     RUN_TEST(test_fora_nao_toca);

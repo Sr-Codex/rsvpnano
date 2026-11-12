@@ -15,6 +15,7 @@
 #include "tempo/Parametros.h"
 #include "tempo/Perfil.h"
 #include "tempo/Progressao.h"
+#include "tempo/Regua.h"
 #include "tempo/Relogio.h"
 #include "tempo/Sessao.h"
 
@@ -933,8 +934,8 @@ void test_foco_livre_liquida_pela_categoria() {
         NEAR(antes + c.cr, e.saldo);   // creditos entram na carteira
         NEAR(c.xp, e.xpTotal);
     }
-    TEST_ASSERT_EQUAL_STRING("Foco livre · Estudo", nomeFocoLivre(Categoria::Estudo).c_str());
-    TEST_ASSERT_EQUAL_STRING("Foco livre · Meditação", nomeFocoLivre(Categoria::Meditacao).c_str());
+    TEST_ASSERT_EQUAL_STRING("Estudo · sem projeto", nomeFocoLivre(Categoria::Estudo).c_str());
+    TEST_ASSERT_EQUAL_STRING("Meditação · sem projeto", nomeFocoLivre(Categoria::Meditacao).c_str());
     // chips <-> categorias
     TEST_ASSERT_EQUAL_INT(static_cast<int>(Categoria::Trabalho), static_cast<int>(categoriaDoChip(0)));
     TEST_ASSERT_EQUAL_INT(static_cast<int>(Categoria::Projetos), static_cast<int>(categoriaDoChip(4)));
@@ -1665,6 +1666,146 @@ void test_v3e2_proximo_passo_do_saque() {
     TEST_ASSERT_EQUAL_INT(0, minutosProximoPasso(ProximoPasso::VoltarInicio));
 }
 
+
+// ---- Inicio v4: regua de 5 a 90 min + 4x sobre a regua --------------------------------------------------------
+void test_regua_posicao_minuto_e_limites() {
+    using namespace tempo::regua;
+    const double cx = 238.0;
+    // sob a agulha: o minuto do centro cai exatamente em cx; 6 px por minuto
+    NEAR(238.0, xDaParada(25, 25.0, cx));
+    NEAR(238.0 + 30.0, xDaParada(30, 25.0, cx));
+    NEAR(238.0 - 90.0, xDaParada(10, 25.0, cx));
+    // inverso: levar a parada 60 ate x = cx deixa 60 sob a agulha
+    NEAR(60.0, centroDeX(60, cx, cx));
+    NEAR(55.0, centroDeX(60, cx + 30.0, cx));   // a fita foi 30 px para a direita: o valor diminui 5 min
+    // limites e encaixe
+    NEAR(5.0, limitar(-3));
+    NEAR(90.0, limitar(120));
+    TEST_ASSERT_EQUAL_INT(5, encaixar(0));
+    TEST_ASSERT_EQUAL_INT(5, encaixar(7.4));
+    TEST_ASSERT_EQUAL_INT(10, encaixar(7.6));
+    TEST_ASSERT_EQUAL_INT(25, encaixar(24.9));
+    TEST_ASSERT_EQUAL_INT(90, encaixar(89.0));
+    TEST_ASSERT_EQUAL_INT(90, encaixar(500));
+    TEST_ASSERT_EQUAL_INT(5, limitarEncaixado(1));        // salvo antigo/invalido
+    TEST_ASSERT_EQUAL_INT(60, limitarEncaixado(60));
+    TEST_ASSERT_EQUAL_INT(90, limitarEncaixado(90));      // antes o teto era 60
+    TEST_ASSERT_EQUAL_INT(90, limitarEncaixado(200));
+    TEST_ASSERT_EQUAL_INT(55, limitarEncaixado(57));
+}
+
+void test_regua_opacidade_das_pontas() {
+    using namespace tempo::regua;
+    NEAR(0.0, opacidadePonta(12, 12, 448));
+    NEAR(0.0, opacidadePonta(448, 12, 448));
+    NEAR(0.5, opacidadePonta(37, 12, 448));
+    NEAR(1.0, opacidadePonta(62, 12, 448));
+    NEAR(1.0, opacidadePonta(230, 12, 448));
+    NEAR(0.5, opacidadePonta(423, 12, 448));
+    NEAR(0.0, opacidadePonta(0, 12, 448));     // fora da regua
+}
+
+void test_regua_toque_nas_metades_com_limites() {
+    using namespace tempo::regua;
+    // painel x 8..468 (largura 460): metade a partir de x = 238
+    TEST_ASSERT_FALSE(metadeDireita(10, 8, 460));
+    TEST_ASSERT_FALSE(metadeDireita(237, 8, 460));
+    TEST_ASSERT_TRUE(metadeDireita(238, 8, 460));
+    TEST_ASSERT_TRUE(metadeDireita(467, 8, 460));
+    TEST_ASSERT_EQUAL_INT(30, ajustarPorToque(25, true));
+    TEST_ASSERT_EQUAL_INT(20, ajustarPorToque(25, false));
+    TEST_ASSERT_EQUAL_INT(5, ajustarPorToque(5, false));     // limite inferior
+    TEST_ASSERT_EQUAL_INT(10, ajustarPorToque(5, true));
+    TEST_ASSERT_EQUAL_INT(90, ajustarPorToque(90, true));    // limite superior (antes 60)
+    TEST_ASSERT_EQUAL_INT(85, ajustarPorToque(90, false));
+    TEST_ASSERT_EQUAL_INT(90, ajustarPorToque(85, true));
+}
+
+void test_regua_arrasto_leva_a_fita_1_para_1_e_encaixa() {
+    using namespace tempo::regua;
+    Arrasto a;
+    a.comecar(200, 25);
+    TEST_ASSERT_FALSE(a.mover(204));                 // dentro da zona morta: ainda e toque
+    TEST_ASSERT_FALSE(a.moveu);
+    TEST_ASSERT_EQUAL_INT(25, a.soltar());           // soltou sem arrastar: valor de partida (quem trata e o toque)
+    a.comecar(200, 25);
+    TEST_ASSERT_FALSE(a.mover(150));                 // cruza a zona morta: a referencia passa a 150 (sem salto)
+    TEST_ASSERT_TRUE(a.moveu);
+    NEAR(25.0, a.minuto);
+    TEST_ASSERT_TRUE(a.mover(120));                  // 30 px para a esquerda = +5 min (dedo leva a fita)
+    NEAR(30.0, a.minuto);
+    TEST_ASSERT_TRUE(a.mover(138));                  // 18 px para a direita da ref. = -3 min
+    NEAR(27.0, a.minuto);
+    TEST_ASSERT_EQUAL_INT(25, a.soltar());           // 27 encaixa em 25
+    TEST_ASSERT_FALSE(a.ativo);
+    // limites: arrastar muito longe prende em 5 / 90 e voltar o dedo volta a fita logo
+    a.comecar(300, 60);
+    a.mover(250);                                    // sai da zona morta
+    a.mover(-1000);
+    NEAR(90.0, a.minuto);
+    a.mover(-1000 + 6);                              // 6 px de volta = -1 min
+    NEAR(89.0, a.minuto);
+    a.mover(5000);
+    NEAR(5.0, a.minuto);
+    TEST_ASSERT_EQUAL_INT(5, a.soltar());
+    a.comecar(100, 40);
+    a.cancelar();
+    TEST_ASSERT_FALSE(a.ativo);
+    TEST_ASSERT_FALSE(a.mover(50));                  // inativo: ignora
+}
+
+void test_ciclo_4x_pausa_da_rodada() {
+    TEST_ASSERT_EQUAL_INT(5, pausaDoCiclo(5));
+    TEST_ASSERT_EQUAL_INT(5, pausaDoCiclo(25));
+    TEST_ASSERT_EQUAL_INT(5, pausaDoCiclo(35));
+    TEST_ASSERT_EQUAL_INT(10, pausaDoCiclo(50));
+    TEST_ASSERT_EQUAL_INT(10, pausaDoCiclo(60));
+    TEST_ASSERT_EQUAL_INT(15, pausaDoCiclo(75));
+    TEST_ASSERT_EQUAL_INT(15, pausaDoCiclo(90));     // 90/5 = 18 -> 20 -> limitada a 15
+    for (int m = 5; m <= 90; m += 5) {
+        const int p = pausaDoCiclo(m);
+        TEST_ASSERT_TRUE(p >= 5 && p <= 15 && p % 5 == 0);
+    }
+    // o ciclo carrega a rodada escolhida e a pausa derivada; a pausa longa continua 15
+    Ciclo c = iniciarCiclo(60);
+    TEST_ASSERT_EQUAL_INT(60, duracaoCicloMin(c));
+    c = avancarCiclo(c);
+    TEST_ASSERT_EQUAL_INT(10, duracaoCicloMin(c));
+    c = avancarCiclo(c);
+    TEST_ASSERT_EQUAL_INT(2, c.rodada);
+    TEST_ASSERT_EQUAL_INT(60, duracaoCicloMin(c));
+    c.rodada = kCicloRodadas;
+    c.passo = PassoCiclo::Foco;
+    c = avancarCiclo(c);
+    TEST_ASSERT_EQUAL_INT(kCicloPausaLongaMin, duracaoCicloMin(c));
+    TEST_ASSERT_EQUAL_INT(25, duracaoCicloMin(iniciarCiclo()));   // padrao antigo continua valendo
+    TEST_ASSERT_EQUAL_INT(10, minutosProximoPasso(ProximoPasso::PausaCurta, iniciarCiclo(60)));
+    TEST_ASSERT_EQUAL_INT(15, minutosProximoPasso(ProximoPasso::PausaLonga, iniciarCiclo(60)));
+}
+
+void test_ate_hh_mm_com_4x() {
+    TEST_ASSERT_EQUAL_INT(25, duracaoTotalMin(25, false));
+    TEST_ASSERT_EQUAL_INT(4 * 25 + 3 * 5, duracaoTotalMin(25, true));
+    TEST_ASSERT_EQUAL_INT(270, duracaoTotalMin(60, true));            // 4 x 60 + 3 x 10 (pausa longa depois nao entra)
+    // mockup: 14:32 -> "25 min · ate 14:57" e "4 x 60 · ate 19:02"
+    const int agora = 14 * 60 + 32;
+    TEST_ASSERT_EQUAL_STRING("25 min · até 14:57", textoComecar(25, false, true, agora).c_str());
+    TEST_ASSERT_EQUAL_STRING("4 × 60 · até 19:02", textoComecar(60, true, true, agora).c_str());
+    TEST_ASSERT_EQUAL_STRING("50 min · até 15:22", textoComecar(50, false, true, agora).c_str());
+    TEST_ASSERT_EQUAL_STRING("4 × 90 · até 21:17", textoComecar(90, true, true, agora).c_str());  // 360 + 3 x 15 = 405 min
+    TEST_ASSERT_EQUAL_STRING("25 min", textoComecar(25, false, false, 0).c_str());                // sem relogio valido
+    TEST_ASSERT_EQUAL_STRING("4 × 60", textoComecar(60, true, false, 0).c_str());
+    TEST_ASSERT_EQUAL_STRING("4 × 90 · até 02:50", textoComecar(90, true, true, 20 * 60 + 5).c_str());   // vira o dia
+}
+
+void test_texto_sem_projeto() {
+    TEST_ASSERT_EQUAL_STRING("Leitura · sem projeto", nomeFocoLivre(Categoria::Leitura).c_str());
+    TEST_ASSERT_EQUAL_STRING("Trabalho · sem projeto", nomeFocoLivre(Categoria::Trabalho).c_str());
+    TEST_ASSERT_EQUAL_STRING("sem projeto · 0,20 cr/min", linhaTaxaDoFoco(false, Categoria::Leitura).c_str());
+    TEST_ASSERT_EQUAL_STRING("sem projeto · 0,40 cr/min", linhaTaxaDoFoco(false, Categoria::Estudo).c_str());
+    TEST_ASSERT_EQUAL_STRING("Projetos · 0,40 cr/min", linhaTaxaDoFoco(true, Categoria::Leitura).c_str());   // com projeto a categoria e unica
+}
+
 void test_v3e2_desfazer_batalha_reverte_tudo() {
     Estado e = estadoComMeditacao();
     creditar(e, 40.0);   // saldo previo
@@ -1806,6 +1947,13 @@ int main(int, char**) {
     RUN_TEST(test_relogio_escala_e_ancora);
     RUN_TEST(test_foco_livre_liquida_pela_categoria);
     RUN_TEST(test_ciclo_pomodoro_sequencia);
+    RUN_TEST(test_regua_posicao_minuto_e_limites);
+    RUN_TEST(test_regua_opacidade_das_pontas);
+    RUN_TEST(test_regua_toque_nas_metades_com_limites);
+    RUN_TEST(test_regua_arrasto_leva_a_fita_1_para_1_e_encaixa);
+    RUN_TEST(test_ciclo_4x_pausa_da_rodada);
+    RUN_TEST(test_ate_hh_mm_com_4x);
+    RUN_TEST(test_texto_sem_projeto);
     RUN_TEST(test_ciclo_pomodoro_cada_rodada_liquida_separado);
     RUN_TEST(test_estado_preferencias_da_tela_inicial);
     RUN_TEST(test_log_foco_livre_registra_categoria);

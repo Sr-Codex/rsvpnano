@@ -25,6 +25,10 @@ namespace tempo {
         }
     }
 
+    int minutosProximoPasso(ProximoPasso p, const Ciclo& c) {
+        return p == ProximoPasso::PausaCurta && c.ativo ? c.pausaMin : minutosProximoPasso(p);
+    }
+
     AssinaturaBatalha assinaturaDoEstado(const Estado& e) {
         AssinaturaBatalha a;
         a.saldo = e.saldo;

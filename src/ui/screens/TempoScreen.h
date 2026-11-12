@@ -19,6 +19,7 @@
 #include "tempo/ModoFoco.h"
 #include "tempo/Motor.h"
 #include "tempo/Recarga.h"
+#include "tempo/Regua.h"
 #include "tempo/Relogio.h"
 #include "som/Sintese.h"
 #include "tempo/Sessao.h"
@@ -197,7 +198,7 @@ namespace screens {
         void ligarBatalha(uint32_t nowMs);                     // zera contadores e entra em Lutando
         void concluirRodada(uint32_t nowMs, fs::FS* filesystem);   // ciclo: liquida a rodada e entra na pausa
         void salvarPreferencias();
-        void escolher(int indice);                              // -1 = Foco livre (a categoria livre fica em categoria_)
+        void escolher(int indice);                              // -1 = sem projeto (a categoria livre fica em categoria_)
         void pausarOuRetomar(uint32_t nowMs);
         void alternarDistracao(uint32_t nowMs);
         void acumular(uint32_t nowMs);
@@ -257,14 +258,15 @@ namespace screens {
         uint64_t pausaInicioMs_ = 0;         // inicio da pausa em curso (Pausar)
         uint32_t sincPedidaMs_ = 0;          // "Sincronizar" tocado ha pouco (0 = nao)
         bool seletor_ = false;               // seletor de foco aberto (Screen::TempoHoje)
-        int escolha_ = -1;                   // foco escolhido no Inicio: -1 = Foco livre, senao indice do projeto
+        int escolha_ = -1;                   // foco escolhido no Inicio: -1 = sem projeto, senao indice do projeto
         tempo::Categoria categoria_ = tempo::Categoria::Trabalho;   // categoria do FOCO LIVRE (nunca Projetos; com projeto a categoria e unica)
-        int duracaoMin_ = 25;                // duracao do anel do Inicio (5..60)
-        bool pomodoro_ = false;              // interruptor do ciclo
+        int duracaoMin_ = 25;                // duracao da regua do Inicio (5..90, multiplo de 5)
+        bool pomodoro_ = false;              // "4x rodadas": repete a rodada escolhida 4 vezes (pausa = tempo::pausaDoCiclo)
+        tempo::regua::Arrasto reguaArrasto_; // dedo sobre a regua do Inicio (fita 1:1 + encaixe de 5 em 5)
         tempo::Ciclo ciclo_;                 // ciclo em curso (ativo = false: sessao unica)
         int64_t descansoMs_ = 5 * 60 * 1000;
         tempo::Categoria categoriaBatalha_ = tempo::Categoria::Trabalho;   // da batalha em curso
-        std::string nomeBatalha_;            // "Foco livre · Estudo" ou titulo do projeto
+        std::string nomeBatalha_;            // "Estudo · sem projeto" ou titulo do projeto
 
         Fase fase_ = Fase::Nenhuma;
         int projeto_ = -1;                   // projeto da batalha em curso (-1 = Foco livre)

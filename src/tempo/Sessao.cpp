@@ -8,9 +8,21 @@
 
 namespace tempo {
 
-    Ciclo iniciarCiclo() {
+    int pausaDoCiclo(int rodadaMin) {
+        const int arred = static_cast<int>(std::lround(rodadaMin / 25.0)) * 5;   // rodada/5 arredondada a 5
+        return std::clamp(arred, kCicloPausaMin, 15);
+    }
+
+    int duracaoTotalMin(int rodadaMin, bool ciclo4x) {
+        if (!ciclo4x) return rodadaMin;
+        return kCicloRodadas * rodadaMin + (kCicloRodadas - 1) * pausaDoCiclo(rodadaMin);
+    }
+
+    Ciclo iniciarCiclo(int focoMin) {
         Ciclo c;
         c.ativo = true;
+        c.focoMin = focoMin;
+        c.pausaMin = pausaDoCiclo(focoMin);
         return c;
     }
 
@@ -34,9 +46,9 @@ namespace tempo {
 
     int duracaoCicloMin(const Ciclo& c) {
         switch (c.passo) {
-        case PassoCiclo::PausaCurta: return kCicloPausaMin;
+        case PassoCiclo::PausaCurta: return c.pausaMin;
         case PassoCiclo::PausaLonga: return kCicloPausaLongaMin;
-        default: return kCicloFocoMin;
+        default: return c.focoMin;
         }
     }
 
@@ -66,7 +78,23 @@ namespace tempo {
     }
 
     std::string nomeFocoLivre(Categoria c) {
-        return std::string{"Foco livre · "} + nomeCategoria(c);
+        return std::string{nomeCategoria(c)} + " · sem projeto";
+    }
+
+    std::string linhaTaxaDoFoco(bool temProjeto, Categoria livre) {
+        const Categoria cat = categoriaDoFoco(temProjeto, livre);
+        return std::string{temProjeto ? nomeCategoria(cat) : "sem projeto"} + " · " + textoTaxa(cat);
+    }
+
+    std::string textoComecar(int rodadaMin, bool ciclo4x, bool horaValida, int minutoDoDia) {
+        std::string t = ciclo4x ? "4 × " + std::to_string(rodadaMin) : std::to_string(rodadaMin) + " min";
+        if (horaValida) {
+            const int fim = (((minutoDoDia + duracaoTotalMin(rodadaMin, ciclo4x)) % 1440) + 1440) % 1440;
+            char hora[16];
+            std::snprintf(hora, sizeof hora, " · até %02d:%02d", fim / 60, fim % 60);
+            t += hora;
+        }
+        return t;
     }
 
     Categoria categoriaDoFoco(bool temProjeto, Categoria livre) {

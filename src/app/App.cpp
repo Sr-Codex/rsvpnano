@@ -293,9 +293,15 @@ void App::update(uint32_t nowMs) {
         handleInput(actions, nowMs);
         nowMs = millis();
     }
+    bool moveAdiado = false;   // arrasto da regua do Inicio do Tempo: so a ultima amostra de cada quadro e tratada/desenhada
     while (immediateUi_.pollTouch(nowMs)) {
         lastActivityMs_ = nowMs;
         const ui::Touch* toque = immediateUi_.touch();
+        if (toque != nullptr && screen_ == screens::Screen::TempoHoje && immediateUi_.lastTouchIsPureMove()) {
+            moveAdiado = true;   // se vier outra amostra, esta ja esta velha; Soltar/Cancelar carregam a posicao final
+            continue;
+        }
+        moveAdiado = false;
         if (toque != nullptr && ui::hasTouch(*toque, ui::TouchStart) && modoFoco_.toque(nowMs)) {
             // Modo Foco: com a tela escurecida o 1o toque so acorda. O gesto inteiro e ignorado ate soltar, entao nunca
             // aciona o botao sob o dedo (nem "Fim · segure").
@@ -303,6 +309,11 @@ void App::update(uint32_t nowMs) {
             nowMs = millis();
             continue;
         }
+        if (!handleAvisoTouch(nowMs)) handleTouch(nowMs);
+        nowMs = millis();
+    }
+    if (moveAdiado) {   // ultima amostra de arrasto do quadro (a fila foi esvaziada)
+        immediateUi_.replayLastTouch();
         if (!handleAvisoTouch(nowMs)) handleTouch(nowMs);
         nowMs = millis();
     }

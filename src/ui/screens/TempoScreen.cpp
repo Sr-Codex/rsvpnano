@@ -10,7 +10,9 @@
 #include "storage/tempo/TempoStorage.h"
 #include "som/Regras.h"
 #include "tempo/Parametros.h"
+#include "tempo/Regua.h"
 #include "tempo/Sessao.h"
+#include "ui/ReguaSuave.h"
 #include "ui/AnelSuave.h"
 #include "ui/SansFont.h"
 #include "ui/screens/HabitosIcones.h"
@@ -107,6 +109,17 @@ namespace screens {
             return uint16_t((canal(11, 31) << 11) | (canal(5, 63) << 5) | canal(0, 31));
         }
 
+        // Retangulo arredondado com borda suavizada (cantos pixel a pixel; retas por fillRect). `fundo` = cor por tras.
+        void retanguloSuave565(Arduino_GFX& g, int x, int y, int w, int h, int r, uint16_t cor, uint16_t fundo, int borda = 0,
+                               uint16_t corBorda = 0) {
+            g.startWrite();
+            ui::regua::retanguloSuave(
+                [&](int px, int py, uint16_t c) { g.writePixel(int16_t(px), int16_t(py), c); },
+                [&](int rx, int ry, int rw, int rh, uint16_t c) { if (rw > 0 && rh > 0) g.writeFillRect(int16_t(rx), int16_t(ry), int16_t(rw), int16_t(rh), c); },
+                x, y, w, h, r, ui::regua::deRgb565(cor), ui::regua::deRgb565(fundo), borda, ui::regua::deRgb565(corBorda));
+            g.endWrite();
+        }
+
         // Bloco (cartao ou linha) com texto proprio sobre fundo uniforme.
         struct Bloco {
             ui::Context& ui;
@@ -121,6 +134,9 @@ namespace screens {
             std::vector<Item> itens;
             int32_t corFixa = -1;    // >= 0: fundo RGB565 proprio (ex.: linha selecionada) no lugar do papel
             bool apertado = false;   // dedo em cima (estado "apertado"): fundo mais claro + contorno
+            bool suave = false;      // cantos e contorno com borda suavizada (Inicio v4)
+            int borda = 0;           // suave: contorno fixo (px) na cor `corBorda`
+            uint16_t corBorda = 0;
 
             Bloco(ui::Context& u, Rect a, ColorRole f, int r, uint32_t semente = 0)
                 : ui(u), area(a), fundo(f), raio(r), sig(ui::Context::combine(semente, static_cast<uint32_t>(f))) {}
@@ -144,14 +160,18 @@ namespace screens {
             void desenhar(const Desenho& extra = {}) {
                 if (apertado) sig = ui::Context::combine(sig, 0xA9E5ADU);
                 sig = ui::Context::combine(sig, uint32_t(corFixa + 1));
+                if (suave) sig = ui::Context::combine(sig, uint32_t(borda) * 65537U + corBorda + 0x5A0000U);
                 if (!ui.redraw(area, sig, true)) return;
                 const uint16_t base = corFixa >= 0 ? uint16_t(corFixa) : ui.color(fundo);
                 const uint16_t cor = apertado ? misturar565(base, 0xFFFF, 0.16) : base;
                 ui.paint(area, [&](Arduino_GFX& g, Rect alvo) {
                     g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, ui.color(Background));
-                    if (raio > 0) g.fillRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, raio, cor);
+                    if (suave && raio > 0) {
+                        retanguloSuave565(g, alvo.x, alvo.y, alvo.w, alvo.h, raio, cor, ui.color(Background),
+                                          apertado ? 2 : borda, apertado ? uint16_t(0xFFFF) : corBorda);
+                    } else if (raio > 0) g.fillRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, raio, cor);
                     else g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, cor);
-                    if (apertado && raio > 0) {
+                    if (apertado && raio > 0 && !suave) {
                         g.drawRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, raio, 0xFFFF);
                         g.drawRoundRect(alvo.x + 1, alvo.y + 1, alvo.w - 2, alvo.h - 2, raio - 1, 0xFFFF);
                     }
@@ -179,7 +199,6 @@ namespace screens {
         constexpr Cor kCorCat[tempo::kNumChips] = {{255, 140, 60}, {150, 120, 235}, {60, 190, 170}, {90, 200, 255}, {255, 196, 80}};
         constexpr int kCx = 80, kCy = 88;      // centro dos aneis da batalha
         constexpr int kRaioFora = 70, kRaioDentro = 50, kEspessura = 15;
-        constexpr int kIniCx = 80, kIniCy = 106, kIniRaio = 56, kIniLarg = 12;   // anel unico do Inicio (v3)
         constexpr Cor kTonal{34, 36, 35}, kSelFundo{44, 28, 16}, kClaro{228, 228, 220};
         constexpr Cor kCinzaA{120, 122, 116}, kCinzaB{165, 166, 158}, kVinhoApagado{120, 56, 72}, kVinhoApagado2{150, 70, 92};
 
@@ -271,6 +290,8 @@ namespace screens {
             uint16_t corContorno = 0;     // 0 = mesma da tinta
             uint16_t tintaIcone = 0;      // 0 = mesma da tinta
             bool check = false;           // selecionado: check-circle laranja no canto
+            bool suave = false;           // cantos e contorno com borda suavizada (Inicio v4)
+            int raio = 16;                // raio do canto
         };
 
         // Contorno de retangulo arredondado enchendo no sentido horario a partir do meio do topo (frac 0..1).
@@ -312,7 +333,7 @@ namespace screens {
                 ui::Context::combine(ui::Context::combine(b.fundo, b.tinta),
                                      (b.habilitado ? 1U : 0U) + (apertado ? 2U : 0U) + (b.selecionado ? 4U : 0U)
                                          + (b.comIcone ? 8U : 0U) + (b.empilhado ? 16U : 0U) + (b.check ? 8388608U : 0U) + uint32_t(b.corContorno) * 3U + uint32_t(b.tintaIcone) * 5U + uint32_t(b.tam) * 32U
-                                         + uint32_t(int(b.icone)) * 8192U + uint32_t(b.progresso64 + 1) * 262144U));
+                                         + uint32_t(int(b.icone)) * 8192U + uint32_t(b.progresso64 + 1) * 262144U + (b.suave ? 0x40000000U : 0U)));
             if (ui.redraw(r, sig, true)) {
                 const uint16_t fundo = apertado ? misturar565(b.fundo, 0xFFFF, 0.22) : b.fundo;
                 const uint16_t tinta = b.tinta;
@@ -343,11 +364,16 @@ namespace screens {
                 ui.paint(r, [&](Arduino_GFX& g, Rect alvo) {
                     const int dx = alvo.x - r.x, dy = alvo.y - r.y;
                     g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, ui.color(Background));
-                    g.fillRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, 16, fundo);
-                    if (b.selecionado || apertado) {
-                        const uint16_t cc = b.selecionado ? (b.corContorno != 0 ? b.corContorno : tinta) : uint16_t(0xFFFF);   // apertado = contorno branco
-                        g.drawRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, 16, cc);
-                        g.drawRoundRect(alvo.x + 1, alvo.y + 1, alvo.w - 2, alvo.h - 2, 15, cc);
+                    const bool contorno = b.selecionado || apertado;
+                    const uint16_t cc = b.selecionado ? (b.corContorno != 0 ? b.corContorno : tinta) : uint16_t(0xFFFF);   // apertado = contorno branco
+                    if (b.suave) {
+                        retanguloSuave565(g, alvo.x, alvo.y, alvo.w, alvo.h, b.raio, fundo, ui.color(Background), contorno ? 2 : 0, cc);
+                    } else {
+                        g.fillRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, 16, fundo);
+                        if (contorno) {
+                            g.drawRoundRect(alvo.x, alvo.y, alvo.w, alvo.h, 16, cc);
+                            g.drawRoundRect(alvo.x + 1, alvo.y + 1, alvo.w - 2, alvo.h - 2, 15, cc);
+                        }
                     }
                     if (b.progresso64 >= 0)
                         contornoQueEnche(g, alvo.x, alvo.y, alvo.w, alvo.h, 16, b.progresso64 / 64.0, c565(kLaranja));
@@ -445,6 +471,117 @@ namespace screens {
             std::snprintf(texto, sizeof texto, "%02d:%02d", minutoDoDia / 60, minutoDoDia % 60);
             return texto;
         }
+
+        // ------------------------------------------------------------------ regua do Inicio (v4)
+        // Painel 460 x 98 (mockup tempo-regua4@2x): "‹ −5" / "+5 ›" nos cantos, valor grande + "min" (+ "× 4"), fita de
+        // minutos sob a agulha fixa (marcas de 5 em 5, maiores e numeradas nas dezenas, somem nas pontas), agulha com brilho.
+        // Tudo com cobertura por pixel (ui/ReguaSuave): marcas, triangulo da agulha, brilho gaussiano, cantos e contorno.
+        struct VistaRegua {
+            double centro = 25;      // minuto (fracionario) sob a agulha
+            int valor = 25;          // minutos mostrados (encaixado)
+            bool arrastando = false; // dedo levando a fita: contorno laranja, rotulos apagados, brilho forte
+            bool ativo = true;       // false (batalha em curso): rotulos apagados
+            bool x4 = false;         // "× 4" laranja ao lado do valor
+        };
+
+        void textoEm(Arduino_GFX& g, const std::string& txt, uint8_t tam, int x, int baseline, uint16_t cor, uint16_t fundo,
+                     const Rect& clip, int alinhamento /*0 esq, 1 centro, 2 dir*/) {
+            const auto& fonte = ui::sans::font(tam);
+            const int w = ui::sans::width(txt, fonte);
+            const int xi = alinhamento == 1 ? x - w / 2 : alinhamento == 2 ? x - w : x;
+            ui::sans::draw(g, txt, fonte, xi, baseline, cor, fundo, clip.x, clip.y, clip.w, clip.h);
+        }
+        // Baseline que deixa o texto de `tam` centrado verticalmente em yc.
+        int baselineCentrada(uint8_t tam, int yc) {
+            const auto& f = ui::sans::font(tam);
+            return yc - f.height / 2 + f.ascent;
+        }
+
+        void desenharRegua(ui::Context& ui, Rect area, const VistaRegua& v) {
+            const uint16_t cPainel = ui.color(SurfaceMuted), cTexto = ui.color(Foreground), cMudo = ui.color(Muted);
+            const uint16_t cLaranja = c565(kLaranja), cBg = ui.color(Background);
+            const int px6 = int(std::lround(v.centro * tempo::regua::kPxPorMin));
+            uint32_t sig = ui::Context::combine(0x9E6A0000U, uint32_t(px6 + 100000));
+            sig = ui::Context::combine(sig, uint32_t(v.valor) * 8U + v.arrastando * 1U + v.ativo * 2U + v.x4 * 4U);
+            sig = ui::Context::combine(sig, uint32_t(cPainel) * 65537U + cMudo);
+            if (!ui.redraw(area, sig, true)) return;
+            ui.paint(area, [&](Arduino_GFX& g, Rect alvo) {
+                namespace rg = ui::regua;
+                using ui::anel::Anel;
+                const int ox = alvo.x, oy = alvo.y, W = area.w, H = area.h;
+                constexpr float kCx = 230.0f;   // agulha (mockup: X0..X1 = 8..468 -> centro 238, em coordenadas do painel)
+                const rg::Rgb painel = rg::deRgb565(cPainel), lar = rg::deRgb565(cLaranja), fg = rg::deRgb565(cTexto),
+                              mudo = rg::deRgb565(cMudo);
+                g.fillRect(ox, oy, W, H, cBg);
+                retanguloSuave565(g, ox, oy, W, H, 16, cPainel, cBg, v.arrastando ? 2 : 0, cLaranja);
+
+                // ---- brilho da agulha: caixa 9 x 26 px (x = kCx, y 52..78) desfocada (sigma 4); aditivo sobre o painel
+                constexpr float kSigma = 4.0f;
+                constexpr int gx0 = int(kCx) - 14, gx1 = int(kCx) + 14, gy0 = 36, gy1 = 92;
+                const float forca = v.arrastando ? 0.55f : 0.32f;
+                float colK[gx1 - gx0 + 1], linK[gy1 - gy0 + 1];
+                for (int x = gx0; x <= gx1; ++x) colK[x - gx0] = rg::gaussFaixa(kCx - 4.5f - (x + 0.5f), kCx + 4.5f - (x + 0.5f), kSigma);
+                for (int y = gy0; y <= gy1; ++y) linK[y - gy0] = rg::gaussFaixa(52.0f - (y + 0.5f), 78.0f - (y + 0.5f), kSigma);
+                const auto base = [&](int lx, int ly) {   // painel + brilho em (lx, ly)
+                    if (lx < gx0 || lx > gx1 || ly < gy0 || ly > gy1) return painel;
+                    const float k = forca * colK[lx - gx0] * linK[ly - gy0];
+                    return rg::Rgb{std::min(255.0f, painel.r + lar.r * k), std::min(255.0f, painel.g + lar.g * k),
+                                   std::min(255.0f, painel.b + lar.b * k)};
+                };
+                g.startWrite();
+                const auto put = [&](int lx, int ly, const rg::Rgb& c) {
+                    g.writePixel(int16_t(ox + lx), int16_t(oy + ly), Anel::para565(c, lx, ly));
+                };
+                for (int y = gy0; y <= gy1; ++y)
+                    for (int x = gx0; x <= gx1; ++x)
+                        if (colK[x - gx0] * linK[y - gy0] > 0.004f) put(x, y, base(x, y));
+
+                // ---- marcas: so de 5 em 5; maior (e com numero) nas dezenas; opacidade cai nas pontas
+                const float xa = 12.0f, xb = float(W) - 12.0f;
+                struct Rotulo { int x; std::string txt; uint16_t cor; };
+                std::vector<Rotulo> rotulos;
+                for (int m = tempo::regua::kMinMin; m <= tempo::regua::kMaxMin; m += tempo::regua::kPassoMin) {
+                    const float x = kCx + float(tempo::regua::xDaParada(m, v.centro, 0.0));
+                    if (x < xa || x > xb) continue;
+                    const float k = tempo::regua::opacidadePonta(x, xa, xb);
+                    if (k <= 0.01f) continue;
+                    const bool maior = m % 10 == 0;
+                    const float larg = maior ? 2.0f : 1.5f, alfa = k * (maior ? 0.8f : 0.55f);
+                    const int y0 = maior ? 58 : 63, y1 = 74;
+                    const rg::Rgb& tinta = maior ? fg : mudo;
+                    for (int lx = int(std::floor(x - larg / 2)); lx <= int(std::ceil(x + larg / 2)); ++lx) {
+                        const float cob = rg::coberturaFaixa(x - larg / 2, x + larg / 2, lx);
+                        if (cob <= 0) continue;
+                        for (int ly = y0; ly < y1; ++ly) put(lx, ly, rg::mistura(base(lx, ly), tinta, alfa * cob));
+                    }
+                    if (maior) rotulos.push_back({int(std::lround(x)), std::to_string(m), Anel::para565(Anel::grade(rg::mistura(painel, mudo, k)))});
+                }
+
+                // ---- agulha: triangulo (apice y=52) + traco de 3 px (y 50..79), cobertura por pixel sobre o brilho
+                for (int ly = 43; ly < 80; ++ly)
+                    for (int lx = int(kCx) - 9; lx <= int(kCx) + 9; ++lx) {
+                        const float tri = ly < 53 ? rg::coberturaTriangulo(lx, ly, kCx - 7, 44, kCx + 7, 44, kCx, 52) : 0.0f;
+                        const float traco = ly >= 50 ? rg::coberturaFaixa(kCx - 1.5f, kCx + 1.5f, lx) : 0.0f;
+                        const float cob = std::max(tri, traco);
+                        if (cob > 0) put(lx, ly, rg::mistura(base(lx, ly), lar, cob));
+                    }
+                g.endWrite();
+
+                // ---- textos (fonte sans com alfa de 4 bits: borda suavizada)
+                const Rect clip{alvo.x, alvo.y, int16_t(W), int16_t(H)};
+                for (const auto& r : rotulos)
+                    textoEm(g, r.txt, 15, ox + r.x, oy + baselineCentrada(15, 88), r.cor, cPainel, clip, 1);
+                const uint16_t cLado = v.arrastando || !v.ativo ? cMudo : cLaranja;
+                textoEm(g, "‹ −5", 17, ox + 16, oy + baselineCentrada(17, 22), cLado, cPainel, clip, 0);
+                textoEm(g, "+5 ›", 17, ox + W - 16, oy + baselineCentrada(17, 22), cLado, cPainel, clip, 2);
+                const std::string num = std::to_string(v.valor);
+                const int wNum = ui::sans::width(num, ui::sans::font(39)), wMin = ui::sans::width("min", ui::sans::font(17));
+                const int wTot = wNum + 6 + wMin, xNum = int(kCx) - wTot / 2;
+                textoEm(g, num, 39, ox + xNum, oy + 36, cTexto, cPainel, clip, 0);
+                textoEm(g, "min", 17, ox + xNum + wNum + 6, oy + 36, cMudo, cPainel, clip, 0);
+                if (v.x4) textoEm(g, "× 4", 21, ox + int(kCx) + wTot / 2 + 10, oy + 36, cLaranja, cPainel, clip, 0);
+            });
+        }
     } // namespace
 
     void desenharAneisMini(ui::Context& ui, Arduino_GFX& g, int cx, int cy, int raio, double voce, double inimigo,
@@ -516,8 +653,8 @@ namespace screens {
         } else {
             r.projeto = escolha_ >= 0 && size_t(escolha_) < titulos_.size() ? titulos_[escolha_]
                                                                            : tempo::nomeFocoLivre(categoria_);
-            r.centro = fmtRelogio(int64_t(ciclo_.ativo || pomodoro_ ? tempo::kCicloFocoMin : duracaoMin_) * 60);
-            r.planejadoMin = pomodoro_ ? tempo::kCicloFocoMin : duracaoMin_;
+            r.centro = fmtRelogio(int64_t(duracaoMin_) * 60);
+            r.planejadoMin = duracaoMin_;
         }
         // Habitos (launcher): usa o minuto do relogio de parede (o estado so avanca na manutencao ~1x/s)
         if (const auto agoraH = tempo::agora(nowMs); agoraH.valida && !estado_.dia.ocorrencias.empty()) {
@@ -794,7 +931,7 @@ namespace screens {
             garantirDia(nowMs);
             carregado_ = true;
             categoria_ = tempo::categoriaLivreValida(estado_.ultimaCategoria);   // salvo "Projetos" (versoes antigas) vira Trabalho
-            duracaoMin_ = std::clamp(estado_.ultimaDuracaoMin / 5 * 5, 5, 60);
+            duracaoMin_ = tempo::regua::limitarEncaixado(estado_.ultimaDuracaoMin);   // 5..90, multiplo de 5
             pomodoro_ = estado_.ciclopomodoro;
             salvar(filesystem);
         }
@@ -844,11 +981,11 @@ namespace screens {
             projeto_ = -1;
             nomeBatalha_ = tempo::nomeFocoLivre(categoriaBatalha_);
         }
-        ciclo_ = pomodoro_ ? tempo::iniciarCiclo() : tempo::Ciclo{};
+        ciclo_ = pomodoro_ ? tempo::iniciarCiclo(duracaoMin_) : tempo::Ciclo{};   // 4x repete a rodada escolhida na regua
         emCiclo_ = pomodoro_;
         cicloRodadas_ = 0;
         cicloFocadoMin_ = 0;
-        planejadoMin_ = pomodoro_ ? tempo::kCicloFocoMin : duracaoMin_;
+        planejadoMin_ = duracaoMin_;
         salvarPreferencias();
         ligarBatalha(nowMs);
     }
@@ -1239,9 +1376,11 @@ namespace screens {
         return drawVitoria(ui, nowMs, screen);
     }
 
-    // ====================================================================== Inicio v3
-    // Layout 640x172 (mockup tempo3-foco, quadros 1-2): anel de minutos + -5/+5 a esquerda, cartao unico "FOCO EM" no meio
-    // (toque abre o seletor), Comecar grande + ciclo a direita. Com projeto NAO existe seletor de categoria (e unica).
+    // ====================================================================== Inicio v4
+    // Layout 640x172 (mockup tempo-regua4@2x): linha de cima = "‹ Inicio" (72 x 56) + cartao do foco (nome em 1 linha,
+    // 2a linha = icone + categoria/"sem projeto" + cr/min, "Trocar ›" abre o seletor); embaixo a REGUA de 5 a 90 min
+    // (arrastar leva a fita e encaixa de 5 em 5; toque sem arrasto: metade esquerda -5, direita +5); a direita,
+    // Comecar (sub "25 min · ate HH:MM" / "4 × 60 · ate HH:MM") e "4× rodadas" (repete a rodada escolhida 4 vezes).
     Action TempoScreen::drawInicio(ui::Context& ui, uint32_t nowMs, Screen& screen) {
         if (fase_ == Fase::Reflexao || (saqueAtivo_ && !confirmado_)) { screen = Screen::TempoVitoria; return Action::None; }
         garantirDia(nowMs);
@@ -1249,37 +1388,50 @@ namespace screens {
         const bool ciclo = pomodoro_;
         const bool comProjeto = escolha_ >= 0 && size_t(escolha_) < titulos_.size();
         const tempo::Categoria cat = tempo::categoriaDoFoco(comProjeto, categoria_);
+        const bool podeEditar = !emBatalha;
+        const Rect areaRegua{8, 70, 460, 98};
 
-        // ---- arrastar o dedo em volta do anel ajusta 5..60 min em passos de 5 (so sem batalha e sem ciclo)
-        if (!emBatalha && !ciclo) {
+        // ---- regua: o dedo leva a fita (so a ultima amostra por quadro, ver App::update); soltar encaixa de 5 em 5
+        bool foiArrasto = false;
+        if (podeEditar) {
             if (const auto* t = ui.touch()) {
-                const double dx = double(t->x) - kIniCx, dy = double(t->y) - kIniCy;
-                const double dist = std::sqrt(dx * dx + dy * dy);
-                if (hasTouch(*t, ui::TouchStart)) arrastando_ = dist >= 34 && dist <= 70;
-                if (arrastando_ && (hasTouch(*t, ui::TouchStart) || hasTouch(*t, ui::TouchMove) || hasTouch(*t, ui::TouchRelease))
-                    && dist > 4) {
-                    double f = std::atan2(dx, -dy) / (2 * 3.14159265358979);
-                    if (f < 0) f += 1.0;
-                    int m = int(std::lround(f * 12));
-                    if (m == 0) m = f < 0.5 ? 1 : 12;
-                    duracaoMin_ = std::clamp(m, 1, 12) * 5;
+                const bool dentro = t->x >= areaRegua.x && t->x < areaRegua.x + areaRegua.w && t->y >= areaRegua.y
+                                    && t->y < areaRegua.y + areaRegua.h;
+                if (hasTouch(*t, ui::TouchStart)) {
+                    if (dentro) reguaArrasto_.comecar(int(t->x), duracaoMin_);
+                    else reguaArrasto_.cancelar();
+                } else if (reguaArrasto_.ativo && hasTouch(*t, ui::TouchMove)) {
+                    reguaArrasto_.mover(int(t->x));
                 }
-                if (hasTouch(*t, ui::TouchCancel) || hasTouch(*t, ui::TouchRelease)) arrastando_ = false;
+                if (reguaArrasto_.ativo && hasTouch(*t, ui::TouchRelease)) {
+                    if (hasTouch(*t, ui::TouchCancel)) {
+                        reguaArrasto_.cancelar();
+                    } else {
+                        reguaArrasto_.mover(int(t->x));
+                        foiArrasto = reguaArrasto_.moveu;
+                        const int v = reguaArrasto_.soltar();
+                        if (foiArrasto) duracaoMin_ = v;
+                    }
+                }
             }
         } else {
-            arrastando_ = false;
+            reguaArrasto_.cancelar();
         }
-        const int minutos = ciclo ? tempo::kCicloFocoMin : duracaoMin_;
-        const uint16_t cMudo = ui.color(Muted), cTexto = ui.color(Foreground), cBg = ui.color(Background);
-        const uint16_t cLaranja = c565(kLaranja), cPainel = ui.color(SurfaceMuted), cTonal = c565(kTonal);
-        const bool podeEditar = !emBatalha;
+        const bool arrastando = reguaArrasto_.ativo && reguaArrasto_.moveu;
+        const double centro = reguaArrasto_.ativo ? reguaArrasto_.minuto : double(duracaoMin_);
+        const int valor = reguaArrasto_.ativo ? tempo::regua::encaixar(reguaArrasto_.minuto) : duracaoMin_;
 
-        // ---- "‹ Início"
+        const uint16_t cMudo = ui.color(Muted), cTexto = ui.color(Foreground), cBg = ui.color(Background);
+        const uint16_t cLaranja = c565(kLaranja), cTonal = c565(kTonal);
+
+        // ---- "‹ Início" (alvo de 72 x 56)
         {
-            const Rect area{0, 0, 120, 38};
-            Bloco voltar(ui, area, Background, 0, 90);
+            const Rect area{8, 6, 72, 56};
+            Bloco voltar(ui, area, Background, 14, 90);
+            voltar.corFixa = cTonal;
+            voltar.suave = true;
             voltar.apertado = ui.pressed(area);
-            voltar.linha(10, 14, 100, "‹ Início", 13, cMudo);
+            voltar.linha(8, 34, 72, "‹ Início", 15, cTexto, TextAlign::Center);
             voltar.desenhar();
             if (ui.firmTap(area)) {
                 salvarPreferencias();
@@ -1288,59 +1440,21 @@ namespace screens {
             }
         }
 
-        // ---- anel + minutos no centro
+        // ---- cartao do foco: nome em 1 linha (reticencias), icone + categoria/"sem projeto" + cr/min, Trocar ›
         {
-            Bloco aneis(ui, {0, 40, 172, 132}, Background, 0, 20);
-            aneis.linha(kIniCx - 40, 100, 80, std::to_string(minutos), 28, cTexto, TextAlign::Center);
-            aneis.linha(kIniCx - 40, 124, 80, "min", 15, cMudo, TextAlign::Center);
-            aneis.marca(static_cast<uint32_t>(minutos));
-            const Cor fundo = deRole(ui, Background);
-            aneis.desenhar([&](Arduino_GFX& g, int dx, int dy) {
-                anel(g, dx, dy, kIniCx, kIniCy, kIniRaio, kIniLarg, minutos / 60.0, kLaranja, kAmbar, fundo, kLaranja);
-            });
-        }
-
-        // ---- -5 / +5
-        for (int k = 0; k < 2; ++k) {
-            Btn b;
-            b.texto = k == 0 ? "+5" : "−5";
-            b.tam = 21;
-            b.fundo = cTonal;
-            b.tinta = ciclo || emBatalha ? rgb565(90, 92, 90) : cTexto;
-            b.habilitado = !ciclo && !emBatalha;
-            if (botao3(ui, Rect{150, int16_t(k == 0 ? 42 : 106), 56, 56}, b))
-                duracaoMin_ = std::clamp(duracaoMin_ + (k == 0 ? 5 : -5), 5, 60);
-        }
-
-        // ---- cartao "FOCO EM": nome real do projeto (ate 2 linhas), etiqueta de categoria + cr/min, rodadas e fim
-        {
-            const Rect cartao{216, 8, 252, 156};
+            const Rect cartao{88, 6, 380, 56};
             const std::string nome = comProjeto ? (titulos_[escolha_].empty() ? std::string{"(sem título)"} : titulos_[escolha_])
-                                                : tempo::nomeFocoLivre(cat);
-            const auto q = quebrar(nome, 222, 21, 17);
-            const int rodadas = ciclo ? tempo::kCicloRodadas : 1;
-            std::string fim = std::to_string(rodadas) + (rodadas == 1 ? " rodada" : " rodadas");
-            if (const auto agora = tempo::agora(nowMs); agora.valida) {
-                const int total = rodadas * minutos + (rodadas - 1) * tempo::kCicloPausaMin;
-                fim += " · termina " + fmtHoraRelogio(agora.minutoDoDia + total);
-            }
-            const char* nomeCat = tempo::nomeCategoria(cat);
-            const int larguraCat = ui::sans::width(nomeCat, ui::sans::font(15));
-            Bloco card(ui, cartao, SurfaceMuted, 16, 42 + comProjeto);
+                                                : std::string{tempo::nomeCategoria(cat)};
+            const auto q = quebrar(nome, 270, 17, 15, 1);
+            Bloco card(ui, cartao, SurfaceMuted, 14, 42 + comProjeto);
+            card.suave = true;
             card.apertado = podeEditar && ui.pressed(cartao);
-            card.linha(232, 24, 120, "FOCO EM", 15, cMudo);
-            if (podeEditar) card.linha(332, 24, 120, "Trocar ›", 17, cLaranja, TextAlign::Right);
-            const int passo = q.tam == 21 ? 25 : 21;
-            for (size_t i = 0; i < q.linhas.size(); ++i) card.linha(232, 52 + int(i) * passo, 222, q.linhas[i], q.tam, cTexto);
-            if (!comProjeto && q.linhas.size() == 1) card.linha(232, 80, 222, "sem projeto", 15, cMudo);
-            card.linha(262, 114, larguraCat + 8, nomeCat, 15, cTexto);
-            card.linha(232 + 24 + larguraCat + 26, 114, 120, tempo::textoTaxa(cat), 15, cMudo);
-            card.linha(232, 148, 226, fim, 15, cMudo);
-            card.marca(uint32_t(cat));
-            card.desenhar([&](Arduino_GFX& g, int dx, int dy) {
-                g.fillRoundRect(232 + dx, 100 + dy, 24 + larguraCat + 14, 28, 10, cTonal);
-                icones::phosphor(g, iconeDaCategoria(cat), 248, 114, 16, cLaranja, cTonal);
-            });
+            if (!q.linhas.empty()) card.linha(102, 24, 272, q.linhas[0], q.tam, cTexto);
+            card.linha(122, 46, 300, tempo::linhaTaxaDoFoco(comProjeto, categoria_), 15, cMudo);
+            if (podeEditar) card.linha(344, 34, 110, "Trocar ›", 17, cLaranja, TextAlign::Right);
+            card.marca(uint32_t(cat) * 4U + podeEditar * 2U + comProjeto);
+            const uint16_t corIcone = comProjeto ? rgb565(120, 160, 255) : cLaranja;
+            card.desenhar([&](Arduino_GFX& g, int, int) { icones::phosphor(g, iconeDaCategoria(cat), 110, 46, 15, corIcone, ui.color(SurfaceMuted)); });
             if (ui.firmTap(cartao, podeEditar)) {
                 seletor_ = true;
                 pagina_ = 0;
@@ -1348,40 +1462,57 @@ namespace screens {
             }
         }
 
-        // ---- Comecar (ou voltar a batalha em curso) + ciclo
+        // ---- regua (painel unico); toque sem arrasto = -5 / +5 conforme a metade
+        {
+            VistaRegua vista;
+            vista.centro = centro;
+            vista.valor = valor;
+            vista.arrastando = arrastando;
+            vista.ativo = podeEditar;
+            vista.x4 = ciclo;
+            desenharRegua(ui, areaRegua, vista);
+            if (ui.tap(areaRegua, podeEditar) && !foiArrasto) {
+                if (const auto* t = ui.touch())
+                    duracaoMin_ = tempo::regua::ajustarPorToque(duracaoMin_, tempo::regua::metadeDireita(int(t->x), areaRegua.x, areaRegua.w));
+            }
+        }
+
+        // ---- Comecar (ou voltar a batalha em curso) + 4x rodadas
         {
             Btn b;
             b.fundo = cLaranja;
             b.tinta = cBg;
+            b.suave = true;
             if (emBatalha) {
                 b.texto = "Voltar à batalha";
                 b.tam = 17;
-                if (botao3(ui, Rect{476, 8, 156, 92}, b)) screen = Screen::TempoBatalha;
+                if (botao3(ui, Rect{476, 6, 156, 94}, b)) screen = Screen::TempoBatalha;
             } else {
+                const auto agora = tempo::agora(nowMs);
                 b.texto = "Começar";
-                b.sub = std::to_string(minutos) + " min";
+                b.sub = tempo::textoComecar(valor, ciclo, agora.valida, agora.minutoDoDia);
                 b.tam = 21;
                 b.comIcone = true;
                 b.icone = IconeId::Play;
-                if (botao3(ui, Rect{476, 8, 156, 92}, b)) {
+                if (botao3(ui, Rect{476, 6, 156, 94}, b)) {
                     comecarSessao(nowMs);
                     screen = Screen::TempoBatalha;
                     return Action::None;
                 }
             }
             Btn c;
-            c.texto = ciclo ? "ciclo 4×" : "ciclo";
+            c.texto = "4× rodadas";
             c.tam = 17;
             c.comIcone = true;
             c.icone = IconeId::ArrowsClockwise;
             c.fundo = ciclo ? c565(kSelFundo) : cTonal;
-            c.tinta = ciclo ? cLaranja : cMudo;
+            c.tinta = ciclo ? cLaranja : (emBatalha ? rgb565(90, 92, 90) : cTexto);
             c.selecionado = ciclo;
             c.corContorno = cLaranja;
             c.habilitado = !emBatalha;
-            if (botao3(ui, Rect{476, 108, 156, 56}, c)) pomodoro_ = !pomodoro_;
+            c.suave = true;
+            if (botao3(ui, Rect{476, 108, 156, 60}, c)) pomodoro_ = !pomodoro_;
         }
-        (void)cPainel;
         return Action::None;
     }
 
@@ -1582,7 +1713,7 @@ namespace screens {
         const bool pausada = fase_ == Fase::Pausada;
         const bool bonus = overtime_ && !descanso;
         const bool distr = cron_.distraido && !pausada;
-        const std::string nome = nomeBatalha_.empty() ? std::string{"Foco livre"} : nomeBatalha_;
+        const std::string nome = nomeBatalha_.empty() ? std::string{"Sem projeto"} : nomeBatalha_;
         const int64_t planoMs = int64_t(planejadoMin_) * 60000;
         const auto agora = tempo::agora(nowMs);
 
@@ -1666,7 +1797,7 @@ namespace screens {
         const std::string rodadaTxt = "RODADA " + std::to_string(rodada) + " DE " + std::to_string(rodadas);
         std::string termina;
         if (agora.valida && !pausada && !descanso) {
-            const int extra = ciclo_.ativo ? (tempo::kCicloRodadas - ciclo_.rodada) * (tempo::kCicloFocoMin + tempo::kCicloPausaMin) : 0;
+            const int extra = ciclo_.ativo ? (tempo::kCicloRodadas - ciclo_.rodada) * (ciclo_.focoMin + ciclo_.pausaMin) : 0;
             termina = " · TERMINA " + fmtHoraRelogio(agora.minutoDoDia + int((restanteMs() + 59999) / 60000) + extra);
         }
         const auto nomeLinhas = [&](int y0, uint8_t tamA, uint8_t tamB, uint16_t cor) {
@@ -2036,7 +2167,7 @@ namespace screens {
         };
         icone(r.liq.vitoria ? IconeId::CheckCircle : IconeId::FlagCheckered, 184, 16, 18, cTitulo);
         texto.linha(198, 16, 270, titulo, 15, cTitulo);
-        const auto q = quebrar(r.projeto.empty() ? std::string{"Foco livre"} : r.projeto, 282, 21, 17);
+        const auto q = quebrar(r.projeto.empty() ? std::string{"Sem projeto"} : r.projeto, 282, 21, 17);
         const int passoNome = q.tam >= 21 ? 25 : 20;
         for (size_t i = 0; i < q.linhas.size(); ++i) texto.linha(176, 40 + int(i) * passoNome, 292, q.linhas[i], q.tam, cTexto);
         const std::string crTxt = fmtSinal(r.liq.cr) + " cr", xpTxt = fmtSinal(r.liq.xp) + " XP";
@@ -2061,7 +2192,7 @@ namespace screens {
             for (const auto& f : extras) f(g);
         });
         // ---- botoes: proximo passo (primario) + Desfazer (8 s) ou "Mais uma rodada"
-        const int minutos = tempo::minutosProximoPasso(proximo_);
+        const int minutos = tempo::minutosProximoPasso(proximo_, ciclo_);
         const bool pausa = proximo_ != tempo::ProximoPasso::VoltarInicio;
         Btn primario;
         primario.texto = pausa ? "Pausa " + std::to_string(minutos) + " min" : "Voltar ao início";

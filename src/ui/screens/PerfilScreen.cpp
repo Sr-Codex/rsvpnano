@@ -481,7 +481,7 @@ namespace screens {
             const bool habito = e.tipo == "habito";   // fase 2 dos Habitos: "Hábito · Medicação" (a hora ja vai na coluna HORA)
             std::string atividade = habito ? "Hábito · " + (e.projeto.empty() ? std::string{"hábito"} : e.projeto)
                                   : e.origem == tempo::kOrigemLeitor ? "Leitura · " + (e.projeto.empty() ? std::string{"livro"} : e.projeto)
-                                  : e.projetoId.empty() ? "Foco livre" + (e.categoria.empty() ? std::string{} : " · " + e.categoria) : e.projeto;
+                                  : e.projetoId.empty() ? (e.categoria.empty() ? std::string{"Sem projeto"} : e.categoria + " · sem projeto") : e.projeto;
             b.texto({16, y + 2, 44, 14}, e.hora.size() >= 5 ? e.hora.substr(0, 5) : std::string{"--:--"}, 10, cMudo);
             b.texto({64, y, 270, 18}, atividade, 12, cTexto);
             const std::string tempoCol = habito ? (e.resultado == "pulado" ? "pulado" : e.resultado == "no_horario" ? "no horário" : e.resultado == "atrasado" ? "atrasado" : "esquecido")

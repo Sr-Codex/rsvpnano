@@ -285,6 +285,9 @@ namespace ui {
         // Ha um dedo apoiado (gesto em curso ou ignorado ate soltar): o Modo Foco nao escurece com a mao na tela.
         bool fingerDown() const { return touchActive_ || touchSuppressed_; }
         bool verticalSlider(Rect rect, int& value, int minimum, int maximum);
+        // Entrega de novo o ultimo evento lido (usado para tratar so a ULTIMA amostra de um arrasto por quadro).
+        bool lastTouchIsPureMove() const { return touchEvent_.actions == TouchMove; }
+        void replayLastTouch() { touchPending_ = true; }
         const Touch* touch() const {
             return touchPending_ ? &touchEvent_ : nullptr;
         }

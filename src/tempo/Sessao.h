@@ -21,9 +21,18 @@ namespace tempo {
         bool ativo = false;
         PassoCiclo passo = PassoCiclo::Foco;
         int rodada = 1;   // 1..kCicloRodadas
+        int focoMin = kCicloFocoMin;      // duracao de cada rodada (a escolhida na regua do Inicio)
+        int pausaMin = kCicloPausaMin;    // pausa curta entre rodadas (pausaDoCiclo(focoMin))
     };
 
-    Ciclo iniciarCiclo();                 // rodada 1, foco
+    // Pausa curta entre rodadas do 4x: rodada/5 arredondada a multiplo de 5 min, limitada a 5..15
+    // (25 -> 5; 50/60 -> 10; 75/90 -> 15). A pausa longa depois da 4a rodada continua kCicloPausaLongaMin.
+    int pausaDoCiclo(int rodadaMin);
+    // Minutos de relogio do 4x do comeco ate o fim da ultima rodada: n * rodada + (n - 1) pausas curtas
+    // (a pausa longa depois da 4a nao conta). Sem 4x: n = 1 -> so a rodada.
+    int duracaoTotalMin(int rodadaMin, bool ciclo4x);
+
+    Ciclo iniciarCiclo(int focoMin = kCicloFocoMin);   // rodada 1, foco; pausa curta derivada de focoMin
     Ciclo avancarCiclo(const Ciclo& c);   // o passo atual terminou; apos a pausa longa o ciclo acaba (ativo = false)
     int duracaoCicloMin(const Ciclo& c);  // minutos do passo atual
 
@@ -32,8 +41,13 @@ namespace tempo {
     Categoria categoriaDoChip(int chip);   // 0 Trabalho, 1 Estudo, 2 Leitura, 3 Meditacao, 4 Projetos
     int chipDaCategoria(Categoria c);
     const char* nomeCategoria(Categoria c);
-    // "Foco livre · Estudo": nome do "inimigo" quando nao ha projeto.
+    // "Estudo · sem projeto": nome do "inimigo" quando nao ha projeto.
     std::string nomeFocoLivre(Categoria c);
+    // 2a linha do cartao do foco no Inicio: "Projetos · 0,40 cr/min" ou "sem projeto · 0,20 cr/min".
+    std::string linhaTaxaDoFoco(bool temProjeto, Categoria livre);
+    // Sub do botao Comecar: "25 min · ate 14:57" / "4 × 60 · ate 19:02" (sem relogio valido: so "25 min" / "4 × 60").
+    // minutoDoDia = hora de parede em minutos desde 00:00 (ignorado se !horaValida).
+    std::string textoComecar(int rodadaMin, bool ciclo4x, bool horaValida, int minutoDoDia);
 
     // ---- Foco do Inicio (Tempo v3). Com projeto a categoria e UNICA: Projetos (nunca Trabalho/Meditacao etc.).
     // Sem projeto (Foco livre) vale a categoria livre escolhida no seletor (Trabalho, Estudo, Leitura ou Meditacao).

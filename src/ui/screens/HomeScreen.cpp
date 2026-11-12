@@ -222,7 +222,7 @@ namespace screens {
                 linha2 = r.habLinha;
                 botao = "Abrir hábitos";
             } else {
-                nome = r.projeto.empty() ? "Foco livre" : r.projeto;   // foco escolhido no Inicio do Tempo
+                nome = r.projeto.empty() ? "Sem projeto" : r.projeto;   // foco escolhido no Inicio do Tempo
                 linha2 = "inimigo 100% · " + std::to_string(r.planejadoMin) + " min";
                 botao = "Começar";
             }
