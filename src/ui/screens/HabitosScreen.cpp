@@ -10,6 +10,7 @@
 #include "tempo/HabitosVista.h"
 #include "tempo/Parametros.h"
 #include "tempo/Relogio.h"
+#include "ui/ClippedGfx.h"
 #include "ui/FormaSuaveGfx.h"
 #include "ui/Rgb565.h"
 #include "ui/SansFont.h"
@@ -88,8 +89,11 @@ namespace screens {
                     if (raio > 0) ui::forma::retanguloArredondado(g, alvo.x, alvo.y, alvo.w, alvo.h, raio, cor, ui.color(Background));
                     else g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, cor);
                     if (extra) {
+                        // O desenho extra fica preso a area do bloco: uma lista rolada desenha linhas parcialmente acima/abaixo
+                        // e, sem o recorte, invadia o cabecalho (lista do dia aberta ja rolada ate o habito de agora).
+                        ui::ClippedGfx recorte(g, alvo);
                         ic::Origem origem(alvo.x - area.x, alvo.y - area.y, cor);
-                        extra(g, alvo.x - area.x, alvo.y - area.y);
+                        extra(recorte, alvo.x - area.x, alvo.y - area.y);
                     }
                     for (const auto& item : itens) ui.drawText(g, item.layout, item.cor, alvo.x - area.x, alvo.y - area.y, item.fundo);
                 });
