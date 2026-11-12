@@ -55,6 +55,15 @@ namespace {
             const uint16_t* pixels = getFramebuffer();
             if (!pixels)
                 return;
+            // LUME_SIM_RENDER_DELAY_MS=N: cada quadro desenhado leva N ms a mais, como a placa (a batalha do Tempo passa de
+            // 30 ms por quadro). Serve para reproduzir no Mac atrasos que dependem do render lento (fila de toques acumulando).
+            static const unsigned long renderDelayMs = [] {
+                const char* v = std::getenv("LUME_SIM_RENDER_DELAY_MS");
+                const long ms = v ? std::strtol(v, nullptr, 10) : 0;
+                if (ms > 0) std::fprintf(stderr, "[sim] render lento: +%ld ms por quadro\n", ms);
+                return ms > 0 ? static_cast<unsigned long>(ms) : 0UL;
+            }();
+            if (renderDelayMs != 0) sim::sleepMs(renderDelayMs);
             std::lock_guard lock(shared.mutex);
             std::memcpy(shared.pixels.data(), pixels, shared.pixels.size() * sizeof(uint16_t));
             ++shared.serial;

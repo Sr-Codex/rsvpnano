@@ -67,6 +67,11 @@ Coordenadas = as da janela (640×172 deitada). Log de depuração: `LUME_SIM_DEB
 As capturas aplicam o brilho do painel (0,35 + 0,65 × %); `LUME_SIM_SHOT_RAW=1` grava os pixels exatamente como o
 firmware os escreveu (sem brilho), para comparar com os mockups.
 
+**Render lento (como a placa):** `LUME_SIM_RENDER_DELAY_MS=80` faz cada quadro desenhado levar 80 ms a mais (o Mac desenha
+em ~1 ms; na placa a batalha do Tempo passa dos 30 ms entre leituras do toque). Serve para reproduzir defeitos que dependem da
+fila de toques acumulando (ex.: "Fim · segure" que encerrava depois de soltar, lume.21). Roteiros em
+`docs/simulador/toque-atraso/` (repo `lume-nano`). Só o simulador lê a variável (`sim/platform/SimBoard.cpp`).
+
 **Escala de tempo (app Tempo):** `LUME_SIM_TIME_SCALE=60 sim/run.sh` faz o relógio do app Tempo (batalha,
 data/hora) andar 60× mais rápido: 1 min real = 1 h, então uma batalha de 25 min termina em 25 s. Só o
 simulador lê a variável (`sim/main.cpp`); o roteiro `@ms` continua em tempo real e o resto do firmware
