@@ -32,6 +32,14 @@ public:
     virtual void writeFastVLine(int16_t x, int16_t y, int16_t height, uint16_t color) {
         drawFastVLine(x, y, height, color);
     }
+    virtual void startWrite() {}
+    virtual void endWrite() {}
+    virtual void writePixel(int16_t x, int16_t y, uint16_t color) {
+        drawPixel(x, y, color);
+    }
+    virtual void writeFillRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t color) {
+        fillRect(x, y, width, height, color);
+    }
     virtual void writeFillRectPreclipped(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t color) {
         fillRect(x, y, width, height, color);
     }
