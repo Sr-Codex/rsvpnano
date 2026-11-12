@@ -282,7 +282,7 @@ namespace screens {
         };
 
         bool botao3(ui::Context& ui, Rect r, const Btn& b) {
-            const bool apertado = b.habilitado && ui.pressed(r);
+            const bool apertado = b.habilitado && ui.pressedNow(r);   // solta o visual ja com a soltura na fila (Fim sem quadro "apertado" a mais)
             const uint32_t sig = ui::Context::signature(
                 b.texto + "|" + b.sub + "|" + b.sub2,
                 ui::Context::combine(ui::Context::combine(b.fundo, b.tinta),
@@ -1926,8 +1926,11 @@ namespace screens {
         double progFim = -1.0;
         if (!temFim || ui::fim::vencido(nowMs, fimEncerraEmMs_)) fimEncerraEmMs_ = 0;
         const bool travado = ui::fim::agendado(fimEncerraEmMs_);   // 100 % alcancado: "encerrando" por ~450 ms, outros toques ignorados
+        // So enche com o dedo apoiado AGORA: se a fila de toques ja tem a soltura (render lento na placa, backlog de amostras),
+        // o botao para na hora, mesmo antes do App tratar essa soltura.
+        const bool fimApertadoAgora = temFim && ui.pressedNow(rectFim);
         if (travado) progFim = 1.0;
-        else if (temFim) progFim = progressoFim(ui.pressed(rectFim), nowMs);
+        else if (temFim) progFim = progressoFim(fimApertadoAgora, nowMs);
         const bool segurando = progFim >= 0.0;
         const bool dicaFim = segurando || (fimDicaAteMs_ != 0 && int32_t(fimDicaAteMs_ - nowMs) > 0);
 
@@ -2198,7 +2201,10 @@ namespace screens {
         };
         const auto verificarFim = [&]() {
             if (segurando && progFim >= 1.0) {
-                if (!ui::fim::agendado(fimEncerraEmMs_)) fimEncerraEmMs_ = ui::fim::agendar(nowMs);   // mostra o "encerrando" antes
+                if (!ui::fim::agendado(fimEncerraEmMs_)) {
+                    if (!fimApertadoAgora) return false;   // agenda so com o dedo no botao na amostra mais nova
+                    fimEncerraEmMs_ = ui::fim::agendar(nowMs);   // mostra o "encerrando" antes
+                }
                 if (!ui::fim::hora(nowMs, fimEncerraEmMs_)) return false;
                 fimEncerraEmMs_ = 0;
                 ui.cancelTouchUntilRelease();

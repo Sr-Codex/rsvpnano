@@ -83,6 +83,8 @@ namespace ui {
         TouchSurface surface;
         TouchTiming timing;
         TouchSampleResult (*poll)(TouchContact&) = nullptr;
+        // Opcional: ha uma soltura na fila da fonte ainda nao lida por poll (o dedo ja saiu, o App so nao chegou la).
+        bool (*releasePending)() = nullptr;
     };
 
 } // namespace ui

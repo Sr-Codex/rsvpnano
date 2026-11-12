@@ -304,8 +304,7 @@ namespace screens {
         }
         if (dragging_ && touch != nullptr && ui::hasTouch(*touch, ui::TouchMove)) {
             const int32_t dx = static_cast<int32_t>(touch->x) - startX_;
-            const int32_t dy = static_cast<int32_t>(touch->y) - startY_;
-            moved_ = moved_ || std::abs(dx) > kDragThreshold || std::abs(dy) > kDragThreshold;
+            moved_ = moved_ || ui.touchExcursionX() > kDragThreshold || ui.touchExcursionY() > kDragThreshold;   // gesto inteiro
             if (moved_) {
                 offset_ = clampOffset(items, startOffset_ + dx, viewport.w);
                 selectedIndex_ = nearest(items, offset_, marker, viewport.x);
@@ -313,8 +312,7 @@ namespace screens {
         }
         if (dragging_ && touch != nullptr && ui::hasTouch(*touch, ui::TouchRelease)) {
             const int32_t dx = static_cast<int32_t>(touch->x) - startX_;
-            const int32_t dy = static_cast<int32_t>(touch->y) - startY_;
-            moved_ = moved_ || std::abs(dx) > kDragThreshold || std::abs(dy) > kDragThreshold;
+            moved_ = moved_ || ui.touchExcursionX() > kDragThreshold || ui.touchExcursionY() > kDragThreshold;   // gesto inteiro
             if (moved_) {
                 offset_ = clampOffset(items, startOffset_ + dx, viewport.w);
                 selectedIndex_ = nearest(items, offset_, marker, viewport.x);

@@ -50,5 +50,7 @@ namespace Input {
     void notifyTouchFromISR();
     bool poll(ActionMask& actions);
     ui::TouchSampleResult pollTouch(ui::TouchContact& contact);
+    // Ha uma soltura (dedo saiu ou Reset) na fila de toques ainda nao lida por pollTouch.
+    bool touchReleasePending();
 
 } // namespace Input

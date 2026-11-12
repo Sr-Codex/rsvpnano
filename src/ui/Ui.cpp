@@ -281,34 +281,44 @@ namespace ui {
         if (touchSource_.poll == nullptr)
             return false;
 
-        TouchContact contact;
-        switch (touchSource_.poll(contact)) {
-        case TouchSampleResult::None:
-            return false;
-        case TouchSampleResult::Reset:
-            touchSuppressed_ = false;
-            if (!touchActive_) {
-                resetTouchGesture();
+        // Amostras que nao geram evento (gesto ignorado ate soltar, Reset sem gesto) sao puladas na mesma chamada, ate o
+        // tamanho da fila da placa: antes cada uma encerrava a volta do laco do App, e o resto do gesto escoava a uma
+        // amostra por quadro (o toque seguinte esperava esse backlog). O limite protege fontes que nunca dizem None.
+        constexpr int kMaxSilentSamples = 32;
+        for (int silent = 0; silent < kMaxSilentSamples; ++silent) {
+            TouchContact contact;
+            switch (touchSource_.poll(contact)) {
+            case TouchSampleResult::None:
                 return false;
+            case TouchSampleResult::Reset:
+                touchSuppressed_ = false;
+                if (!touchActive_) {
+                    resetTouchGesture();
+                    continue;
+                }
+                touchActive_ = false;
+                touchHoldEmitted_ = false;
+                touchOutsideSamples_ = 0;
+                touchStartedAtMs_ = 0;
+                touchEventSampledAtMs_ = nowMs;
+                touchEvent_ = {TouchRelease | TouchCancel, touchLastX_, touchLastY_};
+                return touchPending_ = true;
+            case TouchSampleResult::Contact:
+                break;
             }
-            touchActive_ = false;
-            touchHoldEmitted_ = false;
-            touchOutsideSamples_ = 0;
-            touchStartedAtMs_ = 0;
-            touchEvent_ = {TouchRelease | TouchCancel, touchLastX_, touchLastY_};
-            return touchPending_ = true;
-        case TouchSampleResult::Contact:
-            break;
-        }
 
-        if (touchSuppressed_) {
-            if (!contact.touched) touchSuppressed_ = false;
-            return false;
-        }
+            if (touchSuppressed_) {
+                if (!contact.touched) touchSuppressed_ = false;
+                continue;
+            }
 
-        const uint32_t sampledAtMs = contact.sampledAtMs == 0 ? nowMs : contact.sampledAtMs;
-        touchLastPollMs_ = sampledAtMs;
-        return updateTouch(contact, sampledAtMs);
+            const uint32_t sampledAtMs = contact.sampledAtMs == 0 ? nowMs : contact.sampledAtMs;
+            touchLastPollMs_ = sampledAtMs;
+            touchEventSampledAtMs_ = sampledAtMs;
+            if (updateTouch(contact, sampledAtMs))
+                return true;
+        }
+        return false;
     }
 
     void Context::cancelTouchUntilRelease() {
@@ -1629,6 +1639,10 @@ namespace ui {
         return rect;
     }
 
+    bool Context::pressedNow(Rect rect) const {
+        return pressed(rect) && (touchSource_.releasePending == nullptr || !touchSource_.releasePending());
+    }
+
     bool Context::pressed(Rect rect) const {
         rect = paintBounds(rect);
         return touchActive_ && capturedSlot_ != kSlotCapacity && capturedRect_.x == rect.x && capturedRect_.y == rect.y
@@ -1672,6 +1686,8 @@ namespace ui {
         touchStartY_ = 0;
         touchLastX_ = 0;
         touchLastY_ = 0;
+        touchExcursionX_ = 0;
+        touchExcursionY_ = 0;
         capturedSlot_ = kSlotCapacity;
     }
 
@@ -1715,6 +1731,7 @@ namespace ui {
             touchStartedAtMs_ = nowMs;
             touchStartX_ = touchLastX_ = mapped.x;
             touchStartY_ = touchLastY_ = mapped.y;
+            touchExcursionX_ = touchExcursionY_ = 0;
             touchEvent_ = {TouchStart, mapped.x, mapped.y};
             return touchPending_ = true;
         }
@@ -1724,6 +1741,8 @@ namespace ui {
         uint8_t actions = TouchMove;
         const uint16_t dx = std::max(touchLastX_, touchStartX_) - std::min(touchLastX_, touchStartX_);
         const uint16_t dy = std::max(touchLastY_, touchStartY_) - std::min(touchLastY_, touchStartY_);
+        touchExcursionX_ = std::max(touchExcursionX_, dx);
+        touchExcursionY_ = std::max(touchExcursionY_, dy);
         const bool outside = dx > touchSource_.timing.tapMoveTolerancePx || dy > touchSource_.timing.tapMoveTolerancePx;
         if (outside) {
             touchOutsideSamples_ = std::min<uint8_t>(touchOutsideSamples_ + 1, kTapCancelOutsideSamples);

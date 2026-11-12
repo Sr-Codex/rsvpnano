@@ -92,7 +92,7 @@ namespace screens {
         if (dragging_ && touch != nullptr
             && (ui::hasTouch(*touch, ui::TouchMove) || ui::hasTouch(*touch, ui::TouchRelease))) {
             const int delta = static_cast<int>(touch->y) - dragStartY_;
-            moved_ = moved_ || std::abs(delta) > kDragThreshold;
+            moved_ = moved_ || ui.touchExcursionY() > kDragThreshold;   // gesto inteiro: o App junta arrastos
             if (moved_) {
                 // Displacement owns the selection: holding still never advances chapters,
                 // and sample rate cannot change the distance travelled.
@@ -269,7 +269,7 @@ namespace screens {
             }
             if (dragging_ && touch && (ui::hasTouch(*touch, ui::TouchMove) || ui::hasTouch(*touch, ui::TouchRelease))) {
                 const int delta = static_cast<int>(touch->y) - dragStartY_;
-                moved_ = moved_ || std::abs(delta) > kDragThreshold;
+                moved_ = moved_ || ui.touchExcursionY() > kDragThreshold;   // gesto inteiro: o App junta arrastos
                 if (moved_) {
                     const int direction = settings.chapterScrollReversed ? -1 : 1;
                     const int64_t position = std::clamp<int64_t>(

@@ -19,6 +19,7 @@
 #include "text/Utf8Text.h"
 #include "ui/Localization.h"
 #include "ui/Ui.h"
+#include "ui/VoltaToque.h"
 #include "ui/screens/ChaptersScreen.h"
 #include "ui/screens/PageReaderScreen.h"
 #include "ui/screens/Screens.h"
@@ -1909,6 +1910,118 @@ void test_page_browse_scrolls_without_changing_saved_reader_position() {
     TEST_ASSERT_EQUAL(0,session.state.wordIndex);
 }
 
+// ---- fila de toques com render lento (Fim · segure continuava enchendo depois de soltar, lume.21)
+namespace fila {
+    std::vector<ui::TouchContact> amostras;
+    size_t lidas = 0;
+    ui::TouchSampleResult poll(ui::TouchContact& out) {
+        if (lidas >= amostras.size()) return ui::TouchSampleResult::None;
+        out = amostras[lidas++];
+        return ui::TouchSampleResult::Contact;
+    }
+    bool solturaNaFila() {
+        for (size_t i = lidas; i < amostras.size(); ++i)
+            if (!amostras[i].touched) return true;
+        return false;
+    }
+    void preparar(ui::Context& context, std::vector<ui::TouchContact> lista) {
+        amostras = std::move(lista);
+        lidas = 0;
+        context.setTouchSource({.surface = {640, 172}, .poll = &poll, .releasePending = &solturaNaFila});
+    }
+    struct Entregue {
+        uint8_t actions;
+        uint16_t x, y;
+    };
+} // namespace fila
+
+void test_touch_round_coalesces_pure_moves_and_keeps_start_hold_release() {
+    Arduino_GFX gfx;
+    ui::Context context(gfx);
+    // Start, 6 arrastos (o 4o passa de 600 ms: Hold), soltura. Tudo na fila de uma vez (quadro lento).
+    fila::preparar(context, {{true, 100, 50, 1000}, {true, 103, 50, 1030}, {true, 106, 50, 1060}, {true, 109, 50, 1090},
+                             {true, 112, 50, 1600}, {true, 115, 50, 1630}, {true, 118, 50, 1660}, {false, 0, 0, 1690}});
+    std::vector<fila::Entregue> entregues;
+    uint32_t now = 2000;
+    const auto volta = ui::esvaziarToques(context, now, [] { return true; }, [&] {
+        const ui::Touch* t = context.touch();
+        TEST_ASSERT_NOT_NULL(t);
+        entregues.push_back({t->actions, t->x, t->y});
+    });
+    TEST_ASSERT_EQUAL_UINT16(8, volta.amostras);
+    TEST_ASSERT_EQUAL_UINT16(5, volta.movesDescartados);   // 103,106,109 (antes do Hold) + 115,118 (antes da soltura)
+    TEST_ASSERT_EQUAL(3, int(entregues.size()));
+    TEST_ASSERT_TRUE(ui::hasTouch({entregues[0].actions, 0, 0}, ui::TouchStart));
+    TEST_ASSERT_TRUE(ui::hasTouch({entregues[1].actions, 0, 0}, ui::TouchHold));
+    TEST_ASSERT_EQUAL_UINT16(112, entregues[1].x);
+    TEST_ASSERT_TRUE(ui::hasTouch({entregues[2].actions, 0, 0}, ui::TouchRelease));
+    TEST_ASSERT_EQUAL_UINT16(118, entregues[2].x);   // a soltura carrega a posicao final do arrasto descartado
+    TEST_ASSERT_EQUAL_UINT16(18, context.touchExcursionX());
+    TEST_ASSERT_EQUAL_UINT32(1690, context.touchSampledAtMs());
+}
+
+void test_touch_round_replays_only_the_last_move_when_the_queue_dries() {
+    Arduino_GFX gfx;
+    ui::Context context(gfx);
+    fila::preparar(context, {{true, 100, 50, 10}, {true, 110, 50, 40}, {true, 140, 90, 70}, {true, 120, 60, 100}});
+    std::vector<fila::Entregue> entregues;
+    uint32_t now = 200;
+    const auto volta = ui::esvaziarToques(context, now, [] { return true; }, [&] {
+        entregues.push_back({context.touch()->actions, context.touch()->x, context.touch()->y});
+    });
+    TEST_ASSERT_EQUAL_UINT16(4, volta.amostras);
+    TEST_ASSERT_EQUAL_UINT16(2, volta.movesDescartados);
+    TEST_ASSERT_EQUAL(2, int(entregues.size()));
+    TEST_ASSERT_EQUAL_UINT8(ui::TouchStart, entregues[0].actions);
+    TEST_ASSERT_EQUAL_UINT8(ui::TouchMove, entregues[1].actions);
+    TEST_ASSERT_EQUAL_UINT16(120, entregues[1].x);
+    // o afastamento maximo inclui o arrasto do meio que nao foi entregue (dx 40, dy 40)
+    TEST_ASSERT_EQUAL_UINT16(40, context.touchExcursionX());
+    TEST_ASSERT_EQUAL_UINT16(40, context.touchExcursionY());
+}
+
+void test_touch_round_without_coalescing_delivers_every_sample() {
+    Arduino_GFX gfx;
+    ui::Context context(gfx);
+    fila::preparar(context, {{true, 100, 50, 10}, {true, 110, 50, 40}, {true, 140, 50, 70}, {false, 0, 0, 100}});
+    int entregues = 0;
+    uint32_t now = 200;
+    const auto volta = ui::esvaziarToques(context, now, [] { return false; }, [&] { ++entregues; });   // leitor
+    TEST_ASSERT_EQUAL(4, entregues);
+    TEST_ASSERT_EQUAL_UINT16(4, volta.amostras);
+    TEST_ASSERT_EQUAL_UINT16(0, volta.movesDescartados);
+}
+
+void test_pressed_now_is_false_once_the_release_is_queued() {
+    Arduino_GFX gfx;
+    ui::Context context(gfx);
+    constexpr ui::Rect alvo{100, 40, 80, 56};
+    fila::preparar(context, {{true, 140, 60, 10}, {true, 141, 60, 40}, {true, 141, 61, 70}, {false, 0, 0, 100}});
+    TEST_ASSERT_TRUE(context.pollTouch(10));   // Start: o botao captura o dedo
+    context.beginFrame(1);
+    context.firmTap(alvo);
+    context.endFrame();
+    TEST_ASSERT_TRUE(context.pollTouch(40));
+    TEST_ASSERT_TRUE(context.pressed(alvo));
+    TEST_ASSERT_FALSE(context.pressedNow(alvo));   // a soltura ja esta na fila: o Fim nao pode completar
+    fila::amostras.pop_back();                     // sem soltura na fila, pressedNow acompanha pressed
+    TEST_ASSERT_TRUE(context.pressedNow(alvo));
+    TEST_ASSERT_FALSE(context.pressedNow({0, 0, 50, 30}));
+}
+
+void test_touch_ignored_until_release_drains_in_one_call() {
+    Arduino_GFX gfx;
+    ui::Context context(gfx);
+    fila::preparar(context, {{true, 20, 10, 10}});
+    TEST_ASSERT_TRUE(context.pollTouch(10));
+    context.cancelTouchUntilRelease();   // Modo Foco: o toque so acordou a tela
+    fila::amostras = {{true, 20, 10, 40}, {true, 22, 10, 70}, {true, 24, 10, 100}, {false, 0, 0, 130}, {true, 300, 80, 160}};
+    fila::lidas = 0;
+    TEST_ASSERT_TRUE(context.pollTouch(200));   // as amostras ignoradas nao encerram a volta: o toque novo chega ja
+    TEST_ASSERT_TRUE(ui::hasTouch(*context.touch(), ui::TouchStart));
+    TEST_ASSERT_EQUAL_UINT16(300, context.touch()->x);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_firm_tap_accepts_release_after_600ms_inside_target);
@@ -1932,6 +2045,11 @@ int main(int, char**) {
     RUN_TEST(test_touch_reset_cancels_active_gesture);
     RUN_TEST(test_touch_loading_transition_requires_a_fresh_press);
     RUN_TEST(test_queued_touch_uses_sample_time_instead_of_ui_time);
+    RUN_TEST(test_touch_round_coalesces_pure_moves_and_keeps_start_hold_release);
+    RUN_TEST(test_touch_round_replays_only_the_last_move_when_the_queue_dries);
+    RUN_TEST(test_touch_round_without_coalescing_delivers_every_sample);
+    RUN_TEST(test_pressed_now_is_false_once_the_release_is_queued);
+    RUN_TEST(test_touch_ignored_until_release_drains_in_one_call);
     RUN_TEST(test_stepper_taps_and_repeats);
     RUN_TEST(test_disabled_button_ignores_touch);
     RUN_TEST(test_tap_target_handles_touch_without_drawing);

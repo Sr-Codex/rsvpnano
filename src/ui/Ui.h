@@ -288,6 +288,12 @@ namespace ui {
         // Entrega de novo o ultimo evento lido (usado para tratar so a ULTIMA amostra de um arrasto por quadro).
         bool lastTouchIsPureMove() const { return touchEvent_.actions == TouchMove; }
         void replayLastTouch() { touchPending_ = true; }
+        // Instante em que a amostra do evento atual foi lida do controlador (medidor de atraso do toque).
+        uint32_t touchSampledAtMs() const { return touchEventSampledAtMs_; }
+        // Maior afastamento (|dx|, |dy|) do ponto inicial em TODAS as amostras do gesto atual, inclusive arrastos que o App
+        // juntou sem entregar (so o ultimo arrasto de cada volta chega as telas). Para "passou do limiar" sem depender da taxa.
+        uint16_t touchExcursionX() const { return touchExcursionX_; }
+        uint16_t touchExcursionY() const { return touchExcursionY_; }
         const Touch* touch() const {
             return touchPending_ ? &touchEvent_ : nullptr;
         }
@@ -310,6 +316,9 @@ namespace ui {
         bool firmTap(Rect rect, bool enabled = true);
         // true enquanto o dedo, que comecou neste alvo, continua nele (estado "apertado" do botao). Chamar antes de pintar.
         bool pressed(Rect rect) const;
+        // Como pressed(), mas falso se a fonte ja tem uma soltura na fila ainda nao tratada: o dedo esta apoiado AGORA.
+        // Para acoes que completam so por tempo segurado (Fim · segure), imunes ao atraso da fila de toques.
+        bool pressedNow(Rect rect) const;
         bool button(Rect rect, std::string_view text, bool enabled = true, Icon icon = Icon::None,
                     uint8_t textLines = 1, std::string_view detailLeft = {}, std::string_view detailRight = {});
         bool iconButton(Rect rect, Icon icon);
@@ -508,6 +517,9 @@ namespace ui {
         Orientation touchOrientation_ = Orientation::Portrait;
         uint32_t touchStartedAtMs_ = 0;
         uint32_t touchLastPollMs_ = 0;
+        uint32_t touchEventSampledAtMs_ = 0;
+        uint16_t touchExcursionX_ = 0;
+        uint16_t touchExcursionY_ = 0;
         uint16_t touchStartX_ = 0;
         uint16_t touchStartY_ = 0;
         uint16_t touchLastX_ = 0;

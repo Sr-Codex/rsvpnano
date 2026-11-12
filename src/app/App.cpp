@@ -33,6 +33,7 @@
 #include "update/SwitchSettings.h"
 #include <WiFi.h>
 #include "ui/screens/ModernScreens.h"
+#include "ui/VoltaToque.h"
 #include "ui/screens/HomeScreen.h"
 #include "ui/screens/OnboardingCopy.h"
 #include "dictionary/DictionaryInstaller.h"
@@ -145,7 +146,8 @@ void App::begin() {
     ota::toqueOk(inputOk);
     if (!inputOk)
         ESP_LOGE("input", "startup failed");
-    immediateUi_.setTouchSource({.surface = Board::Input::touchSurface(), .poll = &Input::pollTouch});
+    immediateUi_.setTouchSource({.surface = Board::Input::touchSurface(), .poll = &Input::pollTouch,
+                                 .releasePending = &Input::touchReleasePending});
 
     storage_.begin();
     ota::sdMontado(storage_.mounted());
@@ -294,31 +296,26 @@ void App::update(uint32_t nowMs) {
         handleInput(actions, nowMs);
         nowMs = millis();
     }
-    bool moveAdiado = false;   // arrasto da regua do Inicio do Tempo: so a ultima amostra de cada quadro e tratada/desenhada
-    while (immediateUi_.pollTouch(nowMs)) {
-        lastActivityMs_ = nowMs;
-        const ui::Touch* toque = immediateUi_.touch();
-        if (toque != nullptr && screen_ == screens::Screen::TempoHoje && immediateUi_.lastTouchIsPureMove()) {
-            moveAdiado = true;   // se vier outra amostra, esta ja esta velha; Soltar/Cancelar carregam a posicao final
-            continue;
-        }
-        moveAdiado = false;
-        if (toque != nullptr && ui::hasTouch(*toque, ui::TouchStart)) tempoScreen_.atividade(nowMs, true, int(toque->x), int(toque->y));   // inclusive o toque que so acorda o Modo Foco
-        if (toque != nullptr && ui::hasTouch(*toque, ui::TouchStart) && modoFoco_.toque(nowMs)) {
-            // Modo Foco: com a tela escurecida o 1o toque so acorda. O gesto inteiro e ignorado ate soltar, entao nunca
-            // aciona o botao sob o dedo (nem "Fim · segure").
-            immediateUi_.cancelTouchUntilRelease();
+    // Fila de toques (ui/VoltaToque.h): Start/Release/Cancel/Hold tratados todos, na ordem e na hora; de cada sequencia de
+    // arrastos puros so o ULTIMO da volta e tratado/desenhado. Assim o render lento (batalha do Tempo) nao empilha amostras e a
+    // soltura chega no mesmo quadro. O leitor e o teste do toque recebem toda amostra (tratam sem desenhar / tracam o dedo).
+    ui::esvaziarToques(
+        immediateUi_, nowMs,
+        [this] { return screen_ != screens::Screen::Reader && screen_ != screens::Screen::TouchCheck; },
+        [this, &nowMs] {
+            lastActivityMs_ = nowMs;
+            const ui::Touch* toque = immediateUi_.touch();
+            if (toque != nullptr && ui::hasTouch(*toque, ui::TouchStart)) tempoScreen_.atividade(nowMs, true, int(toque->x), int(toque->y));   // inclusive o toque que so acorda o Modo Foco
+            if (toque != nullptr && ui::hasTouch(*toque, ui::TouchStart) && modoFoco_.toque(nowMs)) {
+                // Modo Foco: com a tela escurecida o 1o toque so acorda. O gesto inteiro e ignorado ate soltar, entao nunca
+                // aciona o botao sob o dedo (nem "Fim · segure").
+                immediateUi_.cancelTouchUntilRelease();
+                nowMs = millis();
+                return;
+            }
+            if (!handleAvisoTouch(nowMs)) handleTouch(nowMs);
             nowMs = millis();
-            continue;
-        }
-        if (!handleAvisoTouch(nowMs)) handleTouch(nowMs);
-        nowMs = millis();
-    }
-    if (moveAdiado) {   // ultima amostra de arrasto do quadro (a fila foi esvaziada)
-        immediateUi_.replayLastTouch();
-        if (!handleAvisoTouch(nowMs)) handleTouch(nowMs);
-        nowMs = millis();
-    }
+        });
     atualizarBrilho(nowMs);   // antes de qualquer retorno antecipado do laco (status, job, standby, companion)
 
     updateBackgroundJob();

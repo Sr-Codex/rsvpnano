@@ -344,7 +344,10 @@ namespace screens {
                 arrastando_ = t->x >= area.x && t->x < area.x + area.w && t->y >= area.y && t->y < area.y + area.h;
                 arrastoY_ = int16_t(t->y);
                 moveu_ = false;
-            } else if (arrastando_ && ui::hasTouch(*t, ui::TouchMove)) {
+            } else if (arrastando_ && (ui::hasTouch(*t, ui::TouchMove)
+                                       || (ui::hasTouch(*t, ui::TouchRelease) && !ui::hasTouch(*t, ui::TouchCancel)))) {
+                // A soltura traz a posicao final: o App junta os arrastos de cada volta e descarta o adiado quando a soltura
+                // chega na mesma volta, entao o ultimo trecho do arrasto entra aqui (sem isso a rolagem ficava curta).
                 const int dy = int(t->y) - arrastoY_;
                 if (moveu_ || std::abs(dy) >= 8) {
                     moveu_ = true;

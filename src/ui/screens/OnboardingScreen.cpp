@@ -72,8 +72,8 @@ void OnboardingScreen::touchPractice(ui::Context& ui,const settings::ReadingSett
         touchX_=touch->x;touchY_=touch->y;pressedAt_=nowMs;moved_=holding_=false;pressedPlaying_=sample_.playing;return;
     }
     if(!touching_)return;
-    const int dx=int(touch->x)-touchX_,dy=int(touch->y)-touchY_;
-    moved_|=std::abs(dx)>18||std::abs(dy)>18;
+    // Afastamento maximo do gesto inteiro (o App junta arrastos: amostras do meio podem nao chegar aqui).
+    moved_|=ui.touchExcursionX()>18||ui.touchExcursionY()>18;
     if(moved_&&holding_){pause();holding_=false;}
     if(ui::hasTouch(*touch,ui::TouchRelease)){
         touching_=false;

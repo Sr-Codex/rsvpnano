@@ -48,6 +48,9 @@ namespace Input {
         uint8_t gTouchReadFailures = 0;
         uint32_t gTouchBackoffUntilMs = 0;
         uint32_t gTouchIgnoreUntilMs = 0;
+        // Solturas (contato sem dedo ou Reset) ainda na fila de toques. Sobe ANTES de enviar e desce ao descartar/ler, entao
+        // nunca fica abaixo do real: o App pode perguntar "o dedo ja saiu?" antes de tratar o backlog (Fim · segure).
+        std::atomic_int gTouchReleasesQueued = 0;
 
         struct TouchSample {
             ui::TouchContact contact;
@@ -179,6 +182,29 @@ namespace Input {
             xQueueSend(queue, &value, 0);
         }
 
+        bool isRelease(const TouchSample& sample) {
+            return sample.result == ui::TouchSampleResult::Reset
+                || (sample.result == ui::TouchSampleResult::Contact && !sample.contact.touched);
+        }
+
+        // Como enqueueLatest, mantendo a contagem de solturas na fila.
+        void enqueueTouch(const TouchSample& sample) {
+            if (isRelease(sample))
+                gTouchReleasesQueued.fetch_add(1);
+            if (xQueueSend(gTouchQueue, &sample, 0) == pdTRUE)
+                return;
+            TouchSample discarded;
+            if (xQueueReceive(gTouchQueue, &discarded, 0) == pdTRUE && isRelease(discarded))
+                gTouchReleasesQueued.fetch_sub(1);
+            if (xQueueSend(gTouchQueue, &sample, 0) != pdTRUE && isRelease(sample))
+                gTouchReleasesQueued.fetch_sub(1);
+        }
+
+        void resetTouchQueue() {
+            xQueueReset(gTouchQueue);
+            gTouchReleasesQueued.store(0);
+        }
+
         bool deadlineReached(uint32_t nowMs, uint32_t deadlineMs) {
             return static_cast<int32_t>(nowMs - deadlineMs) >= 0;
         }
@@ -205,10 +231,10 @@ namespace Input {
                     gTouchReleaseSamples = 0;
                     gTouchReadFailures = 0;
                     gTouchBackoffUntilMs = resumedAtMs;
-                    xQueueReset(gTouchQueue);
+                    resetTouchQueue();
                     TouchSample reset;
                     reset.result = ui::TouchSampleResult::Reset;
-                    enqueueLatest(gTouchQueue, reset);
+                    enqueueTouch(reset);
                 }
 
                 const uint32_t nowMs = millis();
@@ -268,7 +294,7 @@ namespace Input {
                                 nextTouchMs = nowMs + readyIntervalMs;
                             if (emitContact && deadlineReached(nowMs, gTouchIgnoreUntilMs)) {
                                 sample.result = ui::TouchSampleResult::Contact;
-                                enqueueLatest(gTouchQueue, sample);
+                                enqueueTouch(sample);
                             }
                         } else if (++gTouchReadFailures >= gTouchTiming.maxConsecutiveReadFailures) {
                             if (!gTouchReadFailureLogged)
@@ -280,7 +306,7 @@ namespace Input {
                             gTouchReleaseSamples = 0;
                             gTouchBackoffUntilMs = nowMs + gTouchTiming.recoveryRetryMs;
                             sample.result = ui::TouchSampleResult::Reset;
-                            enqueueLatest(gTouchQueue, sample);
+                            enqueueTouch(sample);
                         } else if (!gTouchActive) {
                             nextTouchMs = nowMs + gTouchTiming.failureBackoffMs;
                         }
@@ -312,6 +338,7 @@ namespace Input {
         gTouchTiming = Board::Input::touchTiming();
         const PressActions actions = Board::Input::currentActions();
         resetControls(actions.shortPress, actions.longPress, millis());
+        gTouchReleasesQueued.store(0);
         gEventQueue = xQueueCreate(kEventQueueLength, sizeof(ActionMask));
         gTouchQueue = xQueueCreate(kTouchQueueLength, sizeof(TouchSample));
         if (gEventQueue == nullptr || gTouchQueue == nullptr) {
@@ -344,6 +371,7 @@ namespace Input {
             vQueueDelete(gTouchQueue);
             gTouchQueue = nullptr;
         }
+        gTouchReleasesQueued.store(0);
         gControls.initialized = false;
     }
 
@@ -364,7 +392,7 @@ namespace Input {
         if (gEventQueue != nullptr)
             xQueueReset(gEventQueue);
         if (gTouchQueue != nullptr)
-            xQueueReset(gTouchQueue);
+            resetTouchQueue();
         Board::Input::cancel();
     }
 
@@ -386,8 +414,14 @@ namespace Input {
         TouchSample sample;
         if (gTouchQueue == nullptr || xQueueReceive(gTouchQueue, &sample, 0) != pdTRUE)
             return ui::TouchSampleResult::None;
+        if (isRelease(sample))
+            gTouchReleasesQueued.fetch_sub(1);
         contact = sample.contact;
         return sample.result;
+    }
+
+    bool touchReleasePending() {
+        return gTouchReleasesQueued.load() > 0;
     }
 
 } // namespace Input

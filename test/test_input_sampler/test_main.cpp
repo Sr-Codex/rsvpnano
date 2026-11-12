@@ -125,16 +125,27 @@ void test_active_contact_keeps_sampling_and_confirms_release() {
     const std::vector<uint32_t> expected = {3, 23, 43, 63};
     TEST_ASSERT_TRUE(reads == expected);
     ui::TouchContact contact;
+    TEST_ASSERT_TRUE(Input::touchReleasePending());   // a soltura ja esta na fila atras de duas amostras com dedo
     TEST_ASSERT_EQUAL(ui::TouchSampleResult::Contact, Input::pollTouch(contact));
     TEST_ASSERT_TRUE(contact.touched);
     TEST_ASSERT_EQUAL_UINT32(3, contact.sampledAtMs);
     TEST_ASSERT_EQUAL(ui::TouchSampleResult::Contact, Input::pollTouch(contact));
     TEST_ASSERT_TRUE(contact.touched);
     TEST_ASSERT_EQUAL_UINT32(23, contact.sampledAtMs);
+    TEST_ASSERT_TRUE(Input::touchReleasePending());
     TEST_ASSERT_EQUAL(ui::TouchSampleResult::Contact, Input::pollTouch(contact));
     TEST_ASSERT_FALSE(contact.touched);
     TEST_ASSERT_EQUAL_UINT32(63, contact.sampledAtMs);
+    TEST_ASSERT_FALSE(Input::touchReleasePending());   // lida: nao ha mais soltura pendente
     TEST_ASSERT_EQUAL(ui::TouchSampleResult::None, Input::pollTouch(contact));
+}
+
+void test_release_pending_is_cleared_by_cancel() {
+    run(Scenario::hold);
+    TEST_ASSERT_TRUE(Input::touchReleasePending());
+    Input::gSamplerTask = nullptr;   // a tarefa falsa ja saiu; cancel() nao espera confirmacao
+    Input::cancel();
+    TEST_ASSERT_FALSE(Input::touchReleasePending());
 }
 
 void test_polling_boards_keep_existing_periodic_reads() {
@@ -149,6 +160,7 @@ int main() {
     RUN_TEST(test_interrupt_arriving_during_read_is_retained);
     RUN_TEST(test_failed_read_retries_without_new_edge_and_respects_backoff);
     RUN_TEST(test_active_contact_keeps_sampling_and_confirms_release);
+    RUN_TEST(test_release_pending_is_cleared_by_cancel);
     RUN_TEST(test_polling_boards_keep_existing_periodic_reads);
     return UNITY_END();
 }
