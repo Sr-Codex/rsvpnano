@@ -16,6 +16,7 @@
 #include <utility>
 
 #include "board/BoardStorage.h"
+#include "input/MedidorToque.h"
 #include "logging/Logger.h"
 #include "text/AsciiText.h"
 #include "update/OtaUpdater.h"
@@ -299,6 +300,7 @@ namespace {
 
 companion::api::DeviceInfo CompanionApi::deviceInfo() const {
     constexpr uint32_t kInternal = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    auto toque = atrasotoque::resumoGlobal();
     return companion::api::DeviceInfo{
         .ssid = accessPointSsid_.empty() ? "RSVP-Nano-" + deviceSuffix() : accessPointSsid_,
         .firmwareVersion = std::string{OtaUpdater::currentVersion()},
@@ -310,6 +312,15 @@ companion::api::DeviceInfo CompanionApi::deviceInfo() const {
         .uptimeSeconds = static_cast<uint32_t>(esp_timer_get_time() / 1000000LL),
         .lastResetReason = resetReasonName(esp_reset_reason()),
         .wakeCause = wakeCauseName(esp_sleep_get_wakeup_cause()),
+        .touch = {
+            .releases = toque.releases,
+            .releaseLagMaxMs = toque.releaseLagMaxMs,
+            .releaseLagAvgMs = toque.releaseLagAvgMs,
+            .releaseLagLastMs = std::move(toque.releaseLagLastMs),
+            .releaseBacklogLast = std::move(toque.releaseBacklogLast),
+            .backlogMax = toque.backlogMax,
+            .moveSkipped = toque.moveSkipped,
+        },
     };
 }
 

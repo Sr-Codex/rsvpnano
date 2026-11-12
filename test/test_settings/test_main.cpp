@@ -338,7 +338,9 @@ void test_companion_device_is_identity_and_memory_meter() {
     TEST_ASSERT_EQUAL_STRING(
         R"({"ssid":"RSVP-Nano-123456","firmwareVersion":"preview-v0.0.9+abc","otaAsset":"reader-ota.bin",)"
         R"("freeInternalHeap":0,"largestInternalBlock":0,"minFreeInternalHeap":0,"freePsram":0,"uptimeSeconds":0,)"
-        R"("lastResetReason":"","wakeCause":""})",
+        R"("lastResetReason":"","wakeCause":"",)"
+        R"("touch":{"releases":0,"releaseLagMaxMs":0,"releaseLagAvgMs":0,"releaseLagLastMs":[],"releaseBacklogLast":[],)"
+        R"("backlogMax":0,"moveSkipped":0}})",
         json.c_str());
 }
 

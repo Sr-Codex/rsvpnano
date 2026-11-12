@@ -23,7 +23,7 @@ over USB in a browser supporting Web Serial.
 
 | Method | Path | Success response |
 | --- | --- | --- |
-| `GET` | `/api/v2/device` | `{ "ssid": "RSVP-Nano-XXXXXX", "firmwareVersion": "…", "otaAsset": "…" }` |
+| `GET` | `/api/v2/device` | `{ "ssid": "RSVP-Nano-XXXXXX", "firmwareVersion": "…", "otaAsset": "…", …, "touch": { … } }` (ver abaixo) |
 | `GET` | `/api/v2/library` | Bare array of library entries |
 | `POST` | `/api/v2/library?category=…` | Created entry (`201` and `Location`) |
 | `DELETE` | `/api/v2/library/{id}` | `204` |
@@ -54,6 +54,30 @@ over USB in a browser supporting Web Serial.
 | `GET` | `/api/v2/tempo/ticktick` | `{ "configurado": true, "tag": "…", "lista": "", "coluna": "", "ultimaSync": "AAAA-MM-DDTHH:MM:SSZ", "erro": "" }` |
 | `PUT` | `/api/v2/tempo/ticktick` | `204` |
 | `PUT` | `/api/v2/tempo/projetos` | `204` |
+
+### Diagnóstico em `GET /api/v2/device`
+
+Além da identidade (`ssid`, `firmwareVersion`, `otaAsset`), o handshake traz diagnóstico só de leitura, em RAM (zera no
+reinício): memória interna (`freeInternalHeap`, `largestInternalBlock`, `minFreeInternalHeap`), `freePsram`,
+`uptimeSeconds`, `lastResetReason`, `wakeCause` e o objeto **`touch`**, o medidor de atraso do toque
+(`src/input/MedidorToque.h`). Para cada soltura do dedo tratada pelo laço do App, **atraso** = `millis()` no tratamento −
+instante em que a amostra foi lida do controlador; a **volta** é uma passada do laço que esvazia a fila de toques.
+
+```json
+"touch": {
+  "releases": 37,                  // solturas medidas desde o boot (Reset/cancelamento não conta)
+  "releaseLagMaxMs": 212,          // maior atraso
+  "releaseLagAvgMs": 48,           // média móvel exponencial (peso 1/8 para a medição nova)
+  "releaseLagLastMs": [31, 64],    // últimas 16, da mais antiga para a mais nova
+  "releaseBacklogLast": [1, 3],    // amostras tiradas da fila na volta de cada uma dessas solturas
+  "backlogMax": 9,                 // maior número de amostras numa volta (tratadas + arrastos juntados)
+  "moveSkipped": 1204              // arrastos juntados sem entregar à tela (só o último de cada volta é desenhado)
+}
+```
+
+Leitura rápida: atraso perto de 1–2 quadros (dezenas de ms) é o esperado; centenas de ms com `releaseBacklogLast` alto
+indicam fila acumulando (render mais lento que a leitura do toque, 30 ms na 3.49). `tools/nano_usb.py device` (repo
+`lume-nano`) mostra o JSON inteiro.
 
 ### App Tempo: TickTick e projetos
 

@@ -34,6 +34,7 @@
 #include <WiFi.h>
 #include "ui/screens/ModernScreens.h"
 #include "ui/VoltaToque.h"
+#include "input/MedidorToque.h"
 #include "ui/screens/HomeScreen.h"
 #include "ui/screens/OnboardingCopy.h"
 #include "dictionary/DictionaryInstaller.h"
@@ -299,12 +300,17 @@ void App::update(uint32_t nowMs) {
     // Fila de toques (ui/VoltaToque.h): Start/Release/Cancel/Hold tratados todos, na ordem e na hora; de cada sequencia de
     // arrastos puros so o ULTIMO da volta e tratado/desenhado. Assim o render lento (batalha do Tempo) nao empilha amostras e a
     // soltura chega no mesmo quadro. O leitor e o teste do toque recebem toda amostra (tratam sem desenhar / tracam o dedo).
-    ui::esvaziarToques(
+    int32_t atrasoSoltura = -1;
+    const auto volta = ui::esvaziarToques(
         immediateUi_, nowMs,
         [this] { return screen_ != screens::Screen::Reader && screen_ != screens::Screen::TouchCheck; },
-        [this, &nowMs] {
+        [this, &nowMs, &atrasoSoltura] {
             lastActivityMs_ = nowMs;
             const ui::Touch* toque = immediateUi_.touch();
+            if (toque != nullptr && ui::hasTouch(*toque, ui::TouchRelease) && !ui::hasTouch(*toque, ui::TouchCancel)) {
+                atrasoSoltura = int32_t(millis() - immediateUi_.touchSampledAtMs());
+                atrasotoque::registrarSoltura(uint32_t(atrasoSoltura));   // medidor de atraso (GET /api/v2/device)
+            }
             if (toque != nullptr && ui::hasTouch(*toque, ui::TouchStart)) tempoScreen_.atividade(nowMs, true, int(toque->x), int(toque->y));   // inclusive o toque que so acorda o Modo Foco
             if (toque != nullptr && ui::hasTouch(*toque, ui::TouchStart) && modoFoco_.toque(nowMs)) {
                 // Modo Foco: com a tela escurecida o 1o toque so acorda. O gesto inteiro e ignorado ate soltar, entao nunca
@@ -316,6 +322,10 @@ void App::update(uint32_t nowMs) {
             if (!handleAvisoTouch(nowMs)) handleTouch(nowMs);
             nowMs = millis();
         });
+    if (volta.amostras != 0) atrasotoque::registrarVolta(volta.amostras, volta.movesDescartados);
+    if (atrasoSoltura >= 0)
+        ESP_LOGD("toque", "soltura tratada %ld ms depois da leitura; volta com %u amostras (%u arrastos juntados)",
+                 long(atrasoSoltura), unsigned(volta.amostras), unsigned(volta.movesDescartados));
     atualizarBrilho(nowMs);   // antes de qualquer retorno antecipado do laco (status, job, standby, companion)
 
     updateBackgroundJob();

@@ -20,6 +20,7 @@
 #include "ui/Localization.h"
 #include "ui/Ui.h"
 #include "ui/VoltaToque.h"
+#include "input/MedidorToque.h"
 #include "ui/screens/ChaptersScreen.h"
 #include "ui/screens/PageReaderScreen.h"
 #include "ui/screens/Screens.h"
@@ -2022,6 +2023,37 @@ void test_touch_ignored_until_release_drains_in_one_call() {
     TEST_ASSERT_EQUAL_UINT16(300, context.touch()->x);
 }
 
+void test_touch_lag_meter_keeps_max_average_last_and_backlog() {
+    atrasotoque::MedidorAtraso m;
+    TEST_ASSERT_EQUAL_UINT32(0, m.resumo().releaseLagAvgMs);
+    m.soltar(40);
+    m.fimDaVolta(3, 1);
+    TEST_ASSERT_EQUAL_UINT32(40, m.resumo().releaseLagAvgMs);
+    m.soltar(120);
+    m.fimDaVolta(9, 6);
+    m.fimDaVolta(2, 0);   // volta sem soltura
+    auto r = m.resumo();
+    TEST_ASSERT_EQUAL_UINT32(2, r.releases);
+    TEST_ASSERT_EQUAL_UINT32(120, r.releaseLagMaxMs);
+    TEST_ASSERT_EQUAL_UINT32(50, r.releaseLagAvgMs);   // 40 + (120 - 40) / 8
+    TEST_ASSERT_EQUAL(2, int(r.releaseLagLastMs.size()));
+    TEST_ASSERT_EQUAL_UINT32(40, r.releaseLagLastMs[0]);
+    TEST_ASSERT_EQUAL_UINT32(120, r.releaseLagLastMs[1]);
+    TEST_ASSERT_EQUAL_UINT32(3, r.releaseBacklogLast[0]);
+    TEST_ASSERT_EQUAL_UINT32(9, r.releaseBacklogLast[1]);
+    TEST_ASSERT_EQUAL_UINT32(9, r.backlogMax);
+    TEST_ASSERT_EQUAL_UINT32(7, r.moveSkipped);
+    for (uint32_t i = 0; i < 20; ++i) {
+        m.soltar(i);
+        m.fimDaVolta(1, 0);
+    }
+    r = m.resumo();
+    TEST_ASSERT_EQUAL(int(atrasotoque::MedidorAtraso::kUltimas), int(r.releaseLagLastMs.size()));
+    TEST_ASSERT_EQUAL_UINT32(4, r.releaseLagLastMs.front());   // as 16 mais novas: 4..19
+    TEST_ASSERT_EQUAL_UINT32(19, r.releaseLagLastMs.back());
+    TEST_ASSERT_EQUAL_UINT32(120, r.releaseLagMaxMs);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_firm_tap_accepts_release_after_600ms_inside_target);
@@ -2050,6 +2082,7 @@ int main(int, char**) {
     RUN_TEST(test_touch_round_without_coalescing_delivers_every_sample);
     RUN_TEST(test_pressed_now_is_false_once_the_release_is_queued);
     RUN_TEST(test_touch_ignored_until_release_drains_in_one_call);
+    RUN_TEST(test_touch_lag_meter_keeps_max_average_last_and_backlog);
     RUN_TEST(test_stepper_taps_and_repeats);
     RUN_TEST(test_disabled_button_ignores_touch);
     RUN_TEST(test_tap_target_handles_touch_without_drawing);

@@ -27,6 +27,17 @@ namespace companion::api {
         std::optional<std::string> field;
     };
 
+    // Medidor de atraso do toque (input/MedidorToque.h): soltura tratada pelo App - leitura no controlador, em ms.
+    struct TouchLagInfo {
+        uint32_t releases = 0;                     // solturas medidas desde o boot
+        uint32_t releaseLagMaxMs = 0;              // maior atraso
+        uint32_t releaseLagAvgMs = 0;              // media movel exponencial (peso 1/8)
+        std::vector<uint32_t> releaseLagLastMs;    // ultimas 16 (da mais antiga para a mais nova)
+        std::vector<uint32_t> releaseBacklogLast;  // amostras tiradas da fila na volta de cada uma dessas solturas
+        uint32_t backlogMax = 0;                   // maior numero de amostras numa volta do laco
+        uint32_t moveSkipped = 0;                  // arrastos juntados sem entregar a tela (total)
+    };
+
     struct DeviceInfo {
         std::string ssid;
         std::string firmwareVersion;
@@ -39,6 +50,7 @@ namespace companion::api {
         uint32_t uptimeSeconds = 0;
         std::string lastResetReason;         // esp_reset_reason(): "power_on", "software", "panic", "task_wdt", "deep_sleep"...
         std::string wakeCause;               // esp_sleep_get_wakeup_cause(): "undefined" (boot normal), "timer", "ext0"...
+        TouchLagInfo touch;                  // atraso do toque (diagnostico; zera no boot)
     };
 
     struct BookLanguage {
