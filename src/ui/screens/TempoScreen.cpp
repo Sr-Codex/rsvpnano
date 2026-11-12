@@ -1628,8 +1628,8 @@ namespace screens {
                 aviso.suave = true;
                 aviso.borda = 2;
                 aviso.corBorda = c565(kAmbar);
-                aviso.linha(24, 36, 420, naoContaTxt_, 28, cTexto);
-                aviso.linha(24, 74, 420, "menos de 1 min: nada foi registrado", 17, cMudo);
+                aviso.linha(areaRegua.x + 24, areaRegua.y + 36, 420, naoContaTxt_, 28, cTexto);   // Bloco: coordenadas absolutas da tela
+                aviso.linha(areaRegua.x + 24, areaRegua.y + 74, 420, "menos de 1 min: nada foi registrado", 17, cMudo);
                 aviso.desenhar();
             } else {
                 VistaRegua vista;
@@ -2212,7 +2212,7 @@ namespace screens {
         const auto est = tempo::liquidarBatalha(estado_, tempo::livre::entrada(cron_, categoriaBatalha_));
         const std::string nome = nomeBatalha_.empty() ? std::string{"Sem projeto"} : nomeBatalha_;
 
-        const std::string relogio = distr ? fmtMS(int64_t(cron_.distracaoAtualMs / 1000)) : fmtRelogio(int64_t(focadoMs / 1000));
+        const std::string relogio = tempo::livre::textoRelogio(distr ? cron_.distracaoAtualMs : focadoMs);   // m:ss; h:mm:ss a partir de 1 h
         const auto& f66 = ui::sans::font(66);
         const int wRelogio = ui::sans::width(relogio, f66);
         const int xCol = std::min(10 + wRelogio + 18, 300);
@@ -2261,7 +2261,7 @@ namespace screens {
             rodape = agora.valida ? "pausado por mais de 30 min, conclui sozinho às " + fmtHoraRelogio(agora.minutoDoDia + int((restSeg + 59) / 60))
                                   : std::string{"pausado por mais de 30 min, conclui sozinho"};
         } else if (distr) {
-            rodape = "o relógio parou em " + fmtRelogio(int64_t(focadoMs / 1000)) + " · volta de onde parou";
+            rodape = "o relógio parou em " + tempo::livre::textoRelogio(focadoMs) + " · volta de onde parou";
         } else if (est.tetoCrAplicado) {
             rodape = "passou de 6 h de foco hoje: créditos pela metade";   // teto diario (decisao 23)
             cRodape = cAmbar;

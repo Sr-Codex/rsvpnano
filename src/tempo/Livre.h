@@ -42,6 +42,7 @@ namespace tempo::livre {
     };
     std::vector<ParteTempo> partesDoTempo(uint64_t focadoMs);
     std::string textoTempo(uint64_t focadoMs);        // "1h12" / "42 min"
+    std::string textoRelogio(uint64_t ms);            // "m:ss" ate 1 h, "h:mm:ss" depois ("8:18", "12:34", "1:12:30")
     std::string textoNaoConta(uint64_t focadoMs);     // "0:40 não conta"
     // Rotulo do canto, depois do simbolo ∞ (desenhado por curva, sem glifo de fonte): "LIVRE · DESDE 14:20"; < 0 = sem hora.
     std::string cabecalhoRodando(int minutoDesdeDoDia);

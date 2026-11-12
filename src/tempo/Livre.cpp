@@ -47,6 +47,14 @@ namespace tempo::livre {
         return t;
     }
 
+    std::string textoRelogio(uint64_t ms) {
+        const uint64_t s = ms / 1000ULL;
+        char t[24];
+        if (s < 3600) std::snprintf(t, sizeof t, "%d:%02d", int(s / 60), int(s % 60));
+        else std::snprintf(t, sizeof t, "%d:%02d:%02d", int(s / 3600), int(s / 60 % 60), int(s % 60));
+        return t;
+    }
+
     std::string textoNaoConta(uint64_t focadoMs) {
         const uint64_t s = focadoMs / 1000ULL;
         char t[40];

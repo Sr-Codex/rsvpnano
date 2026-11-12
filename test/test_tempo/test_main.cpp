@@ -2203,6 +2203,13 @@ void test_livre_blocos_de_5_min_por_hora_e_formatos() {
     // relogio: "m:ss" ate 1 h, "h:mm:ss" depois (a mesma funcao da Batalha)
     TEST_ASSERT_EQUAL_STRING("12:34", formatarRelogio(12 * 60 + 34).c_str());
     TEST_ASSERT_EQUAL_STRING("1:12:30", formatarRelogio(3600 + 12 * 60 + 30).c_str());
+    // relogio da sessao livre: "m:ss" (sem zero a esquerda) ate 1 h; "h:mm:ss" depois
+    TEST_ASSERT_EQUAL_STRING("0:42", livre::textoRelogio(42000).c_str());
+    TEST_ASSERT_EQUAL_STRING("8:18", livre::textoRelogio(8 * 60000ULL + 18000).c_str());
+    TEST_ASSERT_EQUAL_STRING("12:34", livre::textoRelogio(12 * 60000ULL + 34000).c_str());
+    TEST_ASSERT_EQUAL_STRING("59:59", livre::textoRelogio(59 * 60000ULL + 59999).c_str());
+    TEST_ASSERT_EQUAL_STRING("1:00:00", livre::textoRelogio(3600000ULL).c_str());
+    TEST_ASSERT_EQUAL_STRING("1:12:30", livre::textoRelogio(3600000ULL + 12 * 60000ULL + 30000).c_str());
 }
 
 void test_livre_desfazer_volta_a_contar_de_onde_parou() {
