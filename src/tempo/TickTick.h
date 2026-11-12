@@ -1,11 +1,11 @@
 #pragma once
 
 // Sincronizacao TickTick -> /tempo/projetos.json em C++ puro (sem rede/Arduino): testavel no host.
-// O firmware (src/network/TickTickSync.cpp) so faz o HTTPS; aqui ficam o corpo do filtro, a leitura das
-// respostas da API oficial (https://developer.ticktick.com/docs/openapi.md) e a montagem do projetos.json
-// no mesmo esquema que tools/ticktick_sync.py (pull) gera.
+// O firmware (src/network/TickTickSync.cpp) so faz o HTTPS; aqui ficam a leitura das respostas da API oficial
+// (https://developer.ticktick.com/docs/openapi.md) e a montagem do projetos.json (projetos = coluna AGORA da lista PROJETOS).
 
 #include <cstdint>
+#include <expected>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -18,23 +18,40 @@ namespace tempo::ticktick {
     inline constexpr size_t kMaxTarefasApi = 200;                 // limite da API em task/filter
     inline constexpr size_t kMaxBytesResposta = 1024 * 1024;      // teto de memoria por resposta
     inline constexpr size_t kMaxTokenBytes = 512;
-    inline constexpr size_t kMaxTagBytes = 64;
-    inline constexpr const char* kTagPadrao = "Projeto\xF0\x9F\x93\x9A";  // "Projeto" + livros
+    inline constexpr size_t kMaxTagBytes = 64;                     // campo antigo "tag": aceito e ignorado (compatibilidade)
+    inline constexpr size_t kMaxNomeBytes = 64;                    // nome configuravel da lista / coluna
+    // Projetos = tarefas abertas da coluna "AGORA" da lista "PROJETOS" (o TickTick decide o que fazer; a placa so marca o
+    // tempo). Os nomes batem por "contem", sem diferenciar maiusculas/acentos e ignorando emoji ("🎯 PROJETOS", "🚀 AGORA").
+    inline constexpr const char* kListaPadrao = "PROJETOS";
+    inline constexpr const char* kColunaPadrao = "AGORA";
 
-    // Tag exata e, se diferente, a variante em minusculas ASCII (a API costuma devolver tags em minusculas).
-    std::vector<std::string> variantesTag(std::string_view tag);
+    // `nome` contem `alvo` (ambos normalizados por tempo::normalizarNome: minusculas, sem acento, emoji viram espaco).
+    // `alvo` que normaliza para vazio nunca bate.
+    bool nomeContem(std::string_view nome, std::string_view alvo);
 
-    // Corpo de POST /open/v1/task/filter: {"tag":["..."],"status":[0]}.
-    std::string corpoFiltro(std::string_view tag);
+    struct ListaAchada {
+        std::string id;
+        std::string nome;   // como veio da API (bruto)
+    };
+    // GET /open/v1/project -> a lista cujo nome contem `nomeLista` (prefere o nome igual; senao a 1a que contem).
+    // Erros legiveis (aparecem na tela): "lista PROJETOS nao encontrada" / "Resposta do TickTick invalida".
+    std::expected<ListaAchada, std::string> acharLista(std::string_view listasJson, std::string_view nomeLista);
 
-    // Quantas tarefas a resposta de task/filter traz (-1 = JSON invalido). Usado para decidir a 2a tentativa.
-    int contarTarefas(std::string_view tarefasJson);
+    // O id vai no caminho da URL: so [A-Za-z0-9_-].
+    bool idDeProjetoValido(std::string_view id);
+    // "/project/{id}/data" ("" se o id for invalido).
+    std::string caminhoDadosLista(std::string_view projectId);
 
-    // Monta o projetos.json (mesmo esquema de tempo::lerProjetos). Ordena por prioridade (maior primeiro) e
-    // vencimento (mais cedo primeiro; sem vencimento por ultimo), limita a tempo::kMaxProjetos e confere o
-    // tamanho maximo. nullopt = JSON de tarefas/listas invalido ou resultado maior que o permitido.
-    std::optional<std::string> montarProjetos(std::string_view tarefasJson, std::string_view listasJson,
-                                              std::string_view tag, std::string_view geradoEm);
+    // projetos.json valido com 0 projetos (lista/coluna nao encontrada: o que sobrou da tag antiga nao pode continuar valendo).
+    std::string projetosVazios(std::string_view geradoEm);
+
+    // Resposta de GET /project/{id}/data ({"tasks":[...],"columns":[...]}; content/desc/items sao ignorados sem alocar) ->
+    // projetos.json (mesmo esquema de tempo::lerProjetos): tarefas ABERTAS (status 0, sem parentId) da coluna cujo nome contem
+    // `nomeColuna`, ordenadas por prioridade (maior primeiro) e vencimento (mais cedo primeiro; sem vencimento por ultimo),
+    // limitadas a tempo::kMaxProjetos. Erros legiveis: "coluna AGORA nao encontrada" / "Resposta do TickTick invalida" /
+    // "projetos.json grande demais".
+    std::expected<std::string, std::string> montarProjetosDaColuna(std::string_view dadosJson, std::string_view nomeLista,
+                                                                  std::string_view nomeColuna, std::string_view geradoEm);
 
     // ---- Habitos (API oficial: GET /habit, GET /habit/checkins, POST /habit/{id}/checkin)
     // habitos.json (mesmo esquema de tempo::lerHabitos) so com habitos ATIVOS (status 0 e nao arquivados; ver

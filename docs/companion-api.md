@@ -51,14 +51,16 @@ over USB in a browser supporting Web Serial.
 | `PUT` | `/api/v2/feeds` | `204` |
 | `GET` | `/api/v2/focus-timers` | Bare array of timers |
 | `PUT` | `/api/v2/focus-timers` | `204` |
-| `GET` | `/api/v2/tempo/ticktick` | `{ "configurado": true, "tag": "…", "ultimaSync": "AAAA-MM-DDTHH:MM:SSZ", "erro": "" }` |
+| `GET` | `/api/v2/tempo/ticktick` | `{ "configurado": true, "tag": "…", "lista": "", "coluna": "", "ultimaSync": "AAAA-MM-DDTHH:MM:SSZ", "erro": "" }` |
 | `PUT` | `/api/v2/tempo/ticktick` | `204` |
 | `PUT` | `/api/v2/tempo/projetos` | `204` |
 
 ### App Tempo: TickTick e projetos
 
-`PUT /api/v2/tempo/ticktick` recebe `{ "token": "…", "tag": "Projeto📚" }` (qualquer um dos dois; token vazio apaga a
-integração). O token fica só na NVS criptografada (`DeviceSecrets`) e **nunca** é devolvido: o `GET` mostra apenas
+`PUT /api/v2/tempo/ticktick` recebe `{ "token": "…", "lista": "PROJETOS", "coluna": "AGORA" }` (qualquer um; token vazio apaga a
+integração). Os projetos do Tempo são as tarefas abertas da coluna `coluna` da lista `lista` (padrões `AGORA` / `PROJETOS`;
+o nome só precisa *conter* o texto, sem diferenciar maiúsculas nem emoji: "🎯 PROJETOS", "🚀 AGORA"). O campo antigo `tag`
+continua aceito e gravado, mas a sincronização não o usa mais. O token fica só na NVS criptografada (`DeviceSecrets`) e **nunca** é devolvido: o `GET` mostra apenas
 `configurado`, `tag`, `ultimaSync` (UTC, vazio = nunca) e `erro` (último erro, ex. `401: token inválido ou expirado`,
 `Sem rede: Wi-Fi não conectou`; vazio = última tentativa deu certo; fica em RAM, zera no reinício).
 `PUT /api/v2/tempo/projetos` recebe o JSON pronto (esquema de `/tempo/projetos.json`, até 96 KB), valida e grava de

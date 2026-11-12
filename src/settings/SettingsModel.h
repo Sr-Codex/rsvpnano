@@ -198,9 +198,14 @@ namespace settings {
         // live only in the secrets store, never in SD settings or the public API.
         std::string wifiPassword;
         std::vector<WifiProfile> wifiNetworks;
-        // TickTick (app Tempo): token da API e tag. Gravados por PUT /api/v2/tempo/ticktick, nunca devolvidos.
+        // TickTick (app Tempo): token da API; nomes (opcionais) da lista e da coluna dos projetos ("" = padroes PROJETOS/AGORA,
+        // casados por "contem", sem caixa nem emoji). `ticktickTag` e o campo ANTIGO (tag "projeto📚"): continua aceito e
+        // gravado para nao quebrar configuracao existente, mas a sincronizacao nao o usa mais.
+        // Gravados por PUT /api/v2/tempo/ticktick, token nunca devolvido.
         std::string ticktickToken;
         std::string ticktickTag;
+        std::string ticktickLista;
+        std::string ticktickColuna;
 
         bool operator==(const DeviceSecrets&) const = default;
     };

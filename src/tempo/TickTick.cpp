@@ -13,11 +13,14 @@ namespace tempo::ticktick {
 
         constexpr glz::opts kLeitura{.error_on_unknown_keys = false};
 
-        // Campos que usamos da API; o resto da tarefa (content, desc, items...) e ignorado.
+        // Campos que usamos da API; o resto da tarefa (content, desc, items...) e ignorado sem alocar.
         struct TarefaApi {
             std::string id;
             std::string title;
             std::optional<std::string> projectId;
+            std::optional<std::string> columnId;
+            std::optional<std::string> parentId;
+            std::optional<int> status;
             std::optional<int> priority;
             std::optional<std::string> dueDate;
             std::optional<std::vector<std::string>> tags;
@@ -26,6 +29,18 @@ namespace tempo::ticktick {
         struct ListaApi {
             std::string id;
             std::string name;
+            std::optional<bool> closed;
+        };
+
+        struct ColunaApi {
+            std::string id;
+            std::string name;
+        };
+
+        // GET /project/{id}/data
+        struct DadosListaApi {
+            std::optional<std::vector<TarefaApi>> tasks;
+            std::optional<std::vector<ColunaApi>> columns;
         };
 
         struct HabitoApi {
@@ -61,64 +76,92 @@ namespace tempo::ticktick {
             int status = 2;   // 2 = concluído; 0 = em andamento/desfeito. Sem isto o APP do TickTick ignora o check-in
         };
 
-        struct CorpoFiltro {
-            std::vector<std::string> tag;
-            std::vector<int> status;
-        };
-
     } // namespace api
 
-    using api::CorpoFiltro;
+    using api::ColunaApi;
+    using api::DadosListaApi;
     using api::ListaApi;
     using api::TarefaApi;
     using api::kLeitura;
 
-    std::vector<std::string> variantesTag(std::string_view tag) {
-        std::vector<std::string> saida;
-        if (tag.empty()) return saida;
-        saida.emplace_back(tag);
-        std::string minuscula{tag};
-        for (char& c : minuscula)
-            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-        if (minuscula != tag) saida.push_back(std::move(minuscula));
-        return saida;
+    namespace {
+
+        // Indice do melhor casamento: nome igual (normalizado) ganha; senao o 1o que contem. -1 = nenhum.
+        template <typename Itens, typename Nome>
+        int melhorPorNome(const Itens& itens, std::string_view alvo, Nome nomeDe) {
+            const std::string alvoNorm = normalizarNome(alvo);
+            if (alvoNorm.empty()) return -1;
+            int contem = -1;
+            for (size_t i = 0; i < itens.size(); ++i) {
+                const std::string nome = normalizarNome(nomeDe(itens[i]));
+                if (nome == alvoNorm) return static_cast<int>(i);
+                if (contem < 0 && nome.find(alvoNorm) != std::string::npos) contem = static_cast<int>(i);
+            }
+            return contem;
+        }
+
+    } // namespace
+
+    bool nomeContem(std::string_view nome, std::string_view alvo) {
+        const std::string alvoNorm = normalizarNome(alvo);
+        return !alvoNorm.empty() && normalizarNome(nome).find(alvoNorm) != std::string::npos;
     }
 
-    std::string corpoFiltro(std::string_view tag) {
-        CorpoFiltro corpo{{std::string{tag}}, {0}};
-        std::string saida;
-        if (glz::write_json(corpo, saida)) return {};
-        return saida;
-    }
-
-    int contarTarefas(std::string_view tarefasJson) {
-        std::vector<TarefaApi> tarefas;
-        if (glz::read<kLeitura>(tarefas, tarefasJson)) return -1;
-        return static_cast<int>(tarefas.size());
-    }
-
-    std::optional<std::string> montarProjetos(std::string_view tarefasJson, std::string_view listasJson,
-                                              std::string_view tag, std::string_view geradoEm) {
-        std::vector<TarefaApi> tarefas;
-        if (glz::read<kLeitura>(tarefas, tarefasJson)) return std::nullopt;
+    std::expected<ListaAchada, std::string> acharLista(std::string_view listasJson, std::string_view nomeLista) {
         std::vector<ListaApi> listas;
-        if (!listasJson.empty() && glz::read<kLeitura>(listas, listasJson)) return std::nullopt;
+        if (glz::read<kLeitura>(listas, listasJson)) return std::unexpected(std::string{"Resposta do TickTick inválida"});
+        // listas arquivadas (closed) nao contam
+        listas.erase(std::remove_if(listas.begin(), listas.end(), [](const ListaApi& l) { return l.closed.value_or(false); }),
+                     listas.end());
+        const int i = melhorPorNome(listas, nomeLista, [](const ListaApi& l) -> std::string_view { return l.name; });
+        if (i < 0 || listas[static_cast<size_t>(i)].id.empty())
+            return std::unexpected("lista " + std::string{nomeLista} + " não encontrada");
+        return ListaAchada{listas[static_cast<size_t>(i)].id, listas[static_cast<size_t>(i)].name};
+    }
 
-        std::map<std::string, std::string, std::less<>> nomes;
-        for (auto& lista : listas) nomes[lista.id] = std::move(lista.name);
+    bool idDeProjetoValido(std::string_view id) {
+        if (id.empty() || id.size() > 64) return false;
+        for (const char c : id)
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c == '-')) return false;
+        return true;
+    }
+
+    std::string caminhoDadosLista(std::string_view projectId) {
+        if (!idDeProjetoValido(projectId)) return {};
+        return "/project/" + std::string{projectId} + "/data";
+    }
+
+    std::string projetosVazios(std::string_view geradoEm) {
+        ListaProjetos saida;
+        saida.fonte = "ticktick";
+        saida.gerado_em = std::string{geradoEm};
+        std::string json;
+        if (glz::write_json(saida, json)) return {};
+        return json;
+    }
+
+    std::expected<std::string, std::string> montarProjetosDaColuna(std::string_view dadosJson, std::string_view nomeLista,
+                                                                  std::string_view nomeColuna, std::string_view geradoEm) {
+        DadosListaApi dados;
+        if (glz::read<kLeitura>(dados, dadosJson)) return std::unexpected(std::string{"Resposta do TickTick inválida"});
+        const auto colunas = dados.columns.value_or(std::vector<ColunaApi>{});
+        const int c = melhorPorNome(colunas, nomeColuna, [](const ColunaApi& col) -> std::string_view { return col.name; });
+        if (c < 0 || colunas[static_cast<size_t>(c)].id.empty())
+            return std::unexpected("coluna " + std::string{nomeColuna} + " não encontrada");
+        const std::string& colunaId = colunas[static_cast<size_t>(c)].id;
 
         ListaProjetos saida;
         saida.fonte = "ticktick";
-        saida.tag = std::string{tag};
         saida.gerado_em = std::string{geradoEm};
-        for (auto& t : tarefas) {
-            if (t.id.empty()) continue;
+        for (auto& t : dados.tasks.value_or(std::vector<TarefaApi>{})) {
+            if (t.id.empty() || t.columnId.value_or("") != colunaId) continue;
+            if (t.status.value_or(0) != 0) continue;                              // so abertas
+            if (t.parentId && !t.parentId->empty()) continue;                     // subtarefa nao e projeto
             Projeto p;
             p.id = std::move(t.id);
             p.titulo = std::move(t.title);
             p.projectId = t.projectId.value_or("");
-            const auto nome = nomes.find(p.projectId);
-            p.lista = nome == nomes.end() ? "?" : nome->second;
+            p.lista = std::string{nomeLista};
             p.prioridade = t.priority.value_or(0);
             if (t.dueDate && !t.dueDate->empty()) p.vence = std::move(t.dueDate);
             p.tags = t.tags.value_or(std::vector<std::string>{});
@@ -131,14 +174,14 @@ namespace tempo::ticktick {
         if (saida.projetos.size() > kMaxProjetos) saida.projetos.resize(kMaxProjetos);
 
         std::string json;
-        if (glz::write_json(saida, json)) return std::nullopt;
+        if (glz::write_json(saida, json)) return std::unexpected(std::string{"Não foi possível montar projetos.json"});
         // Ainda acima do teto: tira os de menor prioridade ate caber (nao deixa o Tempo sem projetos).
         while (json.size() > kMaxBytesProjetos && saida.projetos.size() > 1) {
             saida.projetos.resize(saida.projetos.size() - std::max<size_t>(1, saida.projetos.size() / 8));
             json.clear();
-            if (glz::write_json(saida, json)) return std::nullopt;
+            if (glz::write_json(saida, json)) return std::unexpected(std::string{"Não foi possível montar projetos.json"});
         }
-        if (json.size() > kMaxBytesProjetos) return std::nullopt;
+        if (json.size() > kMaxBytesProjetos) return std::unexpected(std::string{"projetos.json grande demais"});
         return json;
     }
 

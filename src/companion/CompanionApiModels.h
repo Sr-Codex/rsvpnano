@@ -63,13 +63,17 @@ namespace companion::api {
     // PUT /api/v2/tempo/ticktick. Token vazio apaga a integracao; ausente mantem o atual.
     struct TickTickUpdate {
         std::optional<std::string> token;
-        std::optional<std::string> tag;
+        std::optional<std::string> tag;      // campo antigo: aceito e ignorado pela sincronizacao
+        std::optional<std::string> lista;    // nome da lista dos projetos ("" = padrao PROJETOS)
+        std::optional<std::string> coluna;   // nome da coluna dos projetos ("" = padrao AGORA)
     };
 
     // GET /api/v2/tempo/ticktick. O token nunca e devolvido.
     struct TickTickInfo {
         bool configurado = false;
         std::string tag;
+        std::string lista;       // "" = padrao PROJETOS
+        std::string coluna;      // "" = padrao AGORA
         std::string ultimaSync;  // "" = nunca sincronizou
         std::string erro;        // "" = ultima tentativa ok
         std::string erroHabitos; // "" = parte dos habitos ok (lume.11: diagnostico com passo, erro do ESP-IDF e memoria)

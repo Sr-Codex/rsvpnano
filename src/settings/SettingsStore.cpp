@@ -102,6 +102,8 @@ namespace settings {
             wifi::sanitize(value);
             truncate(value.ticktickToken, 512);
             truncate(value.ticktickTag, 64);
+            truncate(value.ticktickLista, 64);
+            truncate(value.ticktickColuna, 64);
         }
 
     } // namespace

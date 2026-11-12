@@ -247,7 +247,10 @@ namespace net::ticktick {
         std::expected<size_t, std::string> run(const settings::NetworkSettings& network,
                                                const settings::DeviceSecrets& secrets, fs::FS& filesystem) {
             if (secrets.ticktickToken.empty()) return std::unexpected("Token do TickTick não configurado");
-            const std::string tag = secrets.ticktickTag.empty() ? tempo::ticktick::kTagPadrao : secrets.ticktickTag;
+            // Projetos = coluna AGORA da lista PROJETOS (nomes padrao; podem ser trocados nos segredos). O campo antigo
+            // ticktickTag segue aceito na configuracao, mas nao e mais usado.
+            const std::string nomeLista = secrets.ticktickLista.empty() ? tempo::ticktick::kListaPadrao : secrets.ticktickLista;
+            const std::string nomeColuna = secrets.ticktickColuna.empty() ? tempo::ticktick::kColunaPadrao : secrets.ticktickColuna;
 
             WifiScope wifi;
             // Falhas antes dos hábitos também aparecem na tela de Hábitos ("erro de sync"), senão ela fica muda.
@@ -277,19 +280,29 @@ namespace net::ticktick {
             auto listas = call(sessao, HTTP_METHOD_GET, "/project", secrets.ticktickToken, {});
             if (!listas) return std::unexpected(listas.error());
 
-            std::string tarefas;
-            for (const auto& variante : tempo::ticktick::variantesTag(tag)) {
-                auto resposta = call(sessao, HTTP_METHOD_POST, "/task/filter", secrets.ticktickToken,
-                                     tempo::ticktick::corpoFiltro(variante));
-                if (!resposta) return std::unexpected(resposta.error());
-                const int quantas = tempo::ticktick::contarTarefas(*resposta);
-                if (quantas < 0) return std::unexpected("Resposta do TickTick inválida");
-                tarefas = std::move(*resposta);
-                if (quantas > 0) break;  // vazio: tenta a variante em minúsculas
+            // Lista/coluna nao encontrada e definitivo (nao e falha de rede): zera projetos.json para nao ficar valendo uma lista
+            // velha (ex.: a da tag antiga) e o erro legivel aparece no "Trocar ›".
+            const auto semProjetos = [&](std::string erro) {
+                if (const std::string vazio = tempo::ticktick::projetosVazios(agora); !vazio.empty()) TempoStorage::saveProjects(filesystem, vazio);
+                return std::unexpected(std::move(erro));
+            };
+            const auto lista = tempo::ticktick::acharLista(*listas, nomeLista);
+            if (!lista) {
+                if (lista.error().ends_with("não encontrada")) return semProjetos(lista.error());
+                return std::unexpected(lista.error());
             }
+            const std::string caminhoDados = tempo::ticktick::caminhoDadosLista(lista->id);
+            if (caminhoDados.empty()) return std::unexpected("Resposta do TickTick inválida");
+            // Resposta grande (todas as tarefas da lista, com content/desc/items): fica numa std::string de ate 1 MB (teto
+            // kMaxBytesResposta; os buffers do TLS ja vao para a PSRAM) e o parse (glaze) so aloca os campos usados.
+            auto dados = call(sessao, HTTP_METHOD_GET, caminhoDados, secrets.ticktickToken, {});
+            if (!dados) return std::unexpected(dados.error());
 
-            auto json = tempo::ticktick::montarProjetos(tarefas, *listas, tag, agora);
-            if (!json) return std::unexpected("Não foi possível montar projetos.json");
+            auto json = tempo::ticktick::montarProjetosDaColuna(*dados, lista->nome, nomeColuna, agora);
+            if (!json) {
+                if (json.error().ends_with("não encontrada")) return semProjetos(json.error());
+                return std::unexpected(json.error());
+            }
             if (!TempoStorage::saveProjects(filesystem, *json)) return std::unexpected("Falha ao gravar no cartão SD");
             tempo::ListaProjetos gravada;
             tempo::lerProjetos(*json, gravada);

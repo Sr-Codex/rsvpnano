@@ -36,6 +36,8 @@ auto CompanionApi::getTickTick(httpd_req_t& request) -> companion::api::Result<c
     // O token nunca sai da placa: so se ha token, a tag e o resultado da ultima sincronizacao.
     return api::TickTickInfo{.configurado = !secrets.ticktickToken.empty(),
                              .tag = secrets.ticktickTag,
+                             .lista = secrets.ticktickLista,
+                             .coluna = secrets.ticktickColuna,
                              .ultimaSync = status.lastSync,
                              .erro = status.error,
                              .erroHabitos = status.habitsError};
@@ -52,13 +54,23 @@ companion::api::Result<> CompanionApi::putTickTick(httpd_req_t& request) {
                 return std::unexpected(api::httpError(HTTP_CODE_UNPROCESSABLE_ENTITY, "invalid_ticktick_tag",
                                                       "Tag must be at most 64 bytes", "tag"));
             }
-            if (!update.token && !update.tag) {
+            if (update.lista && !tagValid(*update.lista)) {
+                return std::unexpected(api::httpError(HTTP_CODE_UNPROCESSABLE_ENTITY, "invalid_ticktick_list",
+                                                      "List name must be at most 64 bytes", "lista"));
+            }
+            if (update.coluna && !tagValid(*update.coluna)) {
+                return std::unexpected(api::httpError(HTTP_CODE_UNPROCESSABLE_ENTITY, "invalid_ticktick_column",
+                                                      "Column name must be at most 64 bytes", "coluna"));
+            }
+            if (!update.token && !update.tag && !update.lista && !update.coluna) {
                 return std::unexpected(api::httpError(HTTP_CODE_UNPROCESSABLE_ENTITY, "invalid_ticktick",
-                                                      "Send token and/or tag", "token"));
+                                                      "Send token, lista and/or coluna", "token"));
             }
             auto& secrets = settingsStore_.secrets();
             if (update.token) secrets.ticktickToken = std::move(*update.token);
             if (update.tag) secrets.ticktickTag = std::move(*update.tag);
+            if (update.lista) secrets.ticktickLista = std::move(*update.lista);
+            if (update.coluna) secrets.ticktickColuna = std::move(*update.coluna);
             settingsStore_.acceptSecretChanges();  // gravado na NVS (criptografada) no ciclo normal de persistencia
             return {};
         });
