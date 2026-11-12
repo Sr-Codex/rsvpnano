@@ -1,4 +1,5 @@
 #include "ui/Modern.h"
+#include "ui/FormaSuaveGfx.h"
 #include "ui/Ui.h"
 
 #include <algorithm>
@@ -104,8 +105,8 @@ namespace ui {
                                               shownValue.empty() ? std::string_view{"_"} : shownValue, 2);
             paint(input, [&](Arduino_GFX& output, Rect local) {
                 const uint16_t surface = color(ui::themes::ColorRole::SurfaceMuted);
-                output.fillRoundRect(local.x, local.y, local.w, local.h, 5, surface);
-                output.drawRoundRect(local.x, local.y, local.w, local.h, 5, color(ui::themes::ColorRole::Outline));
+                forma::retanguloArredondado(output, local.x, local.y, local.w, local.h, 5, surface,
+                                            color(ui::themes::ColorRole::Background), 1, color(ui::themes::ColorRole::Outline));
                 const int16_t dx = local.x - input.x, dy = local.y - input.y;
                 if (!label.empty())
                     drawText(output, caption, color(ui::themes::ColorRole::Muted), dx, dy);

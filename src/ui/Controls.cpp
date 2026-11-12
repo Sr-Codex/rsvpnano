@@ -1,4 +1,5 @@
 #include "ui/Layouts.h"
+#include "ui/FormaSuaveGfx.h"
 
 #include <cmath>
 #include <cstdio>
@@ -33,8 +34,8 @@ namespace ui {
                 const int16_t dx = rect.x - bounds.x, dy = rect.y - bounds.y;
                 const auto surface = blend(themes::SurfaceActive, alpha / 2);
                 const auto ink = blend(enabled ? themes::Foreground : themes::Muted, alpha);
-                output.fillRoundRect(rect.x, rect.y, rect.w, rect.h, 8, surface);
-                output.drawRoundRect(rect.x, rect.y, rect.w, rect.h, 8, blend(role, alpha));
+                forma::retanguloArredondado(output, rect.x, rect.y, rect.w, rect.h, 8, surface, color(themes::Background), 1,
+                                            blend(role, alpha));
                 if (iconWidth)
                     drawIcon(output, {static_cast<int16_t>(rect.x + 6), rect.y, iconWidth, rect.h}, icon,
                              blend(role, alpha), surface);
@@ -114,8 +115,7 @@ namespace ui {
             paint(rect, [&](Arduino_GFX& output, Rect rect) {
                 const int16_t dx = rect.x - bounds.x, dy = rect.y - bounds.y;
                 const auto surface = color(label.empty() ? themes::Surface : themes::SurfaceActive);
-                output.fillRoundRect(rect.x, rect.y, rect.w, rect.h, 7, surface);
-                output.drawRoundRect(rect.x, rect.y, rect.w, rect.h, 7, accent);
+                forma::retanguloArredondado(output, rect.x, rect.y, rect.w, rect.h, 7, surface, color(themes::Background), 1, accent);
                 drawIcon(output,
                          {static_cast<int16_t>(x + dx), static_cast<int16_t>(rect.y + 4), iconWidth,
                           static_cast<int16_t>(rect.h - 8)},

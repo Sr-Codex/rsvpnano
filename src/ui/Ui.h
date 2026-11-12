@@ -462,8 +462,8 @@ namespace ui {
         void drawBookmarkIcon(Arduino_GFX& output, Rect rect, uint16_t ink, uint16_t surface);
         void drawBooksIcon(Arduino_GFX& output, Rect rect, uint16_t ink);
         void drawEditIcon(Arduino_GFX& output, Rect rect, uint16_t ink);
-        void drawDeviceIcon(Arduino_GFX& output, Rect rect, uint16_t ink);
-        void drawLanguageIcon(Arduino_GFX& output, Rect rect, uint16_t ink);
+        void drawDeviceIcon(Arduino_GFX& output, Rect rect, uint16_t ink, uint16_t surface);
+        void drawLanguageIcon(Arduino_GFX& output, Rect rect, uint16_t ink, uint16_t surface);
         void drawHourglassIcon(Arduino_GFX& output, Rect rect, uint16_t ink);
         void drawPowerIcon(Arduino_GFX& output, Rect rect, uint16_t ink, uint16_t surface);
         void drawBatteryIcon(Arduino_GFX& output, Rect rect, uint8_t percent, bool charging, uint16_t ink,

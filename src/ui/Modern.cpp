@@ -1,4 +1,5 @@
 #include "ui/Modern.h"
+#include "ui/FormaSuaveGfx.h"
 
 namespace ui::modern {
     using themes::rgb565;
@@ -61,8 +62,8 @@ namespace ui::modern {
                  static_cast<int16_t>(rect.w - 20), static_cast<int16_t>(groupH - titleH)},
                 detail, 11);
             ui.paint(rect, [&](Arduino_GFX& gfx, Rect target) {
-                gfx.fillRoundRect(target.x, target.y, target.w, target.h, 3, surface);
-                if (down) gfx.drawRoundRect(target.x, target.y, target.w, target.h, 3, ui.color(themes::Accent));
+                forma::retanguloArredondado(gfx, target.x, target.y, target.w, target.h, 3, surface, ui.color(themes::Background),
+                                            down ? 1 : 0, ui.color(themes::Accent));
                 ui.drawText(gfx, titleLayout, ink, target.x - rect.x, target.y - rect.y, surface);
                 ui.drawText(gfx, detailLayout, ui.color(themes::Muted), target.x - rect.x, target.y - rect.y, surface);
             });
@@ -74,9 +75,9 @@ namespace ui::modern {
         const bool down = enabled && ui.pressed(rect);
         if (ui.redraw(rect, Context::combine(static_cast<uint8_t>(direction), enabled + 2U * down))) {
             ui.paint(rect, [&](Arduino_GFX& gfx, Rect target) {
-                gfx.fillRoundRect(target.x, target.y, target.w, target.h, 3,
-                                  ui.color(down ? themes::SurfaceActive : themes::SurfaceMuted));
-                if (down) gfx.drawRoundRect(target.x, target.y, target.w, target.h, 3, ui.color(themes::Accent));
+                forma::retanguloArredondado(gfx, target.x, target.y, target.w, target.h, 3,
+                                            ui.color(down ? themes::SurfaceActive : themes::SurfaceMuted),
+                                            ui.color(themes::Background), down ? 1 : 0, ui.color(themes::Accent));
                 const int x = target.x + target.w / 2, y = target.y + target.h / 2;
                 const auto ink = ui.color(enabled ? themes::Accent : themes::Subtle);
                 // A 3-pixel stroke stays clear on the actual small panel.
@@ -130,7 +131,7 @@ namespace ui::modern {
             case Symbol::Device:
                 line(5,3,19,3); line(5,3,5,21); line(19,3,19,21); line(5,21,19,21); line(10,17,14,17); break;
             case Symbol::Sun:
-                gfx.drawCircle(x + size / 2, y + size / 2, size / 5, ink);
+                forma::circulo(gfx, x + size / 2, y + size / 2, size / 5, ink, ui.color(themes::Background), ui.color(themes::Background));
                 line(12,1,12,4); line(12,20,12,23); line(1,12,4,12); line(20,12,23,12);
                 line(4,4,6,6); line(18,18,20,20); line(4,20,6,18); line(18,6,20,4); break;
             case Symbol::Launch: line(5,19,19,5); line(10,5,19,5); line(19,5,19,14); break;

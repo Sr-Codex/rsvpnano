@@ -1,4 +1,5 @@
 #include "ui/Ui.h"
+#include "ui/FormaSuaveGfx.h"
 
 #include <algorithm>
 #include <cmath>
@@ -433,8 +434,8 @@ namespace ui {
             }
             paint(rect, [&](Arduino_GFX& output, Rect rect) {
                 const uint16_t surface = color(ui::themes::ColorRole::SurfaceMuted);
-                output.fillRoundRect(rect.x, rect.y, rect.w, rect.h, 5, surface);
-                if (!modernPresentation_) output.drawRoundRect(rect.x, rect.y, rect.w, rect.h, 5, color(ui::themes::ColorRole::Outline));
+                forma::retanguloArredondado(output, rect.x, rect.y, rect.w, rect.h, 5, surface, color(ui::themes::ColorRole::Background),
+                                            modernPresentation_ ? 0 : 1, color(ui::themes::ColorRole::Outline));
                 drawText(output, labelText, color(layout == SettingLayout::Inline ? themes::Foreground : themes::Muted),
                          rect.x, rect.y, surface);
                 drawText(output, valueText, color(themes::Accent), rect.x, rect.y, surface);
@@ -454,15 +455,14 @@ namespace ui {
                             label, 2);
             paint(rect, [&](Arduino_GFX& output, Rect rect) {
                 const uint16_t surface = color(ui::themes::ColorRole::SurfaceMuted);
-                output.fillRoundRect(rect.x, rect.y, rect.w, rect.h, 5, surface);
-                if (!modernPresentation_) output.drawRoundRect(rect.x, rect.y, rect.w, rect.h, 5, color(ui::themes::ColorRole::Outline));
+                forma::retanguloArredondado(output, rect.x, rect.y, rect.w, rect.h, 5, surface, color(ui::themes::ColorRole::Background),
+                                            modernPresentation_ ? 0 : 1, color(ui::themes::ColorRole::Outline));
                 const int16_t switchX = static_cast<int16_t>(rect.x + rect.w - switchWidth - 7);
                 const int16_t switchY = static_cast<int16_t>(rect.y + (rect.h - 16) / 2);
-                output.fillRoundRect(switchX, switchY, switchWidth, 16, 8,
-                                     color(enabled ? ui::themes::ColorRole::Accent
-                                                   : ui::themes::ColorRole::ProgressTrack));
-                output.fillCircle(static_cast<int16_t>(switchX + (enabled ? switchWidth - 8 : 8)),
-                                  static_cast<int16_t>(switchY + 8), 6, color(ui::themes::ColorRole::Foreground));
+                const uint16_t track = color(enabled ? ui::themes::ColorRole::Accent : ui::themes::ColorRole::ProgressTrack);
+                forma::retanguloArredondado(output, switchX, switchY, switchWidth, 16, 8, track, surface);
+                forma::disco(output, static_cast<int16_t>(switchX + (enabled ? switchWidth - 8 : 8)),
+                             static_cast<int16_t>(switchY + 8), 6, color(ui::themes::ColorRole::Foreground), track);
                 drawText(output, labelText, color(themes::Foreground), rect.x, rect.y, surface);
             });
         }
@@ -522,11 +522,11 @@ namespace ui {
             }
             paint(rect, [&](Arduino_GFX& output, Rect rect) {
                 const uint16_t surface = color(down ? ui::themes::ColorRole::SurfaceActive : ui::themes::ColorRole::SurfaceMuted);
-                output.fillRoundRect(rect.x, rect.y, rect.w, rect.h, 5, surface);
-                if (down) output.drawRoundRect(rect.x, rect.y, rect.w, rect.h, 5, color(ui::themes::ColorRole::Accent));
-                if (!modernPresentation_) output.drawRoundRect(rect.x, rect.y, rect.w, rect.h, 5,
-                                     color(enabled ? ui::themes::ColorRole::Outline
-                                                   : ui::themes::ColorRole::ProgressTrack));
+                const bool bordered = !modernPresentation_ || down;   // regular: contorno sempre; moderno: so apertado
+                forma::retanguloArredondado(output, rect.x, rect.y, rect.w, rect.h, 5, surface, color(ui::themes::ColorRole::Background), bordered ? 1 : 0,
+                                            !modernPresentation_ ? color(enabled ? ui::themes::ColorRole::Outline
+                                                                                 : ui::themes::ColorRole::ProgressTrack)
+                                                                 : color(ui::themes::ColorRole::Accent));
                 if (!modernPresentation_ && enabled && rect.w > 16 && rect.h >= 28)
                     output.fillRect(static_cast<int16_t>(rect.x + 8), static_cast<int16_t>(rect.y + rect.h - 3),
                                     static_cast<int16_t>(rect.w - 16), 2, color(ui::themes::ColorRole::Accent));
@@ -551,9 +551,8 @@ namespace ui {
         if (widget.changed) {
             paint(rect, [&](Arduino_GFX& output, Rect rect) {
                 const uint16_t surface = color(ui::themes::ColorRole::SurfaceMuted);
-                output.fillRoundRect(rect.x, rect.y, rect.w, rect.h, 7, surface);
-                output.drawRoundRect(rect.x, rect.y, rect.w, rect.h, 7,
-                                     color(down ? ui::themes::ColorRole::Accent : ui::themes::ColorRole::Outline));
+                forma::retanguloArredondado(output, rect.x, rect.y, rect.w, rect.h, 7, surface, color(ui::themes::ColorRole::Background), 1,
+                                            color(down ? ui::themes::ColorRole::Accent : ui::themes::ColorRole::Outline));
                 drawIcon(output, rect, icon, color(ui::themes::ColorRole::Muted), surface);
             });
         }
@@ -678,9 +677,10 @@ namespace ui {
                 const int16_t x = vertical ? center : position;
                 const int16_t y = vertical ? position : center;
                 if (index < current)
-                    output.fillCircle(x, y, radius, color(activeRole));
+                    forma::disco(output, x, y, radius, color(activeRole), color(ui::themes::ColorRole::Background));
                 else
-                    output.drawCircle(x, y, radius, color(ui::themes::ColorRole::Outline));
+                    forma::circulo(output, x, y, radius, color(ui::themes::ColorRole::Outline),
+                                   color(ui::themes::ColorRole::Background), color(ui::themes::ColorRole::Background));
             }
         });
     }
@@ -752,19 +752,21 @@ namespace ui {
                 const Rect empty = vertical ? Rect{target.x, target.y, target.w, static_cast<int16_t>(target.h - amount)}
                                             : Rect{static_cast<int16_t>(target.x + amount), target.y, static_cast<int16_t>(target.w - amount), target.h};
                 output.fillRect(target.x, target.y, target.w, target.h, color(themes::Background));
-                output.fillRoundRect(target.x, target.y, target.w, target.h, radius, color(themes::SurfaceMuted));
+                forma::retanguloArredondado(output, target.x, target.y, target.w, target.h, radius, color(themes::SurfaceMuted),
+                                            color(themes::Background));
                 const auto drawPart = [&](Rect clip, bool active) {
                     if (clip.w <= 0 || clip.h <= 0) return;
                     ClippedGfx viewport(output, clip);
                     const auto fillRole = activeRole == themes::Accent ? themes::AccentBar : activeRole;
                     const uint16_t background = color(active ? fillRole : themes::SurfaceMuted);
                     const uint16_t ink = color(active ? themes::OnAccent : themes::Foreground);
-                    if (active) viewport.fillRoundRect(target.x, target.y, target.w, target.h, radius, background);
+                    if (active) forma::retanguloArredondado(viewport, target.x, target.y, target.w, target.h, radius, background,
+                                                            color(themes::SurfaceMuted));
                     drawText(viewport, titleLayout, ink, dx, dy, background);
                     drawText(viewport, valueLayout, ink, dx, dy, background);
                     if (vertical) {
                         const int16_t x = target.x + target.w / 2, y = target.y + 29;
-                        viewport.drawCircle(x, y, 4, ink);
+                        forma::circulo(viewport, x, y, 4, ink, background, background);
                         viewport.drawFastHLine(x - 10, y, 4, ink); viewport.drawFastHLine(x + 7, y, 4, ink);
                         viewport.drawFastVLine(x, y - 10, 4, ink); viewport.drawFastVLine(x, y + 7, 4, ink);
                         for (const int directionX : {-1, 1}) for (const int directionY : {-1, 1})
@@ -774,7 +776,8 @@ namespace ui {
                 };
                 drawPart(empty, false);
                 drawPart(filled, true);
-                if (pressed) output.drawRoundRect(target.x, target.y, target.w, target.h, radius, color(themes::Foreground));
+                if (pressed) forma::contornoArredondado(output, target.x, target.y, target.w, target.h, radius, color(themes::Foreground),
+                                                        color(themes::Background), color(themes::SurfaceMuted));
             });
         }
         return changed;
@@ -877,9 +880,9 @@ namespace ui {
                                  static_cast<int16_t>(visual.w - 2 * trackInset), 3};
                 if (labeled) {
                     const uint16_t surface = color(ui::themes::ColorRole::SurfaceMuted);
-                    output.fillRoundRect(visual.x, visual.y, visual.w, visual.h, 5, surface);
-                    if (!modernPresentation_) output.drawRoundRect(visual.x, visual.y, visual.w, visual.h, 5,
-                                         color(ui::themes::ColorRole::Outline));
+                    forma::retanguloArredondado(output, visual.x, visual.y, visual.w, visual.h, 5, surface,
+                                                color(ui::themes::ColorRole::Background), modernPresentation_ ? 0 : 1,
+                                                color(ui::themes::ColorRole::Outline));
                     drawText(output, labelText, color(themes::Foreground), dx, dy, surface);
                     drawText(output, valueLayout, color(activeRole), dx, dy, surface);
                 }
@@ -909,8 +912,10 @@ namespace ui {
                 output.fillRect(track.x, track.y, static_cast<int16_t>(knobX - track.x + 1), track.h,
                                 color(activeRole));
                 const int16_t knobRadius = labeled ? 5 : 7;
-                output.fillCircle(knobX, trackCenterY, knobRadius, color(activeRole));
-                output.drawCircle(knobX, trackCenterY, knobRadius, color(ui::themes::ColorRole::OnAccent));
+                const uint16_t knobBack = color(labeled ? ui::themes::ColorRole::SurfaceMuted : ui::themes::ColorRole::Background);
+                forma::disco(output, knobX, trackCenterY, knobRadius, color(activeRole), knobBack);
+                forma::circulo(output, knobX, trackCenterY, knobRadius, color(ui::themes::ColorRole::OnAccent), knobBack,
+                               color(activeRole));
             });
         }
 
@@ -1001,8 +1006,7 @@ namespace ui {
                 const int16_t dx = rect.x - bounds.x, dy = rect.y - bounds.y;
                 const uint16_t surface = color(ui::themes::ColorRole::SurfaceMuted);
                 const uint16_t outline = color(ui::themes::ColorRole::Outline);
-                output.fillRoundRect(rect.x, rect.y, rect.w, rect.h, 5, surface);
-                output.drawRoundRect(rect.x, rect.y, rect.w, rect.h, 5, outline);
+                forma::retanguloArredondado(output, rect.x, rect.y, rect.w, rect.h, 5, surface, color(ui::themes::ColorRole::Background), 1, outline);
                 output.drawFastVLine(static_cast<int16_t>(rect.x + buttonWidth), static_cast<int16_t>(rect.y + 4),
                                      static_cast<int16_t>(rect.h - 8), outline);
                 output.drawFastVLine(static_cast<int16_t>(rect.x + rect.w - buttonWidth),
@@ -1044,7 +1048,8 @@ namespace ui {
         const Rect bounds = rect;
         paint(rect, [&](Arduino_GFX& output, Rect rect) {
             const int16_t dx = rect.x - bounds.x, dy = rect.y - bounds.y;
-            output.drawCircle(cx + dx, cy + dy, radius, color(ui::themes::ColorRole::ProgressTrack));
+            forma::circulo(output, cx + dx, cy + dy, radius, color(ui::themes::ColorRole::ProgressTrack),
+                           color(ui::themes::ColorRole::Background), color(ui::themes::ColorRole::Background));
             if (maximum > minimum)
                 output.drawLine(cx + dx, cy + dy, needleX + dx, needleY + dy, color(ui::themes::ColorRole::Accent));
             drawText(output, label, color(themes::Muted), dx, dy);
@@ -1158,14 +1163,9 @@ namespace ui {
                 const int16_t baseTop = static_cast<int16_t>(rect.y + 2);
                 const int16_t baseHeight = static_cast<int16_t>(rect.h - 4);
                 const uint16_t base = color(ui::themes::ColorRole::SurfaceActive);
-                output.fillRoundRect(static_cast<int16_t>(left - capWidth / 2), baseTop, capWidth, baseHeight,
-                                     capWidth / 2, base);
-                output.drawRoundRect(static_cast<int16_t>(left - capWidth / 2), baseTop, capWidth, baseHeight,
-                                     capWidth / 2, outline);
-                output.fillRoundRect(static_cast<int16_t>(right - capWidth / 2), baseTop, capWidth, baseHeight,
-                                     capWidth / 2, base);
-                output.drawRoundRect(static_cast<int16_t>(right - capWidth / 2), baseTop, capWidth, baseHeight,
-                                     capWidth / 2, outline);
+                for (const int16_t capX : {static_cast<int16_t>(left - capWidth / 2), static_cast<int16_t>(right - capWidth / 2)})
+                    forma::retanguloArredondado(output, capX, baseTop, capWidth, baseHeight, capWidth / 2, base,
+                                                color(ui::themes::ColorRole::Background), 1, outline);
 
                 for (const auto& segment: outlineSegments) {
                     const int16_t x0 = rect.x + segment[0], y0 = rect.y + segment[1];

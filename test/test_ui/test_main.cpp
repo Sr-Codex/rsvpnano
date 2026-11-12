@@ -2,6 +2,7 @@
 #include "AppearanceChecks.h"
 
 #include <array>
+#include <set>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -1642,8 +1643,22 @@ void test_focus_timer_text_does_not_redraw_hourglass() {
     TEST_ASSERT_GREATER_THAN(0, gfx.verticalLines);
 }
 
+namespace {
+    // Records every pixel the (now anti-aliased) step dots write, so the test checks geometry instead of circle calls.
+    class PixelProbe final : public Arduino_GFX {
+    public:
+        using Arduino_GFX::Arduino_GFX;
+        void writePixelPreclipped(int16_t x, int16_t y, uint16_t) override { pixels.insert({y, x}); }
+        void writeFastHLine(int16_t x, int16_t y, int16_t w, uint16_t) override {
+            for (int i = 0; i < w; ++i) pixels.insert({y, x + i});
+        }
+        void drawFastHLine(int16_t x, int16_t y, int16_t w, uint16_t c) override { writeFastHLine(x, y, w, c); }
+        std::set<std::pair<int, int>> pixels;   // (y, x), ordered by row
+    };
+}
+
 void test_steps_follow_the_long_axis() {
-    Arduino_GFX gfx;
+    PixelProbe gfx;
     ui::Context context(gfx);
     auto colors = theme();
     context.setTheme(colors);
@@ -1652,9 +1667,27 @@ void test_steps_follow_the_long_axis() {
     context.steps({8, 8, 40, 156}, 1, 4);
     context.endFrame();
 
-    TEST_ASSERT_EQUAL(4, gfx.circleWrites);
-    TEST_ASSERT_EQUAL(gfx.firstCircleX, gfx.lastCircleX);
-    TEST_ASSERT_LESS_THAN(gfx.lastCircleY, gfx.firstCircleY);
+    // Four dots stacked along the long (vertical) axis: group the written rows into separated clusters.
+    std::vector<std::pair<double, double>> centers;   // (y, x) centroid of each cluster
+    double sumY = 0, sumX = 0;
+    int count = 0, lastY = -1000;
+    for (const auto& [y, x] : gfx.pixels) {
+        if (count > 0 && y > lastY + 1) {
+            centers.push_back({sumY / count, sumX / count});
+            sumY = sumX = 0;
+            count = 0;
+        }
+        sumY += y;
+        sumX += x;
+        ++count;
+        lastY = y;
+    }
+    if (count > 0) centers.push_back({sumY / count, sumX / count});
+    TEST_ASSERT_EQUAL(4, centers.size());
+    for (size_t i = 1; i < centers.size(); ++i) {
+        TEST_ASSERT_FLOAT_WITHIN(0.6f, centers[0].second, centers[i].second);   // same column
+        TEST_ASSERT_TRUE(centers[i].first > centers[i - 1].first);              // top to bottom
+    }
 }
 
 // Exercise the real touch classifier and screen together: a drag may still be

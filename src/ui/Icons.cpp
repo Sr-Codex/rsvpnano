@@ -1,4 +1,5 @@
 #include "ui/Ui.h"
+#include "ui/FormaSuaveGfx.h"
 
 #include <algorithm>
 
@@ -15,10 +16,10 @@ namespace ui {
             drawEditIcon(output, rect, ink);
             break;
         case Icon::Device:
-            drawDeviceIcon(output, rect, ink);
+            drawDeviceIcon(output, rect, ink, surface);
             break;
         case Icon::Language:
-            drawLanguageIcon(output, rect, ink);
+            drawLanguageIcon(output, rect, ink, surface);
             break;
         case Icon::Hourglass:
             drawHourglassIcon(output, rect, ink);
@@ -63,21 +64,21 @@ namespace ui {
                         static_cast<int16_t>(y + 3), ink);
     }
 
-    void Context::drawDeviceIcon(Arduino_GFX& output, Rect rect, uint16_t ink) {
+    void Context::drawDeviceIcon(Arduino_GFX& output, Rect rect, uint16_t ink, uint16_t surface) {
         const int16_t cx = static_cast<int16_t>(rect.x + rect.w / 2);
         const int16_t x = static_cast<int16_t>(cx - 8);
         const int16_t y = static_cast<int16_t>(rect.y + rect.h / 2 - 10);
-        output.drawRoundRect(x, y, 16, 20, 3, ink);
+        forma::contornoArredondado(output, x, y, 16, 20, 3, ink, surface, surface);
         output.fillRect(static_cast<int16_t>(cx - 2), static_cast<int16_t>(y + 16), 4, 1, ink);
     }
 
-    void Context::drawLanguageIcon(Arduino_GFX& output, Rect rect, uint16_t ink) {
+    void Context::drawLanguageIcon(Arduino_GFX& output, Rect rect, uint16_t ink, uint16_t surface) {
         const int16_t cx = static_cast<int16_t>(rect.x + rect.w / 2);
         const int16_t cy = static_cast<int16_t>(rect.y + rect.h / 2);
         const int16_t left = static_cast<int16_t>(cx - 10);
         const int16_t top = static_cast<int16_t>(cy - 8);
-        output.drawRoundRect(left, top, 13, 13, 2, ink);
-        output.drawRoundRect(static_cast<int16_t>(left + 7), static_cast<int16_t>(top + 5), 13, 13, 2, ink);
+        forma::contornoArredondado(output, left, top, 13, 13, 2, ink, surface, surface);
+        forma::contornoArredondado(output, left + 7, top + 5, 13, 13, 2, ink, surface, surface);
         output.drawLine(static_cast<int16_t>(left + 3), static_cast<int16_t>(top + 10), static_cast<int16_t>(left + 6),
                         static_cast<int16_t>(top + 3), ink);
         output.drawLine(static_cast<int16_t>(left + 6), static_cast<int16_t>(top + 3), static_cast<int16_t>(left + 9),
@@ -105,7 +106,7 @@ namespace ui {
     void Context::drawPowerIcon(Arduino_GFX& output, Rect rect, uint16_t ink, uint16_t surface) {
         const int16_t cx = static_cast<int16_t>(rect.x + rect.w / 2);
         const int16_t cy = static_cast<int16_t>(rect.y + rect.h / 2);
-        output.drawCircle(cx, static_cast<int16_t>(cy + 1), 8, ink);
+        forma::circulo(output, cx, cy + 1, 8, ink, surface, surface);
         output.fillRect(static_cast<int16_t>(cx - 3), static_cast<int16_t>(cy - 9), 7, 10, surface);
         output.drawFastVLine(cx, static_cast<int16_t>(cy - 9), 9, ink);
     }
