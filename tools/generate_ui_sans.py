@@ -27,7 +27,7 @@ def main():
         ascent, descent = face.getmetrics()
         pixels, glyphs = [], []
         for cp in points:
-            if size >= 39 and cp not in set(map(ord, " 0123456789:.-?")):
+            if size >= 39 and cp not in set(map(ord, " 0123456789:.-?+")):   # "+" = hora extra (+3:12)
                 continue
             vector_arrow = cp in (0x2039, 0x203a, 0x2190, 0x2191, 0x2192, 0x2193, 0x2197, 0x21b6, 0x232b)
             if cp not in cmap and not vector_arrow:
