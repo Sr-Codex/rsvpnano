@@ -90,7 +90,13 @@ namespace tempo::regua {
         void comecar(int x, int minutoAtual);
         bool mover(int x);       // true se a posicao mudou
         int soltar();            // encerra e devolve os minutos encaixados (sem arrasto: o valor de partida)
-        int minutos() const { return encaixar(pos); }
+        int minutos() const { return encaixar(pos); }   // parada MAIS PROXIMA da fita (o que o encaixe vai escolher ao soltar)
+        // Valor MOSTRADO durante o arrasto: so muda quando uma marca CHEGA a agulha (nunca no meio do vao entre duas). `parada`
+        // = -1 (∞, na posicao kPosInf) ou o indice 0..numParadas()-1. Subindo: ao alcancar a posicao da proxima parada (floor);
+        // descendo: ao alcancar a anterior (ceil); no meio do vao nada muda (ir e voltar nao pisca). Ao soltar = a parada encaixada.
+        int parada = 0;
+        int mostrado() const;   // minutos da parada mostrada (0 = ∞ livre)
+        void atualizarMostrado();
         void cancelar() { ativo = false; moveu = false; }
     };
 

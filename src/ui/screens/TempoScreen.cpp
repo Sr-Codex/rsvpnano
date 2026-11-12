@@ -1588,7 +1588,7 @@ namespace screens {
         }
         const bool arrastando = reguaArrasto_.ativo && reguaArrasto_.moveu;
         const double centro = reguaArrasto_.ativo ? reguaArrasto_.pos : tempo::regua::posicaoDaParada(duracaoMin_);
-        const int valor = reguaArrasto_.ativo ? reguaArrasto_.minutos() : duracaoMin_;
+        const int valor = reguaArrasto_.ativo ? reguaArrasto_.mostrado() : duracaoMin_;   // so muda quando uma marca chega a agulha
         // 4x so ate 90 min por rodada: acima disso desliga (e o botao apaga)
         const bool cicloPermitido = tempo::ciclo4xPermitido(valor);
         if (pomodoro_ && !cicloPermitido && podeEditar) pomodoro_ = false;

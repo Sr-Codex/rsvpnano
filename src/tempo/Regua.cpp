@@ -116,7 +116,20 @@ namespace tempo::regua {
         return p;
     }
 
+    namespace {
+        double posDaParada(int k) { return k < 0 ? kPosInf : double(k); }
+    }
+
+    int Arrasto::mostrado() const { return parada < 0 ? kLivre : minutoDaParada(parada); }
+
+    void Arrasto::atualizarMostrado() {
+        const int ultima = kTotal - 1;
+        while (parada < ultima && pos >= posDaParada(parada + 1) - 1e-9) ++parada;   // subindo: a proxima marca chegou a agulha
+        while (parada > -1 && pos <= posDaParada(parada - 1) + 1e-9) --parada;      // descendo: a anterior chegou
+    }
+
     void Arrasto::comecar(int x, int minutoAtual) {
+        parada = ehLivre(minutoAtual) ? -1 : indiceDaParada(minutoAtual);
         ativo = true;
         moveu = false;
         xRef = x;
@@ -140,11 +153,13 @@ namespace tempo::regua {
         }
         const bool mudou = std::fabs(novo - pos) > 1e-9;
         pos = novo;
+        atualizarMostrado();
         return mudou;
     }
 
     int Arrasto::soltar() {
         const int v = moveu ? encaixar(pos) : encaixar(posRef);
+        parada = ehLivre(v) ? -1 : indiceDaParada(v);   // soltou: o numero passa a ser a parada encaixada, no mesmo quadro
         ativo = false;
         moveu = false;
         return v;

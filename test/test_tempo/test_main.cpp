@@ -2334,6 +2334,111 @@ void test_aviso_sem_resposta_paga_so_ate_a_hora_do_aviso() {
     TEST_ASSERT_EQUAL_INT(70, liquidarBatalha(novoEstado(), in).minutosOvertime);
 }
 
+
+// ---- Regua: o numero mostrado so muda quando uma marca chega a agulha ----------------------------------------------
+void test_regua_valor_mostrado_so_muda_quando_a_marca_chega_a_agulha() {
+    using namespace tempo::regua;
+    Arrasto a;
+    a.comecar(200, 25);                               // parada 4 (25 min)
+    a.mover(209);                                     // cruza a zona morta
+    TEST_ASSERT_EQUAL_INT(25, a.mostrado());
+    a.mover(209 - 12);                                // +0,4 parada
+    NEAR(4.4, a.pos);
+    TEST_ASSERT_EQUAL_INT(25, a.mostrado());
+    a.mover(209 - 18);                                // +0,6: a fita ja esta mais perto do 30, mas o numero fica
+    NEAR(4.6, a.pos);
+    TEST_ASSERT_EQUAL_INT(30, a.minutos());           // (encaixe mais proximo)
+    TEST_ASSERT_EQUAL_INT(25, a.mostrado());
+    a.mover(209 - 30);                                // +1,0: a marca chegou
+    TEST_ASSERT_EQUAL_INT(30, a.mostrado());
+    a.mover(209 - 57);                                // 1,9: continua no 30
+    NEAR(5.9, a.pos);
+    TEST_ASSERT_EQUAL_INT(30, a.mostrado());
+    a.mover(209 - 33);                                // voltando a 1,1: segue no 30 (vindo de cima so cai ao tocar o 30)
+    NEAR(5.1, a.pos);
+    TEST_ASSERT_EQUAL_INT(30, a.mostrado());
+    a.mover(209 - 30);                                // de volta exatamente em 1,0: ainda 30
+    TEST_ASSERT_EQUAL_INT(30, a.mostrado());
+    a.mover(209 - 27);                                // 0,9: ainda 30 (o 25 so volta quando a marca 25 chegar)
+    TEST_ASSERT_EQUAL_INT(30, a.mostrado());
+    a.mover(209 - 21);                                // 0,7... idem
+    TEST_ASSERT_EQUAL_INT(30, a.mostrado());
+    a.mover(209);                                     // de volta a 0,0: a marca do 25 chegou
+    NEAR(4.0, a.pos);
+    TEST_ASSERT_EQUAL_INT(25, a.mostrado());
+    // varias paradas num so movimento
+    a.mover(209 - 150);                               // +5 paradas -> indice 9 = 50 min
+    TEST_ASSERT_EQUAL_INT(50, a.mostrado());
+    a.mover(209 - 345);                               // +11,5 -> pos 15,5 (indice 15 = 75 + 3*15 = 120): mostra a ultima marca alcancada
+    NEAR(15.5, a.pos);
+    TEST_ASSERT_EQUAL_INT(minutoDaParada(15), a.mostrado());
+    a.mover(209 - 60);                                // desce direto varias paradas: ceil
+    NEAR(6.0, a.pos);
+    TEST_ASSERT_EQUAL_INT(minutoDaParada(6), a.mostrado());
+    a.mover(209 - 45);                                // 5,5 -> ainda 6 (35 min)... vindo de cima so cai ao alcancar o 5
+    TEST_ASSERT_EQUAL_INT(minutoDaParada(6), a.mostrado());
+    // soltar em 0,6 -> encaixa e o numero passa a ser essa parada no mesmo quadro
+    a.comecar(200, 25);
+    a.mover(209);
+    a.mover(209 - 18);                                // 4,6
+    TEST_ASSERT_EQUAL_INT(25, a.mostrado());
+    TEST_ASSERT_EQUAL_INT(30, a.soltar());
+    TEST_ASSERT_EQUAL_INT(30, a.mostrado());
+}
+
+void test_regua_valor_mostrado_limites_e_infinito() {
+    using namespace tempo::regua;
+    Arrasto a;
+    // limite 300: prende e mostra 300
+    a.comecar(300, 285);
+    a.mover(290);
+    a.mover(290 - 5000);
+    TEST_ASSERT_EQUAL_INT(300, a.mostrado());
+    a.mover(290 - 5000 + 15);                          // volta 0,5 parada: ainda 300
+    TEST_ASSERT_EQUAL_INT(300, a.mostrado());
+    // limite 5 e entrada no ∞: 5 -> (vao de 1,5) -> ∞ so quando o ∞ chega a agulha
+    a.comecar(100, 5);
+    a.mover(104);
+    a.mover(110);                                      // cruza
+    TEST_ASSERT_EQUAL_INT(5, a.mostrado());
+    a.mover(110 + 30);                                 // pos -1,0: o encaixe ja diria ∞, o numero segue 5
+    NEAR(-1.0, a.pos);
+    TEST_ASSERT_EQUAL_INT(kLivre, a.minutos());
+    TEST_ASSERT_EQUAL_INT(5, a.mostrado());
+    a.mover(110 + 44);                                 // -1,47: ainda nao chegou
+    TEST_ASSERT_EQUAL_INT(5, a.mostrado());
+    a.mover(110 + 45);                                 // -1,5: o ∞ chegou
+    TEST_ASSERT_EQUAL_INT(kLivre, a.mostrado());
+    a.mover(110 + 60);                                 // alem: prende no ∞
+    TEST_ASSERT_EQUAL_INT(kLivre, a.mostrado());
+    // saindo do ∞: so vira 5 quando o 5 chega a agulha (pos 0), nao antes
+    a.mover(110 + 60 - 30);                            // 0,5 parada depois do ∞ (pos -1,0 com a referencia colada em -1,5)
+    TEST_ASSERT_EQUAL_INT(kLivre, a.mostrado());
+    a.mover(110 + 60 - 45);                            // pos -0,0: o 5 chegou
+    NEAR(0.0, a.pos);
+    TEST_ASSERT_EQUAL_INT(5, a.mostrado());
+    // soltar entre o ∞ e o 5 em -0,6 encaixa no 5 e mostra 5; em -1,0 encaixa no ∞
+    a.comecar(200, 5);
+    a.mover(209);
+    a.mover(209 + 18);
+    TEST_ASSERT_EQUAL_INT(5, a.soltar());
+    TEST_ASSERT_EQUAL_INT(5, a.mostrado());
+    a.comecar(200, 5);
+    a.mover(209);
+    a.mover(209 + 30);
+    TEST_ASSERT_EQUAL_INT(5, a.mostrado());
+    TEST_ASSERT_EQUAL_INT(kLivre, a.soltar());
+    TEST_ASSERT_EQUAL_INT(kLivre, a.mostrado());
+    // a partir do ∞
+    a.comecar(200, kLivre);
+    TEST_ASSERT_EQUAL_INT(kLivre, a.mostrado());
+    a.mover(209);
+    a.mover(209 - 44);                                 // pos -0,03: o 5 ainda nao chegou
+    TEST_ASSERT_EQUAL_INT(kLivre, a.mostrado());
+    a.mover(209 - 45);
+    TEST_ASSERT_EQUAL_INT(5, a.mostrado());
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_datas);
@@ -2391,6 +2496,8 @@ int main(int, char**) {
     RUN_TEST(test_regua_marcas_rotulos_e_valor);
     RUN_TEST(test_regua_infinito_posicao_encaixe_e_toque);
     RUN_TEST(test_regua_infinito_arrasto_e_textos);
+    RUN_TEST(test_regua_valor_mostrado_so_muda_quando_a_marca_chega_a_agulha);
+    RUN_TEST(test_regua_valor_mostrado_limites_e_infinito);
     RUN_TEST(test_livre_liquidacao_taxa_por_minuto_sem_bonus_e_sem_vitoria);
     RUN_TEST(test_livre_dia_valido_so_a_partir_de_15_min_e_tetos_continuam);
     RUN_TEST(test_livre_distracao_nao_e_paga_e_relogio_do_foco_para);
