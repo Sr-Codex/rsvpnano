@@ -242,7 +242,7 @@ namespace tempo {
         Dia dia;
         // preferencias da tela inicial do Tempo (lembradas entre sessoes)
         int ultimaCategoria = 0;       // Categoria (enum) da ultima sessao
-        int ultimaDuracaoMin = 25;     // 5..60
+        int ultimaDuracaoMin = 25;     // 5..300 (paradas da regua)
         bool ciclopomodoro = false;    // interruptor "ciclo pomodoro 4x"
         std::vector<std::string> projetosRecentes;   // ids do TickTick dos projetos usados por ultimo (mais novo primeiro, ate 2)
         int metaSemanalMin = 900;      // meta de foco da semana no Perfil (padrao 15 h; editavel no estado.json)

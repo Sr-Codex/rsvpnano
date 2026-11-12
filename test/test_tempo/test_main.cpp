@@ -1668,29 +1668,48 @@ void test_v3e2_proximo_passo_do_saque() {
 
 
 // ---- Inicio v4: regua de 5 a 90 min + 4x sobre a regua --------------------------------------------------------
-void test_regua_posicao_minuto_e_limites() {
+void test_regua_paradas_duas_marchas() {
     using namespace tempo::regua;
+    TEST_ASSERT_EQUAL_INT(28, numParadas());
+    TEST_ASSERT_EQUAL_INT(5, minutoDaParada(0));
+    TEST_ASSERT_EQUAL_INT(60, minutoDaParada(11));
+    TEST_ASSERT_EQUAL_INT(75, minutoDaParada(12));     // troca de marcha: 60 -> 75 e uma parada so
+    TEST_ASSERT_EQUAL_INT(300, minutoDaParada(27));
+    TEST_ASSERT_EQUAL_INT(5, minutoDaParada(-4));
+    TEST_ASSERT_EQUAL_INT(300, minutoDaParada(99));
+    for (int i = 0; i < numParadas(); ++i) TEST_ASSERT_EQUAL_INT(i, indiceDaParada(minutoDaParada(i)));
+    TEST_ASSERT_EQUAL_INT(11, indiceDaParada(62));     // mais proxima
+    TEST_ASSERT_EQUAL_INT(12, indiceDaParada(70));
+    TEST_ASSERT_EQUAL_INT(11, indiceDaParada(67));     // empate (60/75 -> 7 e 8): vence a mais proxima
+    TEST_ASSERT_EQUAL_INT(0, indiceDaParada(-10));
+    TEST_ASSERT_EQUAL_INT(27, indiceDaParada(999));
+    // mesma distancia entre paradas vizinhas nas duas marchas (30 px)
     const double cx = 238.0;
-    // sob a agulha: o minuto do centro cai exatamente em cx; 6 px por minuto
-    NEAR(238.0, xDaParada(25, 25.0, cx));
-    NEAR(238.0 + 30.0, xDaParada(30, 25.0, cx));
-    NEAR(238.0 - 90.0, xDaParada(10, 25.0, cx));
-    // inverso: levar a parada 60 ate x = cx deixa 60 sob a agulha
-    NEAR(60.0, centroDeX(60, cx, cx));
-    NEAR(55.0, centroDeX(60, cx + 30.0, cx));   // a fita foi 30 px para a direita: o valor diminui 5 min
-    // limites e encaixe
-    NEAR(5.0, limitar(-3));
-    NEAR(90.0, limitar(120));
-    TEST_ASSERT_EQUAL_INT(5, encaixar(0));
-    TEST_ASSERT_EQUAL_INT(5, encaixar(7.4));
-    TEST_ASSERT_EQUAL_INT(10, encaixar(7.6));
-    TEST_ASSERT_EQUAL_INT(25, encaixar(24.9));
-    TEST_ASSERT_EQUAL_INT(90, encaixar(89.0));
-    TEST_ASSERT_EQUAL_INT(90, encaixar(500));
-    TEST_ASSERT_EQUAL_INT(5, limitarEncaixado(1));        // salvo antigo/invalido
+    NEAR(30.0, xDoIndice(5, 4.0, cx) - xDoIndice(4, 4.0, cx));
+    NEAR(30.0, xDoIndice(12, 11.0, cx) - xDoIndice(11, 11.0, cx));     // 60 -> 75
+    NEAR(30.0, xDoIndice(20, 11.0, cx) - xDoIndice(19, 11.0, cx));
+    NEAR(238.0, xDaParada(25, 4.0, cx));                               // 25 min = indice 4 sob a agulha
+    NEAR(238.0 + 30.0, xDaParada(30, 4.0, cx));
+    NEAR(238.0 + 30.0, xDaParada(75, 11.0, cx));                       // 75 esta uma parada depois do 60
+    NEAR(11.0, centroDeX(60, cx, cx));
+    NEAR(10.0, centroDeX(60, cx + 30.0, cx));
+}
+
+void test_regua_limites_e_encaixe() {
+    using namespace tempo::regua;
+    NEAR(0.0, limitar(-3));
+    NEAR(27.0, limitar(40));
+    TEST_ASSERT_EQUAL_INT(5, encaixar(-1.0));
+    TEST_ASSERT_EQUAL_INT(5, encaixar(0.4));
+    TEST_ASSERT_EQUAL_INT(10, encaixar(0.6));
+    TEST_ASSERT_EQUAL_INT(60, encaixar(11.2));
+    TEST_ASSERT_EQUAL_INT(75, encaixar(11.6));
+    TEST_ASSERT_EQUAL_INT(300, encaixar(500.0));
+    TEST_ASSERT_EQUAL_INT(5, limitarEncaixado(1));
     TEST_ASSERT_EQUAL_INT(60, limitarEncaixado(60));
-    TEST_ASSERT_EQUAL_INT(90, limitarEncaixado(90));      // antes o teto era 60
-    TEST_ASSERT_EQUAL_INT(90, limitarEncaixado(200));
+    TEST_ASSERT_EQUAL_INT(90, limitarEncaixado(90));
+    TEST_ASSERT_EQUAL_INT(150, limitarEncaixado(150));
+    TEST_ASSERT_EQUAL_INT(300, limitarEncaixado(400));
     TEST_ASSERT_EQUAL_INT(55, limitarEncaixado(57));
 }
 
@@ -1702,56 +1721,105 @@ void test_regua_opacidade_das_pontas() {
     NEAR(1.0, opacidadePonta(62, 12, 448));
     NEAR(1.0, opacidadePonta(230, 12, 448));
     NEAR(0.5, opacidadePonta(423, 12, 448));
-    NEAR(0.0, opacidadePonta(0, 12, 448));     // fora da regua
+    NEAR(0.0, opacidadePonta(0, 12, 448));
 }
 
-void test_regua_toque_nas_metades_com_limites() {
+void test_regua_toque_nas_metades_nas_duas_marchas_e_limites() {
     using namespace tempo::regua;
-    // painel x 8..468 (largura 460): metade a partir de x = 238
-    TEST_ASSERT_FALSE(metadeDireita(10, 8, 460));
     TEST_ASSERT_FALSE(metadeDireita(237, 8, 460));
     TEST_ASSERT_TRUE(metadeDireita(238, 8, 460));
-    TEST_ASSERT_TRUE(metadeDireita(467, 8, 460));
     TEST_ASSERT_EQUAL_INT(30, ajustarPorToque(25, true));
     TEST_ASSERT_EQUAL_INT(20, ajustarPorToque(25, false));
-    TEST_ASSERT_EQUAL_INT(5, ajustarPorToque(5, false));     // limite inferior
+    TEST_ASSERT_EQUAL_INT(5, ajustarPorToque(5, false));           // limite inferior
     TEST_ASSERT_EQUAL_INT(10, ajustarPorToque(5, true));
-    TEST_ASSERT_EQUAL_INT(90, ajustarPorToque(90, true));    // limite superior (antes 60)
-    TEST_ASSERT_EQUAL_INT(85, ajustarPorToque(90, false));
-    TEST_ASSERT_EQUAL_INT(90, ajustarPorToque(85, true));
+    TEST_ASSERT_EQUAL_INT(75, ajustarPorToque(60, true));          // 60: +15 a direita
+    TEST_ASSERT_EQUAL_INT(55, ajustarPorToque(60, false));         //     -5 a esquerda
+    TEST_ASSERT_EQUAL_INT(60, ajustarPorToque(75, false));
+    TEST_ASSERT_EQUAL_INT(150, ajustarPorToque(135, true));
+    TEST_ASSERT_EQUAL_INT(285, ajustarPorToque(300, false));
+    TEST_ASSERT_EQUAL_INT(300, ajustarPorToque(300, true));        // limite superior
+    // rotulos "‹ −N" / "+N ›": passo daquele lado, 0 = limite (apagado e sem acao)
+    TEST_ASSERT_EQUAL_INT(0, passoDoLado(5, false));
+    TEST_ASSERT_EQUAL_INT(5, passoDoLado(5, true));
+    TEST_ASSERT_EQUAL_INT(5, passoDoLado(60, false));
+    TEST_ASSERT_EQUAL_INT(15, passoDoLado(60, true));
+    TEST_ASSERT_EQUAL_INT(15, passoDoLado(75, false));
+    TEST_ASSERT_EQUAL_INT(15, passoDoLado(150, true));
+    TEST_ASSERT_EQUAL_INT(0, passoDoLado(300, true));
+    TEST_ASSERT_EQUAL_INT(15, passoDoLado(300, false));
+    TEST_ASSERT_EQUAL_INT(5, passoDoLado(55, true));
 }
 
 void test_regua_arrasto_leva_a_fita_1_para_1_e_encaixa() {
     using namespace tempo::regua;
     Arrasto a;
-    a.comecar(200, 25);
+    a.comecar(200, 25);                              // indice 4
     TEST_ASSERT_FALSE(a.mover(204));                 // dentro da zona morta: ainda e toque
     TEST_ASSERT_FALSE(a.moveu);
-    TEST_ASSERT_EQUAL_INT(25, a.soltar());           // soltou sem arrastar: valor de partida (quem trata e o toque)
+    TEST_ASSERT_EQUAL_INT(25, a.soltar());
     a.comecar(200, 25);
-    TEST_ASSERT_FALSE(a.mover(150));                 // cruza a zona morta: a referencia passa a 150 (sem salto)
+    TEST_ASSERT_FALSE(a.mover(150));                 // cruza a zona morta: referencia nova (sem salto)
     TEST_ASSERT_TRUE(a.moveu);
-    NEAR(25.0, a.minuto);
-    TEST_ASSERT_TRUE(a.mover(120));                  // 30 px para a esquerda = +5 min (dedo leva a fita)
-    NEAR(30.0, a.minuto);
-    TEST_ASSERT_TRUE(a.mover(138));                  // 18 px para a direita da ref. = -3 min
-    NEAR(27.0, a.minuto);
-    TEST_ASSERT_EQUAL_INT(25, a.soltar());           // 27 encaixa em 25
+    NEAR(4.0, a.pos);
+    TEST_ASSERT_TRUE(a.mover(120));                  // 30 px para a esquerda = +1 parada (30 min)
+    NEAR(5.0, a.pos);
+    TEST_ASSERT_EQUAL_INT(30, a.minutos());
+    TEST_ASSERT_TRUE(a.mover(30));                   // +120 px da ref. = +4 paradas -> indice 8 = 45 min
+    NEAR(8.0, a.pos);
+    TEST_ASSERT_TRUE(a.mover(-60));                  // +7 paradas -> indice 11 = 60
+    NEAR(11.0, a.pos);
+    TEST_ASSERT_TRUE(a.mover(-75));                  // meia parada alem: 11,5 -> encaixa na mais proxima
+    TEST_ASSERT_EQUAL_INT(75, a.soltar());           // (arredonda para cima em 11,5)
     TEST_ASSERT_FALSE(a.ativo);
-    // limites: arrastar muito longe prende em 5 / 90 e voltar o dedo volta a fita logo
+    // limites: prende em 5 e 300 e voltar o dedo volta a fita logo
     a.comecar(300, 60);
-    a.mover(250);                                    // sai da zona morta
-    a.mover(-1000);
-    NEAR(90.0, a.minuto);
-    a.mover(-1000 + 6);                              // 6 px de volta = -1 min
-    NEAR(89.0, a.minuto);
-    a.mover(5000);
-    NEAR(5.0, a.minuto);
+    a.mover(250);
+    a.mover(-5000);
+    NEAR(27.0, a.pos);
+    a.mover(-5000 + 30);                             // 30 px de volta = -1 parada
+    NEAR(26.0, a.pos);
+    a.mover(9000);
+    NEAR(0.0, a.pos);
     TEST_ASSERT_EQUAL_INT(5, a.soltar());
     a.comecar(100, 40);
     a.cancelar();
     TEST_ASSERT_FALSE(a.ativo);
-    TEST_ASSERT_FALSE(a.mover(50));                  // inativo: ignora
+    TEST_ASSERT_FALSE(a.mover(50));
+}
+
+void test_regua_marcas_rotulos_e_valor() {
+    using namespace tempo::regua;
+    TEST_ASSERT_TRUE(paradaMaior(10) && paradaMaior(60) && !paradaMaior(5) && !paradaMaior(55));
+    TEST_ASSERT_TRUE(paradaMaior(90) && paradaMaior(120) && paradaMaior(300));
+    TEST_ASSERT_FALSE(paradaMaior(75));                // 15/45 acima de 60: marca menor
+    TEST_ASSERT_FALSE(paradaMaior(105));
+    TEST_ASSERT_TRUE(paradaHoraCheia(120) && paradaHoraCheia(300) && !paradaHoraCheia(90) && !paradaHoraCheia(60));
+    TEST_ASSERT_EQUAL_STRING("10", rotuloDaParada(10).c_str());
+    TEST_ASSERT_EQUAL_STRING("60", rotuloDaParada(60).c_str());
+    TEST_ASSERT_EQUAL_STRING("1h30", rotuloDaParada(90).c_str());
+    TEST_ASSERT_EQUAL_STRING("2 h", rotuloDaParada(120).c_str());
+    TEST_ASSERT_EQUAL_STRING("2h30", rotuloDaParada(150).c_str());
+    TEST_ASSERT_EQUAL_STRING("5 h", rotuloDaParada(300).c_str());
+    TEST_ASSERT_EQUAL_STRING("45 min", textoDuracao(45).c_str());
+    TEST_ASSERT_EQUAL_STRING("60 min", textoDuracao(60).c_str());
+    TEST_ASSERT_EQUAL_STRING("1h15", textoDuracao(75).c_str());
+    TEST_ASSERT_EQUAL_STRING("2h30", textoDuracao(150).c_str());
+    TEST_ASSERT_EQUAL_STRING("5 h", textoDuracao(300).c_str());
+    auto p = partesDoValor(45);
+    TEST_ASSERT_EQUAL_INT(2, (int)p.size());
+    TEST_ASSERT_EQUAL_STRING("45", p[0].texto.c_str()); TEST_ASSERT_TRUE(p[0].grande);
+    TEST_ASSERT_EQUAL_STRING("min", p[1].texto.c_str()); TEST_ASSERT_FALSE(p[1].grande);
+    p = partesDoValor(150);
+    TEST_ASSERT_EQUAL_INT(3, (int)p.size());
+    TEST_ASSERT_EQUAL_STRING("2", p[0].texto.c_str());
+    TEST_ASSERT_EQUAL_STRING("h", p[1].texto.c_str()); TEST_ASSERT_FALSE(p[1].grande);
+    TEST_ASSERT_EQUAL_STRING("30", p[2].texto.c_str()); TEST_ASSERT_TRUE(p[2].grande);
+    p = partesDoValor(300);
+    TEST_ASSERT_EQUAL_INT(2, (int)p.size());
+    TEST_ASSERT_EQUAL_STRING("5", p[0].texto.c_str());
+    TEST_ASSERT_EQUAL_STRING("h", p[1].texto.c_str());
+    p = partesDoValor(75);
+    TEST_ASSERT_EQUAL_STRING("15", p[2].texto.c_str());
 }
 
 void test_ciclo_4x_pausa_da_rodada() {
@@ -1796,6 +1864,30 @@ void test_ate_hh_mm_com_4x() {
     TEST_ASSERT_EQUAL_STRING("25 min", textoComecar(25, false, false, 0).c_str());                // sem relogio valido
     TEST_ASSERT_EQUAL_STRING("4 × 60", textoComecar(60, true, false, 0).c_str());
     TEST_ASSERT_EQUAL_STRING("4 × 90 · até 02:50", textoComecar(90, true, true, 20 * 60 + 5).c_str());   // vira o dia
+}
+
+void test_4x_bloqueado_acima_de_90() {
+    TEST_ASSERT_TRUE(ciclo4xPermitido(90));
+    TEST_ASSERT_FALSE(ciclo4xPermitido(105));
+    TEST_ASSERT_FALSE(ciclo4xPermitido(300));
+    TEST_ASSERT_EQUAL_INT(150, duracaoTotalMin(150, true));     // acima de 90 o 4x e ignorado
+    const int agora = 14 * 60 + 32;
+    TEST_ASSERT_EQUAL_STRING("2h30 · até 17:02", textoComecar(150, false, true, agora).c_str());
+    TEST_ASSERT_EQUAL_STRING("2h30 · até 17:02", textoComecar(150, true, true, agora).c_str());
+    TEST_ASSERT_EQUAL_STRING("5 h · até 19:32", textoComecar(300, false, true, agora).c_str());
+    TEST_ASSERT_EQUAL_STRING("5 h · até 01:05", textoComecar(300, false, true, 20 * 60 + 5).c_str());   // cruza a meia-noite
+    TEST_ASSERT_EQUAL_STRING("5 h", textoComecar(300, false, false, 0).c_str());
+    TEST_ASSERT_EQUAL_STRING("45 min · até 15:17", textoComecar(45, false, true, agora).c_str());
+}
+
+void test_formato_relogio_h_mm_ss() {
+    TEST_ASSERT_EQUAL_STRING("00:00", formatarRelogio(0).c_str());
+    TEST_ASSERT_EQUAL_STRING("00:00", formatarRelogio(-5).c_str());
+    TEST_ASSERT_EQUAL_STRING("59:59", formatarRelogio(3599).c_str());
+    TEST_ASSERT_EQUAL_STRING("1:00:00", formatarRelogio(3600).c_str());
+    TEST_ASSERT_EQUAL_STRING("2:29:59", formatarRelogio(150 * 60 - 1).c_str());
+    TEST_ASSERT_EQUAL_STRING("5:00:00", formatarRelogio(300 * 60).c_str());
+    TEST_ASSERT_EQUAL_STRING("10:00:00", formatarRelogio(600 * 60).c_str());   // 5 h + hora extra maxima (+100 %)
 }
 
 void test_texto_sem_projeto() {
@@ -1947,10 +2039,14 @@ int main(int, char**) {
     RUN_TEST(test_relogio_escala_e_ancora);
     RUN_TEST(test_foco_livre_liquida_pela_categoria);
     RUN_TEST(test_ciclo_pomodoro_sequencia);
-    RUN_TEST(test_regua_posicao_minuto_e_limites);
+    RUN_TEST(test_regua_paradas_duas_marchas);
+    RUN_TEST(test_regua_limites_e_encaixe);
     RUN_TEST(test_regua_opacidade_das_pontas);
-    RUN_TEST(test_regua_toque_nas_metades_com_limites);
+    RUN_TEST(test_regua_toque_nas_metades_nas_duas_marchas_e_limites);
     RUN_TEST(test_regua_arrasto_leva_a_fita_1_para_1_e_encaixa);
+    RUN_TEST(test_regua_marcas_rotulos_e_valor);
+    RUN_TEST(test_4x_bloqueado_acima_de_90);
+    RUN_TEST(test_formato_relogio_h_mm_ss);
     RUN_TEST(test_ciclo_4x_pausa_da_rodada);
     RUN_TEST(test_ate_hh_mm_com_4x);
     RUN_TEST(test_texto_sem_projeto);

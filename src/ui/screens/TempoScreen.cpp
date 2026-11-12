@@ -29,15 +29,7 @@ namespace screens {
 
         
         // ------------------------------------------------------------ formatacao
-        std::string fmtRelogio(int64_t totalSeg) {
-            totalSeg = std::max<int64_t>(0, totalSeg);
-            char texto[24];
-            if (totalSeg >= 3600)
-                std::snprintf(texto, sizeof texto, "%d:%02d:%02d", int(totalSeg / 3600), int(totalSeg / 60 % 60), int(totalSeg % 60));
-            else
-                std::snprintf(texto, sizeof texto, "%02d:%02d", int(totalSeg / 60), int(totalSeg % 60));
-            return texto;
-        }
+        std::string fmtRelogio(int64_t totalSeg) { return tempo::formatarRelogio(totalSeg); }   // h:mm:ss a partir de 1 h
 
         std::string fmtHoraMin(int minutos) {
             char texto[24];
@@ -477,7 +469,7 @@ namespace screens {
         // minutos sob a agulha fixa (marcas de 5 em 5, maiores e numeradas nas dezenas, somem nas pontas), agulha com brilho.
         // Tudo com cobertura por pixel (ui/ReguaSuave): marcas, triangulo da agulha, brilho gaussiano, cantos e contorno.
         struct VistaRegua {
-            double centro = 25;      // minuto (fracionario) sob a agulha
+            double centro = 4;       // indice de parada (fracionario) sob a agulha
             int valor = 25;          // minutos mostrados (encaixado)
             bool arrastando = false; // dedo levando a fita: contorno laranja, rotulos apagados, brilho forte
             bool ativo = true;       // false (batalha em curso): rotulos apagados
@@ -500,7 +492,7 @@ namespace screens {
         void desenharRegua(ui::Context& ui, Rect area, const VistaRegua& v) {
             const uint16_t cPainel = ui.color(SurfaceMuted), cTexto = ui.color(Foreground), cMudo = ui.color(Muted);
             const uint16_t cLaranja = c565(kLaranja), cBg = ui.color(Background);
-            const int px6 = int(std::lround(v.centro * tempo::regua::kPxPorMin));
+            const int px6 = int(std::lround(v.centro * tempo::regua::kPxPorParada));
             uint32_t sig = ui::Context::combine(0x9E6A0000U, uint32_t(px6 + 100000));
             sig = ui::Context::combine(sig, uint32_t(v.valor) * 8U + v.arrastando * 1U + v.ativo * 2U + v.x4 * 4U);
             sig = ui::Context::combine(sig, uint32_t(cPainel) * 65537U + cMudo);
@@ -540,12 +532,13 @@ namespace screens {
                 const float xa = 12.0f, xb = float(W) - 12.0f;
                 struct Rotulo { int x; std::string txt; uint16_t cor; };
                 std::vector<Rotulo> rotulos;
-                for (int m = tempo::regua::kMinMin; m <= tempo::regua::kMaxMin; m += tempo::regua::kPassoMin) {
-                    const float x = kCx + float(tempo::regua::xDaParada(m, v.centro, 0.0));
+                for (int i = 0; i < tempo::regua::numParadas(); ++i) {
+                    const int m = tempo::regua::minutoDaParada(i);
+                    const float x = kCx + float(tempo::regua::xDoIndice(i, v.centro, 0.0));
                     if (x < xa || x > xb) continue;
                     const float k = tempo::regua::opacidadePonta(x, xa, xb);
                     if (k <= 0.01f) continue;
-                    const bool maior = m % 10 == 0;
+                    const bool maior = tempo::regua::paradaMaior(m);
                     const float larg = maior ? 2.0f : 1.5f, alfa = k * (maior ? 0.8f : 0.55f);
                     const int y0 = maior ? 58 : 63, y1 = 74;
                     const rg::Rgb& tinta = maior ? fg : mudo;
@@ -554,7 +547,8 @@ namespace screens {
                         if (cob <= 0) continue;
                         for (int ly = y0; ly < y1; ++ly) put(lx, ly, rg::mistura(base(lx, ly), tinta, alfa * cob));
                     }
-                    if (maior) rotulos.push_back({int(std::lround(x)), std::to_string(m), Anel::para565(Anel::grade(rg::mistura(painel, mudo, k)))});
+                    if (maior) rotulos.push_back({int(std::lround(x)), tempo::regua::rotuloDaParada(m),
+                                                  Anel::para565(Anel::grade(rg::mistura(painel, tempo::regua::paradaHoraCheia(m) ? fg : mudo, k)))});
                 }
 
                 // ---- agulha: triangulo (apice y=52) + traco de 3 px (y 50..79), cobertura por pixel sobre o brilho
@@ -571,16 +565,23 @@ namespace screens {
                 const Rect clip{alvo.x, alvo.y, int16_t(W), int16_t(H)};
                 for (const auto& r : rotulos)
                     textoEm(g, r.txt, 15, ox + r.x, oy + baselineCentrada(15, 88), r.cor, cPainel, clip, 1);
-                const bool apagado = v.arrastando || !v.ativo;   // nos limites 5 / 90 o lado sem acao tambem apaga
-                const uint16_t cEsq = apagado || v.valor <= tempo::regua::kMinMin ? cMudo : cLaranja;
-                const uint16_t cDir = apagado || v.valor >= tempo::regua::kMaxMin ? cMudo : cLaranja;
-                textoEm(g, "‹ −5", 17, ox + 16, oy + baselineCentrada(17, 22), cEsq, cPainel, clip, 0);
-                textoEm(g, "+5 ›", 17, ox + W - 16, oy + baselineCentrada(17, 22), cDir, cPainel, clip, 2);
-                const std::string num = std::to_string(v.valor);
-                const int wNum = ui::sans::width(num, ui::sans::font(39)), wMin = ui::sans::width("min", ui::sans::font(17));
-                const int wTot = wNum + 6 + wMin, xNum = int(kCx) - wTot / 2;
-                textoEm(g, num, 39, ox + xNum, oy + 36, cTexto, cPainel, clip, 0);
-                textoEm(g, "min", 17, ox + xNum + wNum + 6, oy + 36, cMudo, cPainel, clip, 0);
+                const bool apagado = v.arrastando || !v.ativo;   // arrastando: sem rotulos de toque
+                const int passoE = tempo::regua::passoDoLado(v.valor, false), passoD = tempo::regua::passoDoLado(v.valor, true);
+                const uint16_t cEsq = apagado || passoE == 0 ? cMudo : cLaranja;   // no limite (5 / 300) apagado e sem acao
+                const uint16_t cDir = apagado || passoD == 0 ? cMudo : cLaranja;
+                textoEm(g, "‹ −" + std::to_string(passoE ? passoE : 5), 17, ox + 16, oy + baselineCentrada(17, 22), cEsq, cPainel, clip, 0);
+                textoEm(g, "+" + std::to_string(passoD ? passoD : 15) + " ›", 17, ox + W - 16, oy + baselineCentrada(17, 22), cDir,
+                        cPainel, clip, 2);
+                // valor: algarismos em 39 px, "min"/"h" em 17 px, mesma linha de base
+                const auto partes = tempo::regua::partesDoValor(v.valor);
+                const auto larg = [&](const tempo::regua::ParteValor& p) { return ui::sans::width(p.texto, ui::sans::font(p.grande ? 39 : 17)); };
+                int wTot = 6 * (int(partes.size()) - 1);
+                for (const auto& p : partes) wTot += larg(p);
+                int xv = int(kCx) - wTot / 2;
+                for (const auto& p : partes) {
+                    textoEm(g, p.texto, p.grande ? 39 : 17, ox + xv, oy + 36, p.grande ? cTexto : cMudo, cPainel, clip, 0);
+                    xv += larg(p) + 6;
+                }
                 if (v.x4) textoEm(g, "× 4", 21, ox + int(kCx) + wTot / 2 + 10, oy + 36, cLaranja, cPainel, clip, 0);
             });
         }
@@ -933,8 +934,8 @@ namespace screens {
             garantirDia(nowMs);
             carregado_ = true;
             categoria_ = tempo::categoriaLivreValida(estado_.ultimaCategoria);   // salvo "Projetos" (versoes antigas) vira Trabalho
-            duracaoMin_ = tempo::regua::limitarEncaixado(estado_.ultimaDuracaoMin);   // 5..90, multiplo de 5
-            pomodoro_ = estado_.ciclopomodoro;
+            duracaoMin_ = tempo::regua::limitarEncaixado(estado_.ultimaDuracaoMin);   // 5..300, uma parada da regua
+            pomodoro_ = estado_.ciclopomodoro && tempo::ciclo4xPermitido(duracaoMin_);
             salvar(filesystem);
         }
         if (syncAtiva_) {
@@ -983,8 +984,8 @@ namespace screens {
             projeto_ = -1;
             nomeBatalha_ = tempo::nomeFocoLivre(categoriaBatalha_);
         }
-        ciclo_ = pomodoro_ ? tempo::iniciarCiclo(duracaoMin_) : tempo::Ciclo{};   // 4x repete a rodada escolhida na regua
-        emCiclo_ = pomodoro_;
+        ciclo_ = pomodoro_ && tempo::ciclo4xPermitido(duracaoMin_) ? tempo::iniciarCiclo(duracaoMin_) : tempo::Ciclo{};   // 4x repete a rodada escolhida na regua
+        emCiclo_ = ciclo_.ativo;
         cicloRodadas_ = 0;
         cicloFocadoMin_ = 0;
         planejadoMin_ = duracaoMin_;
@@ -1380,14 +1381,13 @@ namespace screens {
 
     // ====================================================================== Inicio v4
     // Layout 640x172 (mockup tempo-regua4@2x): linha de cima = "‹ Inicio" (72 x 56) + cartao do foco (nome em 1 linha,
-    // 2a linha = icone + categoria/"sem projeto" + cr/min, "Trocar ›" abre o seletor); embaixo a REGUA de 5 a 90 min
+    // 2a linha = icone + categoria/"sem projeto" + cr/min, "Trocar ›" abre o seletor); embaixo a REGUA de 5 a 300 min (2 marchas)
     // (arrastar leva a fita e encaixa de 5 em 5; toque sem arrasto: metade esquerda -5, direita +5); a direita,
     // Comecar (sub "25 min · ate HH:MM" / "4 × 60 · ate HH:MM") e "4× rodadas" (repete a rodada escolhida 4 vezes).
     Action TempoScreen::drawInicio(ui::Context& ui, uint32_t nowMs, Screen& screen) {
         if (fase_ == Fase::Reflexao || (saqueAtivo_ && !confirmado_)) { screen = Screen::TempoVitoria; return Action::None; }
         garantirDia(nowMs);
         const bool emBatalha = battleActive();
-        const bool ciclo = pomodoro_;
         const bool comProjeto = escolha_ >= 0 && size_t(escolha_) < titulos_.size();
         const tempo::Categoria cat = tempo::categoriaDoFoco(comProjeto, categoria_);
         const bool podeEditar = !emBatalha;
@@ -1420,8 +1420,12 @@ namespace screens {
             reguaArrasto_.cancelar();
         }
         const bool arrastando = reguaArrasto_.ativo && reguaArrasto_.moveu;
-        const double centro = reguaArrasto_.ativo ? reguaArrasto_.minuto : double(duracaoMin_);
-        const int valor = reguaArrasto_.ativo ? tempo::regua::encaixar(reguaArrasto_.minuto) : duracaoMin_;
+        const double centro = reguaArrasto_.ativo ? reguaArrasto_.pos : tempo::regua::posicaoDaParada(duracaoMin_);
+        const int valor = reguaArrasto_.ativo ? reguaArrasto_.minutos() : duracaoMin_;
+        // 4x so ate 90 min por rodada: acima disso desliga (e o botao apaga)
+        const bool cicloPermitido = tempo::ciclo4xPermitido(valor);
+        if (pomodoro_ && !cicloPermitido && podeEditar) pomodoro_ = false;
+        const bool ciclo = pomodoro_;
 
         const uint16_t cMudo = ui.color(Muted), cTexto = ui.color(Foreground), cBg = ui.color(Background);
         const uint16_t cLaranja = c565(kLaranja), cTonal = c565(kTonal);
@@ -1492,10 +1496,10 @@ namespace screens {
             c.comIcone = true;
             c.icone = IconeId::ArrowsClockwise;
             c.fundo = ciclo ? c565(kSelFundo) : cTonal;
-            c.tinta = ciclo ? cLaranja : (emBatalha ? rgb565(90, 92, 90) : cTexto);
+            c.tinta = ciclo ? cLaranja : (emBatalha || !cicloPermitido ? rgb565(90, 92, 90) : cTexto);
             c.selecionado = ciclo;
             c.corContorno = cLaranja;
-            c.habilitado = !emBatalha;
+            c.habilitado = !emBatalha && cicloPermitido;
             c.suave = true;
             if (botao3(ui, Rect{476, 108, 156, 60}, c)) pomodoro_ = !pomodoro_;
         }
@@ -1735,7 +1739,9 @@ namespace screens {
         // ---- aneis + centro
         {
             Bloco aneis(ui, {0, 0, 172, 172}, Background, 0, 20 + surface());
-            aneis.linha(kCx - 40, 82, 80, centro, bonus ? 21 : 26, bonus ? cAzulClaro : cTexto, TextAlign::Center);
+            const bool longo = centro.size() > 5;   // "H:MM:SS" (a partir de 1 h): fonte 21 e caixa mais larga para caber no miolo
+            aneis.linha(longo ? kCx - 42 : kCx - 40, 82, longo ? 84 : 80, centro, bonus || longo ? 21 : 26, bonus ? cAzulClaro : cTexto,
+                        TextAlign::Center);
             aneis.linha(kCx - 40, 106, 80, rotulo, 13, cMudo, TextAlign::Center);
             aneis.marca(static_cast<uint32_t>(voce * 720) * 1031U + static_cast<uint32_t>(inimigo * 720));
             const Cor fundo = deRole(ui, Background);

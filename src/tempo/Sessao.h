@@ -28,6 +28,9 @@ namespace tempo {
     // Pausa curta entre rodadas do 4x: rodada/5 arredondada a multiplo de 5 min, limitada a 5..15
     // (25 -> 5; 50/60 -> 10; 75/90 -> 15). A pausa longa depois da 4a rodada continua kCicloPausaLongaMin.
     int pausaDoCiclo(int rodadaMin);
+    // O 4x so existe ate 90 min por rodada (acima disso o botao apaga e o ciclo desliga).
+    inline constexpr int kCiclo4xMaxMin = 90;
+    constexpr bool ciclo4xPermitido(int rodadaMin) { return rodadaMin <= kCiclo4xMaxMin; }
     // Minutos de relogio do 4x do comeco ate o fim da ultima rodada: n * rodada + (n - 1) pausas curtas
     // (a pausa longa depois da 4a nao conta). Sem 4x: n = 1 -> so a rodada.
     int duracaoTotalMin(int rodadaMin, bool ciclo4x);
@@ -41,11 +44,14 @@ namespace tempo {
     Categoria categoriaDoChip(int chip);   // 0 Trabalho, 1 Estudo, 2 Leitura, 3 Meditacao, 4 Projetos
     int chipDaCategoria(Categoria c);
     const char* nomeCategoria(Categoria c);
+    // Relogio da batalha: "MM:SS" ate 59:59 e "H:MM:SS" a partir de 1 h (duracoes de ate 5 h + hora extra).
+    std::string formatarRelogio(long long totalSeg);
     // "Estudo · sem projeto": nome do "inimigo" quando nao ha projeto.
     std::string nomeFocoLivre(Categoria c);
     // 2a linha do cartao do foco no Inicio: "Projetos · 0,40 cr/min" ou "sem projeto · 0,20 cr/min".
     std::string linhaTaxaDoFoco(bool temProjeto, Categoria livre);
-    // Sub do botao Comecar: "25 min · ate 14:57" / "4 × 60 · ate 19:02" (sem relogio valido: so "25 min" / "4 × 60").
+    // Sub do botao Comecar: "25 min · ate 14:57" / "4 × 60 · ate 19:02" / "2h30 · ate HH:MM" / "5 h · ate HH:MM"
+    // (sem relogio valido: so a duracao). 4x acima de 90 min por rodada e ignorado.
     // minutoDoDia = hora de parede em minutos desde 00:00 (ignorado se !horaValida).
     std::string textoComecar(int rodadaMin, bool ciclo4x, bool horaValida, int minutoDoDia);
 

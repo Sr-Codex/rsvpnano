@@ -5,6 +5,7 @@
 #include <cstdio>
 
 #include "tempo/Parametros.h"
+#include "tempo/Regua.h"
 
 namespace tempo {
 
@@ -14,7 +15,7 @@ namespace tempo {
     }
 
     int duracaoTotalMin(int rodadaMin, bool ciclo4x) {
-        if (!ciclo4x) return rodadaMin;
+        if (!ciclo4x || !ciclo4xPermitido(rodadaMin)) return rodadaMin;
         return kCicloRodadas * rodadaMin + (kCicloRodadas - 1) * pausaDoCiclo(rodadaMin);
     }
 
@@ -77,6 +78,16 @@ namespace tempo {
         }
     }
 
+    std::string formatarRelogio(long long totalSeg) {
+        totalSeg = std::max<long long>(0, totalSeg);
+        char t[24];
+        if (totalSeg >= 3600)
+            std::snprintf(t, sizeof t, "%d:%02d:%02d", int(totalSeg / 3600), int(totalSeg / 60 % 60), int(totalSeg % 60));
+        else
+            std::snprintf(t, sizeof t, "%02d:%02d", int(totalSeg / 60), int(totalSeg % 60));
+        return t;
+    }
+
     std::string nomeFocoLivre(Categoria c) {
         return std::string{nomeCategoria(c)} + " · sem projeto";
     }
@@ -87,7 +98,8 @@ namespace tempo {
     }
 
     std::string textoComecar(int rodadaMin, bool ciclo4x, bool horaValida, int minutoDoDia) {
-        std::string t = ciclo4x ? "4 × " + std::to_string(rodadaMin) : std::to_string(rodadaMin) + " min";
+        ciclo4x = ciclo4x && ciclo4xPermitido(rodadaMin);
+        std::string t = ciclo4x ? "4 × " + std::to_string(rodadaMin) : regua::textoDuracao(rodadaMin);
         if (horaValida) {
             const int fim = (((minutoDoDia + duracaoTotalMin(rodadaMin, ciclo4x)) % 1440) + 1440) % 1440;
             char hora[16];
