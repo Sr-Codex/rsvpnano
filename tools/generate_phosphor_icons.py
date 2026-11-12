@@ -45,6 +45,8 @@ ICONES = [
     ("PauseCircle", "pause-circle"), ("StarFour", "star-four"),
     # Tempo etapa b (livre): aviso "ainda focando?", ganho ao vivo, aviso "0:40 nao conta"
     ("BellRinging", "bell-ringing"), ("Coins", "coins"), ("Info", "info"),
+    # Tempo etapa c (batalha em cabo de guerra): rotulos VOCE x INIMIGO
+    ("Sword", "sword"), ("Skull", "skull"), ("HourglassMedium", "hourglass-medium"), ("Lightning", "lightning"),
 ]
 
 

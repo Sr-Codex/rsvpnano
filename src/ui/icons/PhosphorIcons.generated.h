@@ -40,8 +40,12 @@ enum class Id : uint8_t {
     BellRinging,
     Coins,
     Info,
+    Sword,
+    Skull,
+    HourglassMedium,
+    Lightning,
 };
-inline constexpr unsigned kNumIcones = 35;
+inline constexpr unsigned kNumIcones = 39;
 
 // Mascara alfa 4 bpp, lado x lado, linhas contiguas, 2 px por byte (1o px = nibble alto).
 struct Mascara {
@@ -49,7 +53,7 @@ struct Mascara {
     uint8_t lado;
     const uint8_t* alfa;
 };
-inline constexpr unsigned kNumMascaras = 141;
+inline constexpr unsigned kNumMascaras = 157;
 extern const Mascara kMascaras[kNumMascaras];   // ordenadas por (id, lado)
 
 } // namespace icons::phosphor
