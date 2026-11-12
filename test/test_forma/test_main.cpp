@@ -6,6 +6,7 @@
 #include <map>
 #include <utility>
 
+#include "ui/FimEnche.h"
 #include "ui/FormaSuave.h"
 
 namespace f = ui::forma;
@@ -187,6 +188,43 @@ void test_progresso_monotono() {
     }
 }
 
+void test_fim_enche_nivel_e_cor_do_texto() {
+    namespace fim = ui::fim;
+    // botao y=100, h=56: 0 % = nada laranja; 50 % = topo na linha 128; 100 % = encerrando
+    const auto n0 = fim::nivel(100, 56, 0.0);
+    TEST_ASSERT_EQUAL_INT(156, n0.linha);
+    TEST_ASSERT_FALSE(n0.encerrando);
+    for (int y = 100; y < 156; ++y) TEST_ASSERT_FALSE(fim::textoEscuro(y, n0));   // tudo claro: nada de laranja
+    const auto n50 = fim::nivel(100, 56, 0.5);
+    TEST_ASSERT_EQUAL_INT(128, n50.linha);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, n50.cobertura);
+    TEST_ASSERT_FALSE(fim::textoEscuro(127, n50));   // acima do nivel: base, texto claro
+    TEST_ASSERT_TRUE(fim::textoEscuro(128, n50));    // linha do nivel (100 % laranja): escuro
+    TEST_ASSERT_TRUE(fim::textoEscuro(155, n50));
+    // nivel no meio de uma linha: cobertura de sub-pixel e troca de cor a partir de 50 %
+    const auto n30 = fim::nivel(100, 56, 0.3);   // topo em 156 - 16,8 = 139,2
+    TEST_ASSERT_EQUAL_INT(139, n30.linha);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.8f, n30.cobertura);
+    TEST_ASSERT_EQUAL(int(fim::Camada::Transicao), int(fim::camadaDaLinha(139, n30)));
+    TEST_ASSERT_TRUE(fim::textoEscuro(139, n30));
+    const auto n34 = fim::nivel(100, 56, 0.34);  // topo em 136,96 -> 4 % da linha 136 fica de fora
+    TEST_ASSERT_EQUAL_INT(136, n34.linha);
+    const auto n60 = fim::nivel(100, 56, 0.6);   // topo em 122,4: so 60 % da linha 122 e laranja... 
+    TEST_ASSERT_EQUAL_INT(122, n60.linha);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.6f, n60.cobertura);
+    // crescimento monotono do laranja
+    int anterior = 1000;
+    for (double p : {0.0, 0.2, 0.4, 0.6, 0.8, 1.0}) {
+        const auto n = fim::nivel(100, 56, p);
+        TEST_ASSERT_TRUE(n.linha <= anterior);
+        anterior = n.linha;
+    }
+    // 100 %: encerrando, todas as linhas escuras (botao todo laranja)
+    const auto n1 = fim::nivel(100, 56, 1.0);
+    TEST_ASSERT_TRUE(n1.encerrando);
+    for (int y = 100; y < 156; ++y) TEST_ASSERT_TRUE(fim::textoEscuro(y, n1));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_cobertura_canto_fora_dentro_borda);
@@ -198,5 +236,6 @@ int main(int, char**) {
     RUN_TEST(test_perimetro_geometria);
     RUN_TEST(test_progresso_perimetro_0_meio_1);
     RUN_TEST(test_progresso_monotono);
+    RUN_TEST(test_fim_enche_nivel_e_cor_do_texto);
     return UNITY_END();
 }

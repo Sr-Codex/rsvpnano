@@ -16,6 +16,8 @@
 #include "tempo/Parametros.h"
 #include "tempo/Regua.h"
 #include "tempo/Sessao.h"
+#include "ui/ClippedGfx.h"
+#include "ui/FimEnche.h"
 #include "ui/FormaSuaveGfx.h"
 #include "ui/ReguaSuave.h"
 #include "ui/AnelSuave.h"
@@ -267,7 +269,8 @@ namespace screens {
             uint8_t tam = 17;
             bool habilitado = true;
             bool selecionado = false;     // contorno de 2 px na cor da tinta
-            int progresso64 = -1;         // >= 0: contorno laranja enchendo (0..64)
+            int progresso64 = -1;         // >= 0: laranja subindo por dentro (Fim · segure, 0..64); 64 = encerrando
+            uint16_t tintaCheia = 0, tintaSubCheia = 0;   // progresso: cores de icone/texto onde o laranja ja passou
             bool empilhado = false;       // icone em cima, texto embaixo (blocos pequenos)
             std::string sub2;             // empilhado: linha extra (13 px, apagada)
             uint16_t tintaSub = 0;        // 0 = mesma da tinta
@@ -287,7 +290,7 @@ namespace screens {
                                          + (b.comIcone ? 8U : 0U) + (b.empilhado ? 16U : 0U) + (b.check ? 8388608U : 0U) + uint32_t(b.corContorno) * 3U + uint32_t(b.tintaIcone) * 5U + uint32_t(b.tam) * 32U
                                          + uint32_t(int(b.icone)) * 8192U + uint32_t(b.progresso64 + 1) * 262144U + (b.suave ? 0x40000000U : 0U)));
             if (ui.redraw(r, sig, true)) {
-                const uint16_t fundo = apertado ? misturar565(b.fundo, 0xFFFF, 0.22) : b.fundo;
+                const uint16_t fundo = apertado && b.progresso64 < 0 ? misturar565(b.fundo, 0xFFFF, 0.22) : b.fundo;
                 const uint16_t tinta = b.tinta;
                 const auto fonte = ui::sans::font(b.tam);
                 const int larguraTexto = ui::sans::width(b.texto, fonte);
@@ -315,30 +318,51 @@ namespace screens {
                 }
                 ui.paint(r, [&](Arduino_GFX& g, Rect alvo) {
                     const int dx = alvo.x - r.x, dy = alvo.y - r.y;
-                    g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, ui.color(Background));
+                    const uint16_t fundoTela = ui.color(Background);
+                    g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, fundoTela);
                     const bool contorno = b.selecionado || apertado;
                     const uint16_t cc = b.selecionado ? (b.corContorno != 0 ? b.corContorno : tinta) : uint16_t(0xFFFF);   // apertado = contorno branco
-                    // Fim · segure: o trilho (faixa de 3 px, branco apagado) e o traco laranja de pontas redondas que o percorre
-                    // (ui/FormaSuave::tracoPerimetro), no lugar do contorno branco duro.
-                    const bool trilhoProgresso = b.progresso64 >= 0;
-                    const uint16_t corTrilho = misturar565(fundo, 0xFFFF, 0.30);
-                    if (b.suave) {
-                        retanguloSuave565(g, alvo.x, alvo.y, alvo.w, alvo.h, b.raio, fundo, ui.color(Background),
-                                          trilhoProgresso ? 3 : contorno ? 2 : 0, trilhoProgresso ? corTrilho : cc);
-                    } else g.fillRect(alvo.x, alvo.y, alvo.w, alvo.h, fundo);
-                    if (trilhoProgresso)
-                        ui::forma::tracoDoPerimetro(g, alvo.x, alvo.y, alvo.w, alvo.h, b.raio, 3, b.progresso64 / 64.0, c565(kLaranja),
-                                                    ui.color(Background), corTrilho);
-                    if (b.comIcone) {
-                        icones::Origem o(dx, dy);
-                        icones::phosphor(g, b.icone, xIcone, yIcone, lado, b.tintaIcone != 0 ? b.tintaIcone : tinta, fundo);
+                    // Desenha o botao inteiro (fundo, contorno, icone e textos) numa camada, sobre `g` (que pode estar recortado).
+                    const auto camada = [&](Arduino_GFX& gg, uint16_t corFundo, uint16_t corContorno, int espContorno, uint16_t corTinta,
+                                            uint16_t corSub) {
+                        if (b.suave) retanguloSuave565(gg, r.x, r.y, r.w, r.h, b.raio, corFundo, fundoTela, espContorno, corContorno);
+                        else gg.fillRect(r.x, r.y, r.w, r.h, corFundo);
+                        if (b.comIcone) {
+                            icones::Origem o(dx, dy);
+                            icones::phosphor(gg, b.icone, xIcone, yIcone, lado, b.tintaIcone != 0 && b.progresso64 < 0 ? b.tintaIcone : corTinta, corFundo);
+                        }
+                        if (b.check) {
+                            icones::Origem o(dx, dy);
+                            icones::phosphor(gg, IconeId::CheckCircle, r.x + r.w - 16, r.y + 16, 16, c565(kLaranja), corFundo);
+                        }
+                        ui.drawText(gg, t1, corTinta, dx, dy, corFundo);
+                        ui.drawText(gg, t2, corSub, dx, dy, corFundo);
+                    };
+                    const uint16_t sub = b.tintaSub != 0 ? b.tintaSub : tinta;
+                    if (b.progresso64 < 0) {
+                        camada(g, fundo, cc, contorno ? 2 : 0, tinta, sub);
+                        return;
                     }
-                    if (b.check) {
-                        icones::Origem o(dx, dy);
-                        icones::phosphor(g, IconeId::CheckCircle, r.x + r.w - 16, r.y + 16, 16, c565(kLaranja), fundo);
+                    // Fim · segure (A · enche): base escura com contorno laranja de 2 px; o laranja sobe por dentro, de baixo para cima;
+                    // acima do nivel icone/textos claros, abaixo escuros; a linha do nivel mistura fundo (cobertura de sub-pixel).
+                    const uint16_t laranja = c565(kLaranja);
+                    const auto nv = ui::fim::nivel(r.y, r.h, b.progresso64 / 64.0);
+                    const auto recorte = [&](int y0, int y1, auto&& desenhar) {   // linhas [y0, y1)
+                        y0 = std::max<int>(y0, r.y);
+                        y1 = std::min<int>(y1, r.y + r.h);
+                        if (y1 <= y0) return;
+                        ui::ClippedGfx cg(g, Rect{r.x, int16_t(y0), r.w, int16_t(y1 - y0)});
+                        desenhar(cg);
+                    };
+                    recorte(r.y, nv.linha, [&](Arduino_GFX& cg) { camada(cg, fundo, laranja, 2, tinta, sub); });
+                    if (nv.cobertura > 0.0f && nv.linha >= r.y && nv.linha < r.y + r.h) {
+                        const bool escuro = ui::fim::textoEscuro(nv.linha, nv);
+                        recorte(nv.linha, nv.linha + 1, [&](Arduino_GFX& cg) {
+                            camada(cg, misturar565(fundo, laranja, nv.cobertura), laranja, 2, escuro ? b.tintaCheia : tinta,
+                                   escuro ? b.tintaSubCheia : sub);
+                        });
                     }
-                    ui.drawText(g, t1, tinta, dx, dy, fundo);
-                    ui.drawText(g, t2, b.tintaSub != 0 ? b.tintaSub : tinta, dx, dy, fundo);
+                    recorte(nv.linha + 1, r.y + r.h, [&](Arduino_GFX& cg) { camada(cg, laranja, laranja, 2, b.tintaCheia, b.tintaSubCheia); });
                 });
             }
             return ui.firmTap(r, b.habilitado);
@@ -2151,6 +2175,21 @@ namespace screens {
             } else {
                 b.texto = "Fim · segure";
                 b.tam = 17;
+            }
+            if (segurando) {   // A · enche: apertado = escuro quente + contorno laranja; icone/textos brancos; onde enche, escuros
+                const uint16_t escuro = c565(Cor{44, 30, 22}), fundoBatalha = ui.color(Background);
+                b.fundo = escuro;
+                b.tinta = 0xFFFF;
+                b.tintaSub = misturar565(escuro, 0xFFFF, 0.75);
+                b.tintaCheia = fundoBatalha;
+                b.tintaSubCheia = misturar565(fundoBatalha, c565(kLaranja), 0.25);
+                if (progFim >= 1.0) {   // 100 %: encerrando (todo laranja, check escuro)
+                    b.icone = IconeId::Check;
+                    b.texto = "encerrando";
+                    b.tam = mini ? 13 : 17;
+                    b.sub2.clear();
+                    b.empilhado = mini;
+                }
             }
             botao3(ui, r, b);   // so captura o toque (apertado); o fim acontece pelo tempo segurado
         };
