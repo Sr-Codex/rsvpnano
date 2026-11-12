@@ -95,6 +95,8 @@ namespace screens {
         bool pegarSom(som::SomId& id);
         // "Sincronizar" (seletor sem projetos): true uma vez depois do toque; o App dispara a sync silenciosa do TickTick.
         bool pegarPedidoSync() { const bool v = pedidoSync_; pedidoSync_ = false; return v; }
+        // Erro da ultima sincronizacao do TickTick ("" = deu certo), ex.: "lista PROJETOS não encontrada"; aparece no "Trocar ›" sem projetos.
+        void definirErroSync(std::string erro) { erroSync_ = std::move(erro); }
 
         // Atividade do usuario (toque na tela ou botao fisico, inclusive o que so acorda o Modo Foco): zera os 90 min do aviso
         // "ainda focando?" de qualquer sessao rodando (Timer, hora extra, livre). Com o aviso aberto, o toque na tela e
@@ -214,7 +216,8 @@ namespace screens {
         Action drawAvisoOcio(ui::Context& ui, uint32_t nowMs, Screen& screen);
         void concluirRodada(uint32_t nowMs, fs::FS* filesystem);   // ciclo: liquida a rodada e entra na pausa
         void salvarPreferencias();
-        void escolher(int indice);                              // -1 = sem projeto (a categoria livre fica em categoria_)
+        void escolher(int indice);                              // projeto do TickTick (indice em lista_); lembra o id
+        void escolherCategoria(tempo::Categoria categoria);     // "sem projeto" nessa categoria; esquece o projeto lembrado
         void pausarOuRetomar(uint32_t nowMs);
         void alternarDistracao(uint32_t nowMs);
         void acumular(uint32_t nowMs);
@@ -281,7 +284,10 @@ namespace screens {
         bool syncAtiva_ = false;             // job do TickTick gravando arquivos: nao ler
         uint32_t manutencaoRelogioMs_ = 0;
         std::vector<std::string> titulos_;   // titulos limpos (sem emoji), 1:1 com lista_.projetos
-        size_t pagina_ = 0;                  // pagina do seletor (0 = categorias do Foco livre + 2 projetos recentes)
+        size_t pagina_ = 0;                  // pagina do "Trocar ›" (2 projetos por pagina; setas so com mais de 2)
+        std::string erroSync_;               // erro da ultima sync do TickTick (aparece no "Trocar ›" sem projetos)
+        bool projetoSaiu_ = false;           // o projeto lembrado saiu da coluna AGORA (aviso ambar no cartao ate a proxima escolha/sessao)
+        std::string projetoBatalhaId_;       // id do TickTick do projeto da batalha em curso ("" = sem projeto)
         bool pedidoSync_ = false;            // "Sincronizar" tocado no seletor vazio
         bool fimApertado_ = false;           // dedo em "Fim · segure"
         uint32_t fimInicioMs_ = 0;           // quando o dedo apoiou em "Fim · segure"
@@ -289,7 +295,7 @@ namespace screens {
         uint64_t pausaInicioMs_ = 0;         // inicio da pausa em curso (Pausar)
         uint32_t sincPedidaMs_ = 0;          // "Sincronizar" tocado ha pouco (0 = nao)
         bool seletor_ = false;               // seletor de foco aberto (Screen::TempoHoje)
-        int escolha_ = -1;                   // foco escolhido no Inicio: -1 = sem projeto, senao indice do projeto
+        int escolha_ = -1;                   // foco escolhido no Inicio: -1 = sem projeto, senao indice do projeto (re-resolvido pelo id em Estado::projetoId a cada recarga)
         tempo::Categoria categoria_ = tempo::Categoria::Trabalho;   // categoria do FOCO LIVRE (nunca Projetos; com projeto a categoria e unica)
         int duracaoMin_ = 25;                // duracao da regua do Inicio (5..90, multiplo de 5)
         bool pomodoro_ = false;              // "4x rodadas": repete a rodada escolhida 4 vezes (pausa = tempo::pausaDoCiclo)

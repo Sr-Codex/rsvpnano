@@ -1295,6 +1295,7 @@ void App::updateBackgroundJob() {
             const uint32_t versao = net::ticktick::versao();
             tempoScreen_.sincronizacaoTerminou(storage_.mounted() ? &Board::Storage::filesystem() : nullptr, millis(), versao);
             if (tempo::consumirVersao(tickTickVersaoVista_, versao)) habitsError_ = net::ticktick::status().habitsError;
+            tempoScreen_.definirErroSync(net::ticktick::status().error);   // "lista PROJETOS não encontrada" etc. no Trocar ›
             jobSecrets_ = {};   // nao deixa copia do token na RAM
             immediateUi_.invalidate();
             if (deferredKind_ != JobKind::None) {   // um job bloqueante estava esperando a sync

@@ -10,6 +10,7 @@
 #include "tempo/Progressao.h"
 #include "tempo/Relogio.h"
 #include "ui/Rgb565.h"
+#include "ui/screens/HabitosIcones.h"
 #include "ui/screens/TempoScreen.h"
 
 namespace screens {
@@ -372,11 +373,14 @@ namespace screens {
         for (int i = 0; i < kVisiveis && rolagem_ + i < total; ++i) {
             const auto& p = *lista[size_t(rolagem_ + i)];
             const int y = 26 + i * 33;
-            b.texto({16, y, 340, 18}, p.nome, 13, cTexto);
+            b.texto({38, y, 318, 18}, p.nome, 13, cTexto);   // 🎯 (16 px) a esquerda do nome
             b.texto({360, y + 3, 70, 16}, horasDecimal(p.minutos), 12, cTexto);
             b.texto({400, y + 3, 70, 14}, std::to_string(p.vitorias) + (p.vitorias == 1 ? " vitória" : " vitórias"), 10, cMudo, TextAlign::Right);
         }
         b.desenhar([&](Arduino_GFX& g, int dx, int dy) {
+            icones::Origem origem(dx, dy);
+            for (int i = 0; i < kVisiveis && rolagem_ + i < total; ++i)
+                icones::emoji(g, icons::emoji::Id::Bullseye, 24, 26 + i * 33 + 9, 16, ui.color(Background));
             for (int i = 0; i < kVisiveis && rolagem_ + i < total; ++i)
                 barra(g, 16 + dx, 26 + i * 33 + 19 + dy, 330, double(lista[size_t(rolagem_ + i)]->minutos) / maxMin, kLaranja, 6);
         });

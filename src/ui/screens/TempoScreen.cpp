@@ -747,16 +747,16 @@ namespace screens {
         screen = emFechamento() || saqueAtivo_ ? Screen::TempoVitoria : Screen::TempoBatalha;
     }
 
-    // Botao do cartao AGORA (sem batalha): abre o Inicio com o proximo projeto (o 1o da lista) ja escolhido.
+    // Botao do cartao AGORA (sem batalha): abre o Inicio com o foco lembrado (ultimo projeto pelo id, ou a ultima categoria).
     bool TempoScreen::comecar(Screen& screen) {
         if (battleActive() || emFechamento()) return false;
-        seletor_ = false;
-        if (!lista_.projetos.empty()) escolher(0);
+        seletor_ = false;   // o Inicio mostra o foco lembrado (projeto pelo id ou categoria); nao troca a escolha
         screen = Screen::TempoHoje;
         return true;
     }
 
-    // BOOT curto no launcher: Foco livre imediato com a ultima categoria/duracao (ignora o ciclo pomodoro).
+    // BOOT curto no launcher: Timer imediato com a ultima duracao de Timer no ULTIMO PROJETO lembrado (ou na ultima categoria,
+    // se nao ha projeto) (ignora o ciclo pomodoro).
     void TempoScreen::focoRapido(uint32_t nowMs, Screen& screen, fs::FS* filesystem) {
         if (!carregado_) carregar(filesystem, true, nowMs);
         if (battleActive() || emFechamento()) {
@@ -764,24 +764,44 @@ namespace screens {
             return;
         }
         seletor_ = false;
-        escolha_ = -1;
         ciclo_ = tempo::Ciclo{};
         planejadoMin_ = duracaoTimerMin_;   // BOOT no launcher SEMPRE comeca um Timer (nunca o livre), com a ultima duracao de Timer
-        categoriaBatalha_ = categoria_;
-        projeto_ = -1;
-        nomeBatalha_ = tempo::nomeFocoLivre(categoriaBatalha_);
+        projetoSaiu_ = false;
+        if (escolha_ >= 0 && size_t(escolha_) < lista_.projetos.size()) {
+            projeto_ = escolha_;
+            projetoBatalhaId_ = lista_.projetos[escolha_].id;
+            categoriaBatalha_ = tempo::categoriaDoFoco(true, categoria_);
+            nomeBatalha_ = titulos_[escolha_].empty() ? std::string{"Projeto"} : titulos_[escolha_];
+        } else {
+            escolha_ = -1;
+            projeto_ = -1;
+            projetoBatalhaId_.clear();
+            categoriaBatalha_ = categoria_;
+            nomeBatalha_ = tempo::nomeFocoLivre(categoriaBatalha_);
+        }
         salvarPreferencias();
         ligarBatalha(nowMs, false);
         screen = Screen::TempoBatalha;
     }
 
     void TempoScreen::escolher(int indice) {
-        // Com projeto a categoria e UNICA (Projetos, vem de tempo::categoriaDoFoco); categoria_ guarda so a do Foco livre.
+        // Com projeto a categoria e UNICA (Projetos, vem de tempo::categoriaDoFoco); categoria_ guarda so a do "sem projeto".
         escolha_ = indice >= 0 && size_t(indice) < lista_.projetos.size() ? indice : -1;
+        estado_.projetoId = escolha_ >= 0 ? lista_.projetos[escolha_].id : std::string{};   // lembrado pelo id (sobrevive a desligar e a reordenar)
+        projetoSaiu_ = false;
+        salvarPreferencias();
+    }
+
+    void TempoScreen::escolherCategoria(tempo::Categoria categoria) {
+        escolha_ = -1;
+        categoria_ = tempo::categoriaSemProjetoValida(static_cast<int>(categoria));
+        estado_.projetoId.clear();
+        projetoSaiu_ = false;
+        salvarPreferencias();
     }
 
     void TempoScreen::salvarPreferencias() {
-        estado_.ultimaCategoria = static_cast<int>(tempo::categoriaLivreValida(static_cast<int>(categoria_)));
+        estado_.ultimaCategoria = static_cast<int>(tempo::categoriaSemProjetoValida(static_cast<int>(categoria_)));
         estado_.ultimaDuracaoMin = duracaoMin_;   // 0 = livre (ultima escolha da regua)
         if (!tempo::regua::ehLivre(duracaoMin_)) duracaoTimerMin_ = duracaoMin_;
         estado_.ultimaDuracaoTimerMin = duracaoTimerMin_;
@@ -988,7 +1008,7 @@ namespace screens {
             }
             garantirDia(nowMs);
             carregado_ = true;
-            categoria_ = tempo::categoriaLivreValida(estado_.ultimaCategoria);   // salvo "Projetos" (versoes antigas) vira Trabalho
+            categoria_ = tempo::categoriaSemProjetoValida(estado_.ultimaCategoria);   // salvo Leitura/"Projetos" (versoes antigas) vira Trabalho
             duracaoMin_ = tempo::regua::limitarEncaixado(estado_.ultimaDuracaoMin);   // 5..300, uma parada da regua; 0 = livre
             duracaoTimerMin_ = tempo::regua::duracaoDoTimer(duracaoMin_, estado_.ultimaDuracaoTimerMin);
             pomodoro_ = estado_.ciclopomodoro && tempo::ciclo4xPermitido(duracaoMin_);
@@ -999,8 +1019,21 @@ namespace screens {
         } else {
             lista_ = tempo::ListaProjetos{};
             titulos_.clear();
-            if (filesystem != nullptr) TempoStorage::loadProjects(*filesystem, lista_);
-            for (const auto& projeto : lista_.projetos) titulos_.push_back(tempo::limparTitulo(projeto.titulo));
+            const bool lida = filesystem != nullptr && TempoStorage::loadProjects(*filesystem, lista_);
+            for (const auto& projeto : lista_.projetos) titulos_.push_back(tempo::tituloDeProjeto(projeto.titulo));
+            // O projeto lembrado e guardado pelo id do TickTick; a ordem da lista muda a cada sincronizacao, entao o indice e
+            // re-resolvido a cada recarga. Arquivo ilegivel = nao julga (mantem o id).
+            std::vector<std::string> ids;
+            ids.reserve(lista_.projetos.size());
+            for (const auto& projeto : lista_.projetos) ids.push_back(projeto.id);
+            const auto r = tempo::resolverProjeto(estado_.projetoId, ids, lida);
+            if (lida || estado_.projetoId.empty()) {
+                escolha_ = r.indice;
+                if (r.saiu) {   // saiu de AGORA: "sem projeto" na ultima categoria + aviso (gravado junto da proxima gravacao do estado)
+                    estado_.projetoId.clear();
+                    projetoSaiu_ = true;
+                }
+            }
         }
         pagina_ = 0;
         if (escolha_ >= int(titulos_.size())) escolha_ = -1;
@@ -1068,12 +1101,14 @@ namespace screens {
         if (battleActive() || emFechamento()) return;
         const bool comProjeto = escolha_ >= 0 && size_t(escolha_) < titulos_.size();
         categoriaBatalha_ = tempo::categoriaDoFoco(comProjeto, categoria_);   // categoria unica do projeto
+        projetoSaiu_ = false;
         if (comProjeto) {
             projeto_ = escolha_;
+            projetoBatalhaId_ = lista_.projetos[escolha_].id;
             nomeBatalha_ = titulos_[escolha_].empty() ? std::string{"Projeto"} : titulos_[escolha_];
-            tempo::registrarProjetoRecente(estado_.projetosRecentes, lista_.projetos[escolha_].id);
         } else {
             projeto_ = -1;
+            projetoBatalhaId_.clear();
             nomeBatalha_ = tempo::nomeFocoLivre(categoriaBatalha_);
         }
         const bool livre = tempo::regua::ehLivre(duracaoMin_);
@@ -1241,7 +1276,7 @@ namespace screens {
         evento.tipo = "batalha";
         evento.projeto = projeto_ < 0 ? std::string{"Foco livre"} : titulo;
         evento.categoria = tempo::nomeCategoria(categoriaBatalha_);
-        evento.projetoId = projeto_ >= 0 && size_t(projeto_) < lista_.projetos.size() ? lista_.projetos[projeto_].id : std::string{};
+        evento.projetoId = projeto_ >= 0 ? projetoBatalhaId_ : std::string{};   // id do TickTick guardado ao comecar (a lista pode ser reordenada no meio)
         evento.resultado = entradaPend_.livre ? "livre" : liquidacao.vitoria ? "vitoria" : "fuga";   // livre nao conta como vitoria
         evento.planejadoMin = entradaPend_.livre ? 0 : planejadoMin_;
         evento.focadoMin = entradaPend_.minutosFocados;
@@ -1597,24 +1632,30 @@ namespace screens {
         const uint16_t cMudo = ui.color(Muted), cTexto = ui.color(Foreground), cBg = ui.color(Background);
         const uint16_t cLaranja = c565(kLaranja), cTonal = c565(kTonal);
 
-        // ---- cartao do foco: nome em 1 linha (reticencias), icone + categoria/"sem projeto" + cr/min, Trocar ›
+        // ---- cartao do foco (mockup tempo-trocar1, quadros 5-7): icone grande a esquerda (🎯 com projeto; icone da categoria sem
+        // projeto), nome em 1 linha (reticencias), 2a linha "Projeto · 0,40 cr/min" / "sem projeto · 0,20 cr/min" (ou o aviso
+        // ambar "o projeto saiu da coluna AGORA"), Trocar › so sem batalha em curso.
         {
             const Rect cartao{8, 6, 460, 56};
+            const bool avisoSaiu = projetoSaiu_ && !comProjeto;
             const std::string nome = comProjeto ? (titulos_[escolha_].empty() ? std::string{"(sem título)"} : titulos_[escolha_])
                                                 : std::string{tempo::nomeCategoria(cat)};
-            const auto q = quebrar(nome, 350, 17, 15, 1);
+            const auto q = quebrar(nome, 316, 17, 15, 1);
             Bloco card(ui, cartao, SurfaceMuted, 14, 42 + comProjeto);
             card.suave = true;
             card.apertado = podeEditar && ui.pressed(cartao);
-            if (!q.linhas.empty()) card.linha(22, 24, 352, q.linhas[0], q.tam, cTexto);
-            card.linha(42, 46, 340, tempo::linhaTaxaDoFoco(comProjeto, categoria_), 15, cMudo);
+            if (!q.linhas.empty()) card.linha(64, 24, 316, q.linhas[0], q.tam, cTexto);
+            card.linha(64, 46, 316, avisoSaiu ? std::string{"o projeto saiu da coluna AGORA"} : tempo::linhaTaxaDoFoco(comProjeto, categoria_), 15,
+                       avisoSaiu ? c565(kAmbar) : cMudo);
             if (podeEditar) card.linha(344, 34, 110, "Trocar ›", 17, cLaranja, TextAlign::Right);
-            card.marca(uint32_t(cat) * 4U + podeEditar * 2U + comProjeto);
-            const uint16_t corIcone = comProjeto ? rgb565(120, 160, 255) : cLaranja;
-            card.desenhar([&](Arduino_GFX& g, int, int) { icones::phosphor(g, iconeDaCategoria(cat), 30, 46, 15, corIcone, ui.color(SurfaceMuted)); });
+            card.marca(uint32_t(cat) * 4U + podeEditar * 2U + comProjeto + avisoSaiu * 64U);
+            card.desenhar([&](Arduino_GFX& g, int, int) {
+                if (comProjeto) icones::emoji(g, icons::emoji::Id::Bullseye, 36, 34, 34, ui.color(SurfaceMuted));
+                else icones::phosphor(g, iconeDaCategoria(cat), 36, 34, 28, cLaranja, ui.color(SurfaceMuted));
+            });
             if (ui.firmTap(cartao, podeEditar)) {
                 seletor_ = true;
-                pagina_ = 0;
+                pagina_ = escolha_ >= 0 ? size_t(escolha_) / tempo::kProjetosPorPagina : 0;   // abre na pagina do projeto escolhido
                 return Action::None;
             }
         }
@@ -1689,79 +1730,71 @@ namespace screens {
         return Action::None;
     }
 
-    // ====================================================================== Seletor (opcao B)
-    // Pagina 1: uma linha com os 4 blocos de categoria do Foco livre + os 2 projetos usados por ultimo; demais paginas: 3 projetos
-    // por pagina. Voltar separado de ▲ ▼ (sem rolagem por arrasto). Escolher volta ao Inicio ja preenchido.
+    // ====================================================================== "Trocar ›" (tela unica; mockup tempo-trocar1)
+    // Linha de cima: 3 categorias "sem projeto" lado a lado (Trabalho, Estudo, Meditacao; a Leitura saiu: o app Leitor conta).
+    // Embaixo: os projetos da coluna AGORA em linhas de 56 px (icone 🎯 + nome em ate 2 linhas), 2 por pagina; setas ▲▼ (56 px)
+    // so quando ha mais de 2. 1 toque escolhe e volta ao Inicio; sem "‹ Voltar" (o PWR fecha). Sem projetos: painel + Sincronizar.
     Action TempoScreen::drawSeletor(ui::Context& ui, uint32_t nowMs, Screen& screen) {
         (void)screen;
         const size_t nProj = lista_.projetos.size();
-        std::vector<std::string> ids;
-        ids.reserve(nProj);
-        for (const auto& p : lista_.projetos) ids.push_back(p.id);
-        const auto primeira = tempo::projetosDaPrimeiraPagina(estado_.projetosRecentes, ids);
         const size_t paginas = tempo::paginasDoSeletor(nProj);
         pagina_ = std::min(pagina_, paginas - 1);
-        const auto doProjeto = tempo::projetosDaPagina(pagina_, primeira, nProj);
+        const auto doProjeto = tempo::projetosDaPagina(pagina_, nProj);
+        const bool rolagem = paginas > 1;
 
         const uint16_t cMudo = ui.color(Muted), cTexto = ui.color(Foreground), cLaranja = c565(kLaranja);
-        const uint16_t cPainel = ui.color(SurfaceMuted), cTonal = c565(kTonal), cSel = c565(kSelFundo);
-        int y = 1;
+        const uint16_t cPainel = ui.color(SurfaceMuted), cTonal = c565(kTonal), cSel = c565(kSelFundo), cBg = ui.color(Background);
 
-        // ---- linha das 4 categorias do Foco livre (so na pagina 1)
-        if (pagina_ == 0) {
-            static constexpr tempo::Categoria kCats[4] = {tempo::Categoria::Trabalho, tempo::Categoria::Estudo,
-                                                          tempo::Categoria::Leitura, tempo::Categoria::Meditacao};
-            for (int i = 0; i < 4; ++i) {
-                const bool sel = escolha_ < 0 && categoria_ == kCats[i];
-                Btn b;
-                b.texto = tempo::nomeCategoria(kCats[i]);
-                b.tam = 15;
-                b.comIcone = true;
-                b.empilhado = true;
-                b.icone = iconeDaCategoria(kCats[i]);
-                b.fundo = sel ? cSel : cPainel;
-                b.tinta = cTexto;
-                b.tintaIcone = sel ? cLaranja : cMudo;
-                b.selecionado = sel;
-                b.corContorno = cLaranja;
-                b.check = sel;
-                if (botao3(ui, Rect{int16_t(6 + i * 128), int16_t(y), 121, 56}, b)) {
-                    escolha_ = -1;
-                    categoria_ = kCats[i];
+        // ---- linha das 3 categorias "sem projeto"
+        {
+            static constexpr tempo::Categoria kCats[3] = {tempo::Categoria::Trabalho, tempo::Categoria::Estudo, tempo::Categoria::Meditacao};
+            for (int i = 0; i < 3; ++i) {
+                const tempo::Categoria cat = kCats[i];
+                const bool sel = escolha_ < 0 && categoria_ == cat;
+                const Rect rect{int16_t(6 + i * 211), 1, 206, 56};
+                Bloco bloco(ui, rect, SurfaceMuted, 14, 200U + uint32_t(i) * 2U + sel);
+                bloco.suave = true;
+                bloco.corFixa = sel ? int32_t(cSel) : -1;
+                bloco.borda = sel ? 2 : 0;
+                bloco.corBorda = cLaranja;
+                bloco.apertado = ui.pressed(rect);
+                bloco.linha(rect.x + 48, 19, rect.w - 48 - (sel ? 34 : 8), tempo::nomeCategoria(cat), 17, cTexto);
+                bloco.linha(rect.x + 48, 41, rect.w - 48 - (sel ? 34 : 8), "sem projeto · " + tempo::textoTaxaCurta(cat), 15, cMudo);
+                bloco.desenhar([&](Arduino_GFX& g, int, int) {
+                    const uint16_t fundo = sel ? cSel : cPainel;
+                    icones::phosphor(g, iconeDaCategoria(cat), rect.x + 26, 29, 24, sel ? cLaranja : cMudo, fundo);
+                    if (sel) icones::phosphor(g, IconeId::CheckCircle, rect.x + rect.w - 22, 29, 24, cLaranja, fundo);
+                });
+                if (ui.firmTap(rect)) {
+                    escolherCategoria(cat);
                     seletor_ = false;
                     return Action::None;
                 }
             }
-            y = 58;
         }
 
-        // ---- projetos da pagina
+        // ---- projetos da pagina (2 linhas de 56 px)
+        int y = 58;
         for (int idx : doProjeto) {
-            const auto& projeto = lista_.projetos[idx];
-            const Rect rect{6, int16_t(y), 504, 56};
+            const Rect rect{6, int16_t(y), int16_t(rolagem ? 568 : 628), 56};
             const bool sel = escolha_ == idx;
             const std::string titulo = titulos_[idx].empty() ? std::string{"(sem título)"} : titulos_[idx];
-            std::string info;
-            if (projeto.vence && projeto.vence->size() >= 10)
-                info = "vence " + projeto.vence->substr(8, 2) + "/" + projeto.vence->substr(5, 2);
-            const int larguraInfo = info.empty() ? 0 : ui::sans::width(info, ui::sans::font(15)) + 12;
-            const int maxw = 504 - 56 - 14 - larguraInfo - (sel ? 40 : 0);
+            const int maxw = rect.w - 56 - (sel ? 44 : 14);
             const auto q = quebrar(titulo, maxw, 21, 17);
-            Bloco linha(ui, rect, SurfaceMuted, 14, 100 + sel);
+            Bloco linha(ui, rect, SurfaceMuted, 14, 100U + uint32_t(sel));
+            linha.suave = true;
             linha.corFixa = sel ? int32_t(cSel) : -1;
+            linha.borda = sel ? 2 : 0;
+            linha.corBorda = cLaranja;
             linha.apertado = ui.pressed(rect);
             const int passo = q.tam == 21 ? 25 : 21;
             const int y0 = q.linhas.size() == 1 ? y + 28 : y + 28 - passo / 2;
             for (size_t i = 0; i < q.linhas.size(); ++i) linha.linha(62, y0 + int(i) * passo, maxw, q.linhas[i], q.tam, cTexto);
-            const int xInfo = 510 - 14 - (sel ? 36 : 0);
-            if (!info.empty()) linha.linha(xInfo - larguraInfo, y + 28, larguraInfo, info, 15, cMudo, TextAlign::Right);
-            linha.desenhar([&](Arduino_GFX& g, int dx, int dy) {
-                if (sel) {
-                    g.drawRoundRect(rect.x + dx, rect.y + dy, rect.w, rect.h, 14, cLaranja);
-                    g.drawRoundRect(rect.x + dx + 1, rect.y + dy + 1, rect.w - 2, rect.h - 2, 13, cLaranja);
-                    icones::phosphor(g, IconeId::CheckCircle, 510 - 24, y + 28, 24, cLaranja, cSel);
-                }
-                icones::phosphor(g, IconeId::Kanban, 34, y + 28, 24, sel ? cLaranja : c565(Cor{120, 160, 255}), sel ? cSel : cPainel);
+            linha.marca(uint32_t(rect.w));
+            linha.desenhar([&](Arduino_GFX& g, int, int) {
+                const uint16_t fundo = sel ? cSel : cPainel;
+                icones::emoji(g, icons::emoji::Id::Bullseye, 34, y + 28, 28, fundo);
+                if (sel) icones::phosphor(g, IconeId::CheckCircle, rect.x + rect.w - 24, y + 28, 24, cLaranja, fundo);
             });
             if (ui.firmTap(rect)) {
                 escolher(idx);
@@ -1771,21 +1804,27 @@ namespace screens {
             y += 57;
         }
 
-        // ---- sem projetos do TickTick (na pagina 1, abaixo das categorias)
-        if (nProj == 0 && pagina_ == 0) {
-            const Rect painel{6, 58, 504, 113};
+        // ---- nenhum projeto na coluna AGORA (abaixo das categorias)
+        if (nProj == 0) {
+            const Rect painel{6, 58, 628, 113};
             std::string ultima = "última sincronização: nunca";
             if (lista_.gerado_em.size() >= 16)
                 ultima = "última sincronização: " + lista_.gerado_em.substr(8, 2) + "/" + lista_.gerado_em.substr(5, 2) + " "
                          + lista_.gerado_em.substr(11, 5);
             const bool sincronizando = sincPedidaMs_ != 0 && nowMs - sincPedidaMs_ < 8000;
-            Bloco vazio(ui, painel, SurfaceMuted, 14, 110 + sincronizando);
-            vazio.linha(64, 82, 270, "Sem projetos do TickTick", 17, cTexto);
-            vazio.linha(64, 110, 270, "Marque tarefas com a tag Projeto no", 13, cMudo);
-            vazio.linha(64, 128, 270, "TickTick e sincronize pelo Wi-Fi.", 13, cMudo);
-            vazio.linha(64, 152, 270, ultima, 13, c565(Cor{110, 112, 110}));
+            const bool comErro = !erroSync_.empty() && !sincronizando;
+            Bloco vazio(ui, painel, SurfaceMuted, 14, 110U + sincronizando + comErro * 2U);
+            vazio.linha(64, 82, 396, "Nenhum projeto na coluna AGORA", 21, cTexto);
+            if (comErro) {   // o erro legivel da ultima sincronizacao ("lista PROJETOS não encontrada", "coluna AGORA não encontrada"...)
+                const auto qe = quebrar(erroSync_, 396, 15, 13, 2);
+                for (size_t i = 0; i < qe.linhas.size(); ++i) vazio.linha(64, 112 + int(i) * 22, 396, qe.linhas[i], qe.tam, c565(kAmbar));
+            } else {
+                vazio.linha(64, 112, 396, "No TickTick, arraste o projeto para a coluna AGORA", 15, cMudo);
+                vazio.linha(64, 134, 396, "da lista PROJETOS e sincronize.", 15, cMudo);
+            }
+            vazio.linha(64, 156, 396, ultima, 15, c565(Cor{110, 112, 110}));
             vazio.desenhar([&](Arduino_GFX& g, int, int) {
-                icones::phosphor(g, IconeId::CloudSlash, 36, 88, 32, cMudo, cPainel);
+                icones::emoji(g, icons::emoji::Id::Bullseye, 36, 88, 28, cPainel, 115);   // esmaecido (~45 %)
             });
             Btn b;
             b.texto = sincronizando ? "Sincronizando…" : "Sincronizar";
@@ -1793,29 +1832,17 @@ namespace screens {
             b.comIcone = true;
             b.icone = IconeId::ArrowsClockwise;
             b.fundo = cLaranja;
-            b.tinta = ui.color(Background);
+            b.tinta = cBg;
             b.habilitado = !sincronizando;
-            if (botao3(ui, Rect{338, 96, 164, 56}, b)) {
+            b.suave = true;
+            if (botao3(ui, Rect{470, 96, 156, 56}, b)) {
                 pedidoSync_ = true;
                 sincPedidaMs_ = nowMs ? nowMs : 1;
             }
         }
 
-        // ---- coluna da direita: Voltar | pagina | ▲ ▼
-        {
-            Btn v;
-            v.texto = "‹ Voltar";
-            v.tam = 17;
-            v.fundo = cTonal;
-            v.tinta = cTexto;
-            if (botao3(ui, Rect{518, 1, 116, 56}, v)) {
-                seletor_ = false;
-                return Action::None;
-            }
-            Bloco contador(ui, {518, 66, 116, 30}, Background, 0, 120);
-            contador.linha(518, 81, 116, "pág. " + std::to_string(pagina_ + 1) + " de " + std::to_string(paginas), 15, cMudo,
-                           TextAlign::Center);
-            contador.desenhar();
+        // ---- setas ▲▼ (so com mais de 2 projetos)
+        if (rolagem) {
             for (int k = 0; k < 2; ++k) {
                 const bool sobe = k == 0;
                 const bool ativo = sobe ? pagina_ > 0 : pagina_ + 1 < paginas;
@@ -1826,7 +1853,8 @@ namespace screens {
                 b.tinta = ativo ? cTexto : rgb565(70, 72, 70);
                 b.habilitado = ativo;
                 b.tam = 28;
-                if (botao3(ui, Rect{int16_t(sobe ? 518 : 578), 100, 56, 70}, b)) {
+                b.suave = true;
+                if (botao3(ui, Rect{580, int16_t(sobe ? 58 : 115), 54, 56}, b)) {
                     if (sobe) --pagina_;
                     else ++pagina_;
                     return Action::None;
