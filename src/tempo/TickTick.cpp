@@ -102,6 +102,10 @@ namespace tempo::ticktick {
 
     } // namespace
 
+    std::string nomeEfetivo(std::string_view configurado, std::string_view padrao) {
+        return std::string{configurado.empty() ? padrao : configurado};
+    }
+
     bool nomeContem(std::string_view nome, std::string_view alvo) {
         const std::string alvoNorm = normalizarNome(alvo);
         return !alvoNorm.empty() && normalizarNome(nome).find(alvoNorm) != std::string::npos;

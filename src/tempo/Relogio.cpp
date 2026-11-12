@@ -1,5 +1,6 @@
 #include "tempo/Relogio.h"
 
+#include <cstdio>
 #include <ctime>
 
 namespace tempo {
@@ -58,6 +59,44 @@ namespace tempo {
         }
         const int64_t decorridoS = static_cast<int64_t>((ms(nowMs) - gMsBase) / 1000);
         return deEpoch(gEpochBase + decorridoS);
+    }
+
+    int64_t epochDeIso(std::string_view iso) {
+        if (iso.size() < 19) return 0;
+        const auto num = [&](size_t pos, size_t n, int& out) {
+            out = 0;
+            for (size_t i = pos; i < pos + n; ++i) {
+                if (iso[i] < '0' || iso[i] > '9') return false;
+                out = out * 10 + (iso[i] - '0');
+            }
+            return true;
+        };
+        int a, mo, d, h, mi, se;
+        if (!num(0, 4, a) || !num(5, 2, mo) || !num(8, 2, d) || !num(11, 2, h) || !num(14, 2, mi) || !num(17, 2, se)) return 0;
+        if (iso[4] != '-' || iso[7] != '-' || (iso[10] != 'T' && iso[10] != ' ') || mo < 1 || mo > 12 || d < 1 || d > 31
+            || h > 23 || mi > 59 || se > 60 || a < kAnoMinimoValido)
+            return 0;
+        return diaSerial(Data{a, mo, d}) * 86400 + h * 3600 + mi * 60 + se;
+    }
+
+    std::string textoHoraSincronizacao(std::string_view iso, int64_t agoraEpoch, int fusoMin) {
+        const int64_t epoch = epochDeIso(iso);
+        if (epoch <= 0) return "nunca";
+        const Agora quando = deEpoch(epoch + int64_t(fusoMin) * 60, true);
+        if (!quando.valida) return "nunca";
+        char hora[8];
+        std::snprintf(hora, sizeof hora, "%02d:%02d", quando.minutoDoDia / 60, quando.minutoDoDia % 60);
+        if (agoraEpoch > 0) {
+            const Agora agora = deEpoch(agoraEpoch + int64_t(fusoMin) * 60, true);
+            if (agora.valida) {
+                const int64_t dif = diaSerial(agora.data) - diaSerial(quando.data);
+                if (dif == 0) return std::string{"hoje "} + hora;
+                if (dif == 1) return std::string{"ontem "} + hora;
+            }
+        }
+        char dia[8];
+        std::snprintf(dia, sizeof dia, "%02d/%02d ", quando.data.dia, quando.data.mes);
+        return std::string{dia} + hora;
     }
 
 } // namespace tempo

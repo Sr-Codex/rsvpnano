@@ -1631,6 +1631,27 @@ void test_categoria_sem_projeto_leitura_vira_trabalho() {
     TEST_ASSERT_EQUAL_STRING("0,20", textoTaxaCurta(Categoria::Meditacao).c_str());
 }
 
+void test_hora_da_ultima_sincronizacao_em_hora_local() {
+    const int64_t agora = epochDeIso("2026-11-12T20:00:00Z");   // 17:00 em Brasilia (-180)
+    TEST_ASSERT_TRUE(agora > 0);
+    // mesmo dia local
+    TEST_ASSERT_EQUAL_STRING("hoje 14:20", textoHoraSincronizacao("2026-11-12T17:20:00Z", agora, -180).c_str());
+    // 02:30Z = 23:30 do dia ANTERIOR local -> "ontem"
+    TEST_ASSERT_EQUAL_STRING("ontem 23:30", textoHoraSincronizacao("2026-11-12T02:30:00Z", agora, -180).c_str());
+    // dois dias atras: data
+    TEST_ASSERT_EQUAL_STRING("10/11 14:20", textoHoraSincronizacao("2026-11-10T17:20:00Z", agora, -180).c_str());
+    // sufixo do python ("+00:00", fracao) e aceito
+    TEST_ASSERT_EQUAL_STRING("hoje 01:07", textoHoraSincronizacao("2026-11-12T04:07:02.060133+00:00", agora, -180).c_str());
+    // UTC que ja virou o dia mas local nao: agora 02:30Z (23:30 de 11/11), sync 01:00Z (22:00 de 11/11) = hoje
+    TEST_ASSERT_EQUAL_STRING("hoje 22:00", textoHoraSincronizacao("2026-11-12T01:00:00Z", epochDeIso("2026-11-12T02:30:00Z"), -180).c_str());
+    // sem relogio: sempre data + hora
+    TEST_ASSERT_EQUAL_STRING("12/11 14:20", textoHoraSincronizacao("2026-11-12T17:20:00Z", 0, -180).c_str());
+    // invalido / vazio
+    TEST_ASSERT_EQUAL_STRING("nunca", textoHoraSincronizacao("", agora, -180).c_str());
+    TEST_ASSERT_EQUAL_STRING("nunca", textoHoraSincronizacao("lixo", agora, -180).c_str());
+    TEST_ASSERT_EQUAL(0, int(epochDeIso("2026-13-40T99:00:00Z")));
+}
+
 void test_projeto_titulo_limpo_para_a_tela() {
     TEST_ASSERT_EQUAL_STRING("Lançar o conversor HDMI LapSkill (Raspberry Pi)",
                              tituloDeProjeto("\xF0\x9F\x93\x9A" "Proj - Lançar o conversor HDMI LapSkill (Raspberry Pi)").c_str());
@@ -2651,6 +2672,7 @@ int main(int, char**) {
     RUN_TEST(test_projeto_resolver_por_id_ordem_mudou_e_saiu);
     RUN_TEST(test_projeto_id_persiste_no_estado);
     RUN_TEST(test_categoria_sem_projeto_leitura_vira_trabalho);
+    RUN_TEST(test_hora_da_ultima_sincronizacao_em_hora_local);
     RUN_TEST(test_projeto_titulo_limpo_para_a_tela);
     RUN_TEST(test_v3_estado_guarda_projetos_recentes_no_json);
     RUN_TEST(test_leitor_leitura_da_creditos_e_nunca_por_prazer);

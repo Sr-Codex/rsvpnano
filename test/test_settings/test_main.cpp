@@ -15,6 +15,7 @@
 #include "settings/SettingsCodec.h"
 #include "settings/SettingsGlaze.h"
 #include "settings/WifiProfiles.h"
+#include "tempo/TickTick.h"
 #include "text/UnicodeText.h"
 
 void test_saved_wifi_migrates_switches_forgets_and_keeps_passwords_private(){
@@ -61,6 +62,35 @@ void test_saved_wifi_capacity_and_legacy_roundtrip(){
     TEST_ASSERT_EQUAL_STRING(network.ssid.c_str(),ordered.front().ssid.c_str());
     const auto before=secrets;
     settings::wifi::remember(network,secrets,std::string(33,'s'),"invalid");TEST_ASSERT_TRUE(before==secrets);
+}
+
+// Segredos gravados pela versao ANTERIOR (c255904): so ticktickToken/ticktickTag, sem ticktickLista/ticktickColuna.
+void test_old_secrets_without_ticktick_list_and_column_still_load(){
+    const char* old =
+        "wifiPassword = \"old password\"\n"
+        "ticktickToken = \"tok-123\"\n"
+        "ticktickTag = \"Projeto\xF0\x9F\x93\x9A\"\n"
+        "\n[[wifiNetworks]]\nssid = \"Home\"\npassword = \"home secret\"\n";
+    const auto decoded=settings::codec::decodeSecrets(old,settings::SettingsSource::Nvs);
+    TEST_ASSERT_TRUE_MESSAGE(decoded.has_value(),decoded?"":decoded.error().message.c_str());
+    TEST_ASSERT_EQUAL_STRING("old password",decoded->wifiPassword.c_str());
+    TEST_ASSERT_EQUAL(1,decoded->wifiNetworks.size());
+    TEST_ASSERT_EQUAL_STRING("home secret",decoded->wifiNetworks[0].password.c_str());
+    TEST_ASSERT_EQUAL_STRING("tok-123",decoded->ticktickToken.c_str());
+    TEST_ASSERT_EQUAL_STRING("Projeto\xF0\x9F\x93\x9A",decoded->ticktickTag.c_str());   // campo antigo preservado
+    TEST_ASSERT_TRUE(decoded->ticktickLista.empty());
+    TEST_ASSERT_TRUE(decoded->ticktickColuna.empty());
+    // na sincronizacao, vazio cai nos padroes
+    TEST_ASSERT_EQUAL_STRING("PROJETOS",tempo::ticktick::nomeEfetivo(decoded->ticktickLista,tempo::ticktick::kListaPadrao).c_str());
+    TEST_ASSERT_EQUAL_STRING("AGORA",tempo::ticktick::nomeEfetivo(decoded->ticktickColuna,tempo::ticktick::kColunaPadrao).c_str());
+    // regravar e reler mantem tudo
+    const auto again=settings::codec::decodeSecrets(*settings::codec::encodeSecrets(*decoded,settings::SettingsSource::Nvs),settings::SettingsSource::Nvs);
+    TEST_ASSERT_TRUE(again.has_value());TEST_ASSERT_TRUE(*again==*decoded);
+}
+void test_ticktick_effective_names_use_configured_value_over_default(){
+    TEST_ASSERT_EQUAL_STRING("Meus Projetos",tempo::ticktick::nomeEfetivo("Meus Projetos","PROJETOS").c_str());
+    TEST_ASSERT_EQUAL_STRING("Fazendo",tempo::ticktick::nomeEfetivo("Fazendo","AGORA").c_str());
+    TEST_ASSERT_EQUAL_STRING("AGORA",tempo::ticktick::nomeEfetivo("","AGORA").c_str());
 }
 
 void setUp() {}
@@ -460,6 +490,8 @@ int main() {
     UNITY_BEGIN();
     RUN_TEST(test_saved_wifi_migrates_switches_forgets_and_keeps_passwords_private);
     RUN_TEST(test_saved_wifi_capacity_and_legacy_roundtrip);
+    RUN_TEST(test_old_secrets_without_ticktick_list_and_column_still_load);
+    RUN_TEST(test_ticktick_effective_names_use_configured_value_over_default);
     RUN_TEST(test_pocket_lines_guides_migrate_old_settings_without_reinterpreting_horizontal_gap);
     RUN_TEST(test_onboarding_and_touch_preference_migrate_and_persist);
     RUN_TEST(test_sound_settings_defaults_migrate_clamp_and_persist);

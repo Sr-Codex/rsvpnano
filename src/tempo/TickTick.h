@@ -25,6 +25,9 @@ namespace tempo::ticktick {
     inline constexpr const char* kListaPadrao = "PROJETOS";
     inline constexpr const char* kColunaPadrao = "AGORA";
 
+    // Nome efetivo da lista/coluna: o configurado nos segredos ou, se vazio (config antiga, sem o campo), o padrao.
+    std::string nomeEfetivo(std::string_view configurado, std::string_view padrao);
+
     // `nome` contem `alvo` (ambos normalizados por tempo::normalizarNome: minusculas, sem acento, emoji viram espaco).
     // `alvo` que normaliza para vazio nunca bate.
     bool nomeContem(std::string_view nome, std::string_view alvo);

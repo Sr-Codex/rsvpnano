@@ -5,6 +5,8 @@
 // A escala (padrao 1) e um ponto de teste: so o simulador a altera (sim/main.cpp).
 
 #include <cstdint>
+#include <string>
+#include <string_view>
 
 #include "tempo/Tipos.h"
 
@@ -34,6 +36,13 @@ namespace tempo {
 
     // Epoch (UTC, s) agora pelo relogio do app; 0 se a hora e desconhecida. Na placa = hora do sistema (RTC/NTP).
     int64_t epochAgora(uint32_t nowMs);
+
+    // "AAAA-MM-DDTHH:MM:SS..." (UTC; sufixo apos os segundos ignorado) -> epoch (s). 0 = invalido.
+    int64_t epochDeIso(std::string_view iso);
+    // Hora da ultima sincronizacao para a tela, em hora LOCAL (fuso `fusoMin`, padrao param::kFusoMinutos): "hoje 14:20",
+    // "ontem 14:20" ou "12/11 14:20" (dia por meia-noite local). `agoraEpoch` <= 0 (sem relogio) = sempre "dd/mm hh:mm".
+    // iso invalido/vazio = "nunca".
+    std::string textoHoraSincronizacao(std::string_view iso, int64_t agoraEpoch, int fusoMin);
 
     // Reancora o relogio (ex.: quando o RTC/NTP fornecer a hora). epoch invalido => desancora.
     void ancorar(int64_t epoch, uint32_t nowMs);

@@ -249,8 +249,8 @@ namespace net::ticktick {
             if (secrets.ticktickToken.empty()) return std::unexpected("Token do TickTick não configurado");
             // Projetos = coluna AGORA da lista PROJETOS (nomes padrao; podem ser trocados nos segredos). O campo antigo
             // ticktickTag segue aceito na configuracao, mas nao e mais usado.
-            const std::string nomeLista = secrets.ticktickLista.empty() ? tempo::ticktick::kListaPadrao : secrets.ticktickLista;
-            const std::string nomeColuna = secrets.ticktickColuna.empty() ? tempo::ticktick::kColunaPadrao : secrets.ticktickColuna;
+            const std::string nomeLista = tempo::ticktick::nomeEfetivo(secrets.ticktickLista, tempo::ticktick::kListaPadrao);
+            const std::string nomeColuna = tempo::ticktick::nomeEfetivo(secrets.ticktickColuna, tempo::ticktick::kColunaPadrao);
 
             WifiScope wifi;
             // Falhas antes dos hábitos também aparecem na tela de Hábitos ("erro de sync"), senão ela fica muda.

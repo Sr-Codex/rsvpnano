@@ -1807,10 +1807,8 @@ namespace screens {
         // ---- nenhum projeto na coluna AGORA (abaixo das categorias)
         if (nProj == 0) {
             const Rect painel{6, 58, 628, 113};
-            std::string ultima = "última sincronização: nunca";
-            if (lista_.gerado_em.size() >= 16)
-                ultima = "última sincronização: " + lista_.gerado_em.substr(8, 2) + "/" + lista_.gerado_em.substr(5, 2) + " "
-                         + lista_.gerado_em.substr(11, 5);
+            const std::string ultima = "última sincronização: "
+                + tempo::textoHoraSincronizacao(lista_.gerado_em, tempo::epochAgora(nowMs), tempo::param::kFusoMinutos);   // hora local
             const bool sincronizando = sincPedidaMs_ != 0 && nowMs - sincPedidaMs_ < 8000;
             const bool comErro = !erroSync_.empty() && !sincronizando;
             Bloco vazio(ui, painel, SurfaceMuted, 14, 110U + sincronizando + comErro * 2U);
