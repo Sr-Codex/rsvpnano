@@ -30,7 +30,7 @@ namespace tempo {
     int pausaDoCiclo(int rodadaMin);
     // O 4x so existe ate 90 min por rodada (acima disso o botao apaga e o ciclo desliga).
     inline constexpr int kCiclo4xMaxMin = 90;
-    constexpr bool ciclo4xPermitido(int rodadaMin) { return rodadaMin <= kCiclo4xMaxMin; }
+    constexpr bool ciclo4xPermitido(int rodadaMin) { return rodadaMin > 0 && rodadaMin <= kCiclo4xMaxMin; }   // livre (0): nunca
     // Minutos de relogio do 4x do comeco ate o fim da ultima rodada: n * rodada + (n - 1) pausas curtas
     // (a pausa longa depois da 4a nao conta). Sem 4x: n = 1 -> so a rodada.
     int duracaoTotalMin(int rodadaMin, bool ciclo4x);

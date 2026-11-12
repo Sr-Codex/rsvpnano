@@ -99,4 +99,38 @@ namespace ui::regua {
         return fi(b) - fi(a);
     }
 
+    // Simbolo ∞ (laco duplo deitado) tracado com borda suavizada: curva parametrica x = a cos t, y = b sin 2t / ... amostrada em
+    // N segmentos; a cobertura de cada pixel vem da distancia ao tracado (traco de `esp` px). Nao depende de glifo de fonte
+    // nem de arquivo gerado. `larg` = largura total do simbolo (px), `alt` = altura total.
+    struct Infinito {
+        static constexpr int N = 56;
+        float x[N + 1], y[N + 1];
+        float meioEsp = 1.2f;
+        float cx0 = 0, cy0 = 0, raioBusca = 0;
+
+        Infinito(float cx, float cy, float larg, float alt, float esp) : meioEsp(esp * 0.5f), cx0(cx), cy0(cy) {
+            const float a = (larg - esp) * 0.5f, b = (alt - esp) * 0.5f;
+            for (int i = 0; i <= N; ++i) {
+                const float t = 6.28318531f * float(i) / float(N);
+                const float d = 1.0f + 0.55f * std::sin(t) * std::sin(t);   // laços redondos (lemniscata achatada no cruzamento)
+                x[i] = cx + a * std::cos(t) / d * 1.0f;
+                y[i] = cy + b * std::sin(t) * std::cos(t) * 2.0f / d;
+            }
+            raioBusca = std::max(a, b) + esp + 2.0f;
+        }
+        // Cobertura (0..1) do pixel de centro (px, py).
+        float cobertura(float px, float py) const {
+            float melhor = 1e9f;
+            for (int i = 0; i < N; ++i) {
+                const float vx = x[i + 1] - x[i], vy = y[i + 1] - y[i];
+                const float wx = px - x[i], wy = py - y[i];
+                const float len2 = vx * vx + vy * vy;
+                const float u = len2 > 0 ? std::clamp((wx * vx + wy * vy) / len2, 0.0f, 1.0f) : 0.0f;
+                const float dx = wx - u * vx, dy = wy - u * vy;
+                melhor = std::min(melhor, dx * dx + dy * dy);
+            }
+            return std::clamp(meioEsp + 0.5f - std::sqrt(melhor), 0.0f, 1.0f);
+        }
+    };
+
 } // namespace ui::regua

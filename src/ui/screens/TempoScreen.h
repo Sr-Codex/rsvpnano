@@ -15,6 +15,7 @@
 #include "tempo/Fechamento.h"
 #include "tempo/FocoLeitor.h"
 #include "tempo/Habitos.h"
+#include "tempo/Livre.h"
 #include "tempo/Lembretes.h"
 #include "tempo/ModoFoco.h"
 #include "tempo/Motor.h"
@@ -95,7 +96,14 @@ namespace screens {
         // "Sincronizar" (seletor sem projetos): true uma vez depois do toque; o App dispara a sync silenciosa do TickTick.
         bool pegarPedidoSync() { const bool v = pedidoSync_; pedidoSync_ = false; return v; }
 
-        // Avanca a batalha (acumula tempo), entra em overtime quando o inimigo zera, conclui no teto de +100 %,
+        // Atividade do usuario (toque na tela ou botao fisico, inclusive o que so acorda o Modo Foco): zera os 90 min do aviso
+        // "ainda focando?" de qualquer sessao rodando (Timer, hora extra, livre). Com o aviso aberto, o toque na tela e
+        // resolvido pelo desenho (para nao apertar o botao que estava sob o dedo); o botao fisico, por boot()/back().
+        void atividade(uint32_t nowMs, bool toque, int x = -1, int y = -1);
+        // Sessao livre (parada ∞): conta para cima, sem meta. Aviso de 90 min sem toque aberto.
+        bool sessaoLivre() const { return livre_; }
+        bool avisoOciosoAberto() const { return ocio_.ativo(); }
+        // Avanca a batalha (acumula tempo), entra em overtime quando o inimigo zera (sem teto: segue ate o Concluir),
         // cuida da pausa de 5 min e do auto-salvar da reflexao. Devolve true quando o app deve dar um bipe
         // (inimigo derrotado, fim do overtime/pausa, "presenca" a cada 10 min, aviso 2 min antes do fim). Os SONS saem
         // por pegarSom() (o bool continua so como sinal de "algo aconteceu").
@@ -159,7 +167,8 @@ namespace screens {
         uint8_t surface() const {
             return static_cast<uint8_t>((static_cast<uint8_t>(fase_) + (saqueAtivo_ ? 5 : 0)) * 4 + (cron_.distraido ? 1 : 0)
                                         + (overtime_ ? 2 : 0) + (distracaoAberta_ ? 160 : 0)
-                                        + (seletor_ ? 32 + (pagina_ & 1U) * 64 : 0));
+                                        + (seletor_ ? 32 + (pagina_ & 1U) * 64 : 0)) ^ (livre_ ? 0x15U : 0U) ^ (ocio_.ativo() ? 0x2AU : 0U)
+                   ^ (saqueLivre_ ? 0x51U : 0U);
         }
         // Reflexao aberta ou saque com a janela do "Desfazer" ainda aberta (nada gravado no log/resumo): o estado nao pode
         // mudar por fora (sync de habitos, manutencao) nem comecar outra batalha.
@@ -167,7 +176,7 @@ namespace screens {
         // Modo Foco (etapa 0): a fase da batalha vista pelo escurecimento (tempo::modofoco) e o "Fim · segure" em andamento.
         tempo::modofoco::Fase faseModoFoco() const {
             using F = tempo::modofoco::Fase;
-            if (saqueAtivo_ || fase_ == Fase::Reflexao) return F::Fechamento;
+            if (saqueAtivo_ || fase_ == Fase::Reflexao || ocio_.ativo()) return F::Fechamento;   // aviso 90 min: brilho normal
             switch (fase_) {
             case Fase::Lutando: return overtime_ ? F::HoraExtra : cron_.distraido ? F::Distraido : F::Focando;
             case Fase::Pausada: return F::Pausado;
@@ -179,11 +188,12 @@ namespace screens {
         // Modo Foco, cenas QG (tempo::cenafoco): progresso do foco (0..1, sem contar o overtime), duracao planejada e foco
         // pago HOJE antes desta sessao (as sessoes anteriores do dia; a batalha em curso so entra ao liquidar). Data do
         // dia diferente de hoje (ex.: a batalha passou da meia-noite) = 0.
+        // Livre: a cena trata como 60 min (12 nos de 5 min, ate o maximo de 12; sem vitoria porque nao ha inimigo).
         double progressoFoco() const {
-            const double plano = double(planejadoMin_) * 60000.0;
+            const double plano = double(planejadoMin()) * 60000.0;
             return plano > 0 ? std::min(1.0, double(cron_.focadoMs) / plano) : 0.0;
         }
-        int planejadoMin() const { return planejadoMin_; }
+        int planejadoMin() const { return livre_ ? 60 : planejadoMin_; }
         int focoPagoHojeMin(uint32_t nowMs) const {
             const auto agora = tempo::agora(nowMs);
             if (!carregado_ || (agora.valida && !(estado_.dia.data == agora.data))) return 0;
@@ -195,7 +205,13 @@ namespace screens {
 
         void carregar(fs::FS* filesystem, bool recarregarEstado, uint32_t nowMs);
         void comecarSessao(uint32_t nowMs);                    // inicia a batalha (ou o ciclo) com a escolha do Inicio
-        void ligarBatalha(uint32_t nowMs);                     // zera contadores e entra em Lutando
+        void ligarBatalha(uint32_t nowMs, bool livre = false); // zera contadores e entra em Lutando (livre = parada ∞)
+        // ---- Livre (decisao 23) e aviso de 90 min (decisoes 23/24)
+        void finalizarLivre(uint32_t nowMs, fs::FS* filesystem, bool tocarDesfecho = true);   // < 1 min: nao registra; senao liquida e abre o saque
+        void concluirPorOcio(uint32_t nowMs, fs::FS* filesystem);   // 5 min sem resposta: conclui pagando so ate a hora do aviso
+        void continuarOcio(uint32_t nowMs);
+        Action drawLivre(ui::Context& ui, uint32_t nowMs, Screen& screen);
+        Action drawAvisoOcio(ui::Context& ui, uint32_t nowMs, Screen& screen);
         void concluirRodada(uint32_t nowMs, fs::FS* filesystem);   // ciclo: liquida a rodada e entra na pausa
         void salvarPreferencias();
         void escolher(int indice);                              // -1 = sem projeto (a categoria livre fica em categoria_)
@@ -235,6 +251,21 @@ namespace screens {
         Action drawDistracoes(ui::Context& ui, uint32_t nowMs, Screen& screen);
         Action drawSaque(ui::Context& ui, uint32_t nowMs, Screen& screen);
 
+        // livre / aviso de 90 min
+        bool livre_ = false;                   // a sessao em curso e livre (conta para cima, sem meta)
+        bool saqueLivre_ = false;              // o saque no ar e de uma sessao livre (Desfazer volta a contar)
+        tempo::Cronometro cronLivreSalvo_;     // cronometro no instante do Concluir (o Desfazer volta daqui)
+        tempo::livre::AvisoOcioso ocio_;       // 90 min sem toque -> "ainda focando?"; 5 min -> conclui
+        uint64_t focadoNoAvisoMs_ = 0;         // foco no instante do aviso (paga so ate aqui se ninguem responder)
+        int inicioMinutoDia_ = -1;             // hora de parede do inicio da sessao ("DESDE 14:20"), -1 = sem relogio
+        int avisoMinutoDia_ = -1;              // hora de parede do aviso (minuto do dia), -1 = sem relogio
+        uint32_t avisoDesenhadoMs_ = 0;        // ultimo quadro com o aviso na tela (0 = nunca)
+        bool toqueNovo_ = false;               // toque comecou com o aviso aberto (resolvido no desenho)
+        int toqueX_ = -1, toqueY_ = -1;        // onde o toque novo comecou
+        int evOcio_ = 0;                       // evento do aviso pendente do acumular(): 0 nada, 1 avisar, 2 concluir
+        uint32_t naoContaAteMs_ = 0;           // "0:40 não conta" visivel no Inicio ate (0 = nao)
+        std::string naoContaTxt_;
+        int duracaoTimerMin_ = 25;             // ultima duracao de TIMER (o BOOT do launcher sempre comeca um Timer)
         bool checkinNovo_ = false;
         uint32_t checkinLiberaEmMs_ = 0;
         tempo::InstanteHabito desfazer_;     // ultimo Feito/Pular (Habitos v2)

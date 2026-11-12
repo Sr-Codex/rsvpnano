@@ -25,7 +25,8 @@ namespace tempo::param {
     constexpr int kDistracaoPerdidoMin = 2;       // distraidos > 2 min viram Perdido
     constexpr int kMaxDistracoes = 3;             // > 3 => fuga
     constexpr int kDistracaoLongaMin = 10;        // 1 distracao > 10 min => fuga
-    constexpr double kOvertimeMax = 1.0;          // +100 % do planejado
+    // Hora extra SEM teto (economia, decisao 24): depois que o inimigo cai o Timer segue pagando a taxa normal ate o Concluir.
+    constexpr int kLivreDiaValidoMin = 15;        // sessao livre conta para dia valido a partir de 15 min (decisao 23)
     constexpr int kTetoFocoCrMin = 360;           // 6 h
     constexpr int kTetoFocoXpMin = 480;           // 8 h
     constexpr double kFatorAposTeto = 0.5;

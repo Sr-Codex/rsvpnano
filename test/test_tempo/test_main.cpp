@@ -9,6 +9,7 @@
 #include "tempo/Codec.h"
 #include "tempo/Cronometro.h"
 #include "tempo/Fechamento.h"
+#include "tempo/Livre.h"
 #include "tempo/Habitos.h"
 #include "tempo/FocoLeitor.h"
 #include "tempo/Motor.h"
@@ -272,9 +273,12 @@ namespace {
     void test_batalha_overtime_e_fuga() {
         Estado e = novoEstado();
         LiquidacaoBatalha o = liquidarBatalha(e, batalha(Categoria::Projetos, 30, 90));
-        TEST_ASSERT_EQUAL_INT(30, o.minutosOvertime);  // limitado a +100 %
-        TEST_ASSERT_EQUAL_INT(60, o.minutosPagos);
-        NEAR(60 * 0.4 * 1.25, o.cr);  // perfeita (0 distracoes)
+        // Hora extra SEM teto (decisao 24): paga tudo ate o Concluir; o bonus perfeito so vale para a parte planejada
+        TEST_ASSERT_EQUAL_INT(60, o.minutosOvertime);
+        TEST_ASSERT_EQUAL_INT(90, o.minutosPagos);
+        TEST_ASSERT_TRUE(o.perfeita);
+        NEAR(90 * 0.4 + 30 * 0.4 * 0.25, o.cr);   // 36 + bonus de 25 % so sobre os 30 min planejados
+        NEAR(90 * 1.0 + 30 * 1.0 * 0.25, o.xp);
         LiquidacaoBatalha o2 = liquidarBatalha(e, batalha(Categoria::Projetos, 30, 45));
         TEST_ASSERT_EQUAL_INT(15, o2.minutosOvertime);
         // fuga: > 3 distracoes -> paga focados, sem bonus
@@ -984,16 +988,20 @@ void test_estado_preferencias_da_tela_inicial() {
     TEST_ASSERT_EQUAL_INT(25, e.ultimaDuracaoMin);
     TEST_ASSERT_FALSE(e.ciclopomodoro);
     e.ultimaCategoria = static_cast<int>(Categoria::Leitura);
-    e.ultimaDuracaoMin = 45;
+    e.ultimaDuracaoMin = 0;                    // livre (parada ∞) salvo como ultima escolha da regua
+    e.ultimaDuracaoTimerMin = 45;              // ... e a ultima duracao de Timer (o BOOT do launcher usa esta)
     e.ciclopomodoro = true;
     Estado lido;
     TEST_ASSERT_TRUE(lerEstado(serializarEstado(e), lido));
     TEST_ASSERT_EQUAL_INT(static_cast<int>(Categoria::Leitura), lido.ultimaCategoria);
-    TEST_ASSERT_EQUAL_INT(45, lido.ultimaDuracaoMin);
+    TEST_ASSERT_EQUAL_INT(0, lido.ultimaDuracaoMin);
+    TEST_ASSERT_EQUAL_INT(45, lido.ultimaDuracaoTimerMin);
+    TEST_ASSERT_EQUAL_INT(45, tempo::regua::duracaoDoTimer(lido.ultimaDuracaoMin, lido.ultimaDuracaoTimerMin));
     TEST_ASSERT_TRUE(lido.ciclopomodoro);
     Estado antigo;   // estado.json antigo (sem os campos novos) cai nos padroes
     TEST_ASSERT_TRUE(lerEstado("{\"saldo\": 1}", antigo));
     TEST_ASSERT_EQUAL_INT(25, antigo.ultimaDuracaoMin);
+    TEST_ASSERT_EQUAL_INT(25, antigo.ultimaDuracaoTimerMin);
     TEST_ASSERT_FALSE(antigo.ciclopomodoro);
 }
 
@@ -1697,15 +1705,18 @@ void test_regua_paradas_duas_marchas() {
 
 void test_regua_limites_e_encaixe() {
     using namespace tempo::regua;
-    NEAR(0.0, limitar(-3));
+    NEAR(kPosInf, limitar(-3));              // a esquerda do 5 existe o ∞ (kPosInf = -1,5)
     NEAR(27.0, limitar(40));
-    TEST_ASSERT_EQUAL_INT(5, encaixar(-1.0));
+    TEST_ASSERT_EQUAL_INT(kLivre, encaixar(-1.0));   // mais perto do ∞ (-1,5) que do 5
+    TEST_ASSERT_EQUAL_INT(5, encaixar(-0.7));
     TEST_ASSERT_EQUAL_INT(5, encaixar(0.4));
     TEST_ASSERT_EQUAL_INT(10, encaixar(0.6));
     TEST_ASSERT_EQUAL_INT(60, encaixar(11.2));
     TEST_ASSERT_EQUAL_INT(75, encaixar(11.6));
     TEST_ASSERT_EQUAL_INT(300, encaixar(500.0));
     TEST_ASSERT_EQUAL_INT(5, limitarEncaixado(1));
+    TEST_ASSERT_EQUAL_INT(kLivre, limitarEncaixado(0));
+    TEST_ASSERT_EQUAL_INT(kLivre, limitarEncaixado(-7));
     TEST_ASSERT_EQUAL_INT(60, limitarEncaixado(60));
     TEST_ASSERT_EQUAL_INT(90, limitarEncaixado(90));
     TEST_ASSERT_EQUAL_INT(150, limitarEncaixado(150));
@@ -1779,8 +1790,8 @@ void test_regua_arrasto_leva_a_fita_1_para_1_e_encaixa() {
     a.mover(-5000 + 30);                             // 30 px de volta = -1 parada
     NEAR(26.0, a.pos);
     a.mover(9000);
-    NEAR(0.0, a.pos);
-    TEST_ASSERT_EQUAL_INT(5, a.soltar());
+    NEAR(kPosInf, a.pos);                            // o limite esquerdo agora e o ∞
+    TEST_ASSERT_EQUAL_INT(kLivre, a.soltar());
     a.comecar(100, 40);
     a.cancelar();
     TEST_ASSERT_FALSE(a.ativo);
@@ -1990,6 +2001,332 @@ void test_v3e2_desfazer_batalha_reverte_streak_e_nivel() {
     TEST_ASSERT_EQUAL_INT(3, e.streak);
 }
 
+
+// ---- Etapa b: parada ∞ ("livre") na regua ------------------------------------------------------------------------
+void test_regua_infinito_posicao_encaixe_e_toque() {
+    using namespace tempo::regua;
+    NEAR(-1.5, posicaoDaParada(kLivre));
+    NEAR(0.0, posicaoDaParada(5));
+    NEAR(238.0 - 45.0, xDaParada(kLivre, 0.0, 238.0));             // 1,5 passo (45 px) antes do 5
+    NEAR(230.0 - 165.0, xDoInf(4.0));                              // 25 min sob a agulha: ∞ em x = 65 (visivel)
+    TEST_ASSERT_FALSE(infFixo(4.0));                               // 25: o ∞ aparece na fita
+    TEST_ASSERT_TRUE(infFixo(5.0));                                // 30: ja saiu da area visivel -> fixo na ponta
+    TEST_ASSERT_TRUE(infFixo(11.0));                               // 60
+    TEST_ASSERT_FALSE(infFixo(kPosInf));                           // agulha no ∞
+    TEST_ASSERT_TRUE(toqueNoInf(30, 11.0));                        // fixo: o botaozinho (x 6..50) leva ao livre
+    TEST_ASSERT_TRUE(toqueNoInf(kInfAreaX0, 11.0) && toqueNoInf(kInfAreaX1, 11.0));
+    TEST_ASSERT_FALSE(toqueNoInf(70, 11.0));
+    TEST_ASSERT_TRUE(toqueNoInf(65, 4.0));                         // visivel: toque sobre o proprio ∞
+    TEST_ASSERT_FALSE(toqueNoInf(120, 4.0));
+    // o toque "‹ −5" em 5 min NAO entra no ∞; so arrasto ou o ∞ levam ao livre
+    TEST_ASSERT_EQUAL_INT(5, ajustarPorToque(5, false));
+    TEST_ASSERT_EQUAL_INT(0, passoDoLado(5, false));               // rotulo apagado e sem acao
+    TEST_ASSERT_EQUAL_INT(kLivre, ajustarPorToque(kLivre, false)); // no ∞ nao ha esquerda
+    TEST_ASSERT_EQUAL_INT(5, ajustarPorToque(kLivre, true));       // "+5 ›" do ∞ vai para 5 min
+    TEST_ASSERT_EQUAL_INT(0, passoDoLado(kLivre, false));
+    TEST_ASSERT_EQUAL_INT(5, passoDoLado(kLivre, true));
+    // BOOT do launcher: sempre Timer (a ultima de Timer quando a regua parou no livre)
+    TEST_ASSERT_EQUAL_INT(45, duracaoDoTimer(45, 25));
+    TEST_ASSERT_EQUAL_INT(40, duracaoDoTimer(kLivre, 40));
+    TEST_ASSERT_EQUAL_INT(5, duracaoDoTimer(kLivre, 0));
+    TEST_ASSERT_TRUE(duracaoDoTimer(kLivre, 25) > 0);
+}
+
+void test_regua_infinito_arrasto_e_textos() {
+    using namespace tempo::regua;
+    Arrasto a;
+    a.comecar(200, 5);
+    TEST_ASSERT_FALSE(a.mover(205));                  // zona morta
+    TEST_ASSERT_FALSE(a.mover(209));                  // cruza: referencia nova
+    NEAR(0.0, a.pos);
+    TEST_ASSERT_TRUE(a.mover(209 + 15));              // 0,5 parada a direita do dedo: pos = -0,5 -> ainda 5 min
+    NEAR(-0.5, a.pos);
+    TEST_ASSERT_EQUAL_INT(5, a.minutos());
+    TEST_ASSERT_TRUE(a.mover(209 + 30));              // -1,0: mais perto do ∞ (-1,5) que do 5 -> livre
+    TEST_ASSERT_EQUAL_INT(kLivre, a.minutos());
+    TEST_ASSERT_TRUE(a.mover(209 + 90));              // alem do limite: prende em -1,5
+    NEAR(kPosInf, a.pos);
+    TEST_ASSERT_TRUE(a.mover(209 + 90 - 45));         // voltar o dedo 45 px volta a fita 1,5 parada (a referencia acompanhou o limite)
+    NEAR(0.0, a.pos);
+    TEST_ASSERT_TRUE(a.mover(209 + 90 + 20));
+    TEST_ASSERT_EQUAL_INT(kLivre, a.soltar());        // soltar encaixa no ∞
+    // sem arrasto saindo do ∞: o valor de partida e preservado
+    a.comecar(100, kLivre);
+    TEST_ASSERT_FALSE(a.mover(104));
+    TEST_ASSERT_EQUAL_INT(kLivre, a.soltar());
+    // a partir do ∞ arrastando para a esquerda (fita anda para a esquerda = valor sobe) chega ao 5 e ao 10
+    a.comecar(300, kLivre);
+    a.mover(290);
+    a.mover(290 - 45);
+    NEAR(0.0, a.pos);
+    TEST_ASSERT_EQUAL_INT(5, a.soltar());
+    // textos
+    TEST_ASSERT_TRUE(ehLivre(0));
+    TEST_ASSERT_FALSE(ehLivre(5));
+    TEST_ASSERT_EQUAL_STRING("livre", textoDuracao(kLivre).c_str());
+    TEST_ASSERT_EQUAL_STRING("∞", rotuloDaParada(kLivre).c_str());
+    auto p = partesDoValor(kLivre);
+    TEST_ASSERT_EQUAL_INT(1, (int)p.size());
+    TEST_ASSERT_EQUAL_STRING("livre", p[0].texto.c_str());
+    TEST_ASSERT_EQUAL_STRING("livre · sem meta", textoComecar(kLivre, true, true, 14 * 60 + 20).c_str());
+    TEST_ASSERT_FALSE(ciclo4xPermitido(kLivre));      // "4× rodadas" apagado e sem acao no livre
+    TEST_ASSERT_TRUE(ciclo4xPermitido(90));
+    TEST_ASSERT_EQUAL_INT(0, duracaoTotalMin(kLivre, true));
+    TEST_ASSERT_EQUAL_INT(0, minutoDaParada(0) - 5);  // o ∞ nao e uma das 28 paradas de minutos
+    TEST_ASSERT_EQUAL_INT(28, numParadas());
+}
+
+// ---- Etapa b: sessao livre (decisao 23) -------------------------------------------------------------------------
+Cronometro cronLivre(uint64_t focadoMin, uint64_t distraidoMin = 0) {
+    Cronometro c;
+    c.zerar(0);
+    c.focadoMs = focadoMin * 60000ULL;
+    c.distraidoMs = distraidoMin * 60000ULL;
+    return c;
+}
+
+void test_livre_liquidacao_taxa_por_minuto_sem_bonus_e_sem_vitoria() {
+    Estado e = novoEstado();
+    const auto entrada = livre::entrada(cronLivre(60), Categoria::Projetos);
+    const LiquidacaoBatalha l = liquidarBatalha(e, entrada);
+    TEST_ASSERT_FALSE(l.vitoria);
+    TEST_ASSERT_FALSE(l.fuga);
+    TEST_ASSERT_FALSE(l.perfeita);
+    TEST_ASSERT_EQUAL_INT(60, l.minutosPagos);
+    TEST_ASSERT_EQUAL_INT(0, l.minutosOvertime);
+    NEAR(60 * 0.4, l.cr);          // taxa da categoria, nada de +25 %
+    NEAR(60 * 1.0, l.xp);
+    // outra categoria = outra taxa
+    NEAR(30 * 0.2, liquidarBatalha(e, livre::entrada(cronLivre(30), Categoria::Trabalho)).cr);
+    NEAR(30 * 1.2, liquidarBatalha(e, livre::entrada(cronLivre(30), Categoria::Estudo)).xp);
+    // aplicar: paga, mas nao e vitoria (contador de vitoria vive no log: resultado "livre") e entra no dia valido (>= 15 min)
+    const double antes = e.saldo;
+    aplicarBatalha(e, entrada);
+    NEAR(antes + 24.0, e.saldo);
+    TEST_ASSERT_EQUAL_INT(60, e.dia.fochoPagoMin);
+    TEST_ASSERT_EQUAL_INT(60, e.dia.fochoValidoMin);
+}
+
+void test_livre_dia_valido_so_a_partir_de_15_min_e_tetos_continuam() {
+    Estado e = novoEstado();
+    aplicarBatalha(e, livre::entrada(cronLivre(14), Categoria::Trabalho));
+    TEST_ASSERT_EQUAL_INT(14, e.dia.fochoPagoMin);
+    TEST_ASSERT_EQUAL_INT(0, e.dia.fochoValidoMin);          // < 15 min: paga, mas nao conta para o dia valido
+    aplicarBatalha(e, livre::entrada(cronLivre(15), Categoria::Trabalho));
+    TEST_ASSERT_EQUAL_INT(15, e.dia.fochoValidoMin);
+    // teto diario de 6 h: 20 min livres com 350 min ja pagos hoje -> 10 min cheios + 10 min pela metade
+    Estado t = novoEstado();
+    t.dia.fochoPagoMin = 350;
+    const LiquidacaoBatalha l = liquidarBatalha(t, livre::entrada(cronLivre(20), Categoria::Trabalho));
+    TEST_ASSERT_TRUE(l.tetoCrAplicado);
+    NEAR((10 + 0.5 * 10) * 0.2, l.cr);
+    TEST_ASSERT_FALSE(liquidarBatalha(novoEstado(), livre::entrada(cronLivre(20), Categoria::Trabalho)).tetoCrAplicado);
+}
+
+void test_livre_distracao_nao_e_paga_e_relogio_do_foco_para() {
+    Cronometro c;
+    c.zerar(0);
+    c.avancar(20 * 60000ULL, true);          // 20 min focados
+    c.distrair();
+    c.avancar(10 * 60000ULL, true);          // 10 min distraido: o relogio do foco NAO anda
+    TEST_ASSERT_EQUAL_UINT64(20 * 60000ULL, c.focadoMs);
+    TEST_ASSERT_EQUAL_UINT64(10 * 60000ULL, c.distraidoMs);
+    c.voltar();
+    c.avancar(5 * 60000ULL, true);
+    const auto in = livre::entrada(c, Categoria::Projetos);
+    TEST_ASSERT_EQUAL_INT(25, in.minutosFocados);           // so o foco e pago
+    TEST_ASSERT_EQUAL_INT(10, in.minutosDistraidos);
+    NEAR(25 * 0.4, liquidarBatalha(novoEstado(), in).cr);   // distraido nao cura inimigo nem vira "perdido" aqui: nenhum bonus/fuga
+    TEST_ASSERT_FALSE(liquidarBatalha(novoEstado(), in).fuga);
+    // pausado: nada muda
+    Cronometro p;
+    p.zerar(0);
+    p.avancar(7 * 60000ULL, true);
+    p.avancar(40 * 60000ULL, false);
+    TEST_ASSERT_EQUAL_UINT64(7 * 60000ULL, p.focadoMs);
+}
+
+void test_livre_menos_de_1_min_nao_conta_e_pausa_longa_conclui() {
+    TEST_ASSERT_FALSE(livre::conta(0));
+    TEST_ASSERT_FALSE(livre::conta(59999));
+    TEST_ASSERT_TRUE(livre::conta(60000));
+    TEST_ASSERT_EQUAL_STRING("0:40 não conta", livre::textoNaoConta(40000).c_str());
+    TEST_ASSERT_EQUAL_STRING("0:00 não conta", livre::textoNaoConta(0).c_str());
+    TEST_ASSERT_FALSE(livre::pausaEstourou(30ULL * 60000));      // exatamente 30 min: ainda nao
+    TEST_ASSERT_TRUE(livre::pausaEstourou(30ULL * 60000 + 1));   // mais de 30 min: conclui sozinho
+    TEST_ASSERT_FALSE(livre::pausaEstourou(5 * 60000ULL));
+    // pausa de 31 min nao altera o foco pago (a sessao conclui com o foco ate a pausa)
+    Cronometro c = cronLivre(37);
+    c.avancar(31 * 60000ULL, false);
+    TEST_ASSERT_EQUAL_INT(37, livre::entrada(c, Categoria::Estudo).minutosFocados);
+}
+
+void test_livre_blocos_de_5_min_por_hora_e_formatos() {
+    auto b = livre::blocos(12 * 60000ULL + 34000ULL);       // 12:34
+    TEST_ASSERT_EQUAL_INT(1, b.hora);
+    TEST_ASSERT_EQUAL_INT(2, b.cheios);
+    NEAR((2 * 60 + 34) / 300.0, b.parcial);                  // 2:34 dentro do 3o bloco
+    b = livre::blocos(0);
+    TEST_ASSERT_EQUAL_INT(0, b.cheios);
+    b = livre::blocos(59 * 60000ULL + 59000ULL);
+    TEST_ASSERT_EQUAL_INT(1, b.hora);
+    TEST_ASSERT_EQUAL_INT(11, b.cheios);                     // ultimo bloco em andamento
+    b = livre::blocos(3600000ULL);                           // ao virar a hora os blocos recomecam
+    TEST_ASSERT_EQUAL_INT(2, b.hora);
+    TEST_ASSERT_EQUAL_INT(0, b.cheios);
+    b = livre::blocos(3600000ULL + 12 * 60000ULL + 30000ULL);   // 1:12:30
+    TEST_ASSERT_EQUAL_INT(2, b.hora);
+    TEST_ASSERT_EQUAL_INT(2, b.cheios);
+    b = livre::blocos(2ULL * 3600000ULL + 5);
+    TEST_ASSERT_EQUAL_INT(3, b.hora);
+    TEST_ASSERT_EQUAL_STRING("1ª h", livre::rotuloHora(1).c_str());
+    TEST_ASSERT_EQUAL_STRING("2ª h", livre::rotuloHora(2).c_str());
+    // saque: "1h12" (algarismos grandes + "h" pequeno), abaixo de 1 h "42 min"
+    auto t = livre::partesDoTempo(72 * 60000ULL);
+    TEST_ASSERT_EQUAL_INT(3, (int)t.size());
+    TEST_ASSERT_EQUAL_STRING("1", t[0].texto.c_str());
+    TEST_ASSERT_TRUE(t[0].grande);
+    TEST_ASSERT_EQUAL_STRING("h", t[1].texto.c_str());
+    TEST_ASSERT_FALSE(t[1].grande);
+    TEST_ASSERT_EQUAL_STRING("12", t[2].texto.c_str());
+    TEST_ASSERT_TRUE(t[2].grande);
+    t = livre::partesDoTempo(65 * 60000ULL);
+    TEST_ASSERT_EQUAL_STRING("05", t[2].texto.c_str());
+    t = livre::partesDoTempo(42 * 60000ULL);
+    TEST_ASSERT_EQUAL_INT(2, (int)t.size());
+    TEST_ASSERT_EQUAL_STRING("42", t[0].texto.c_str());
+    TEST_ASSERT_EQUAL_STRING("min", t[1].texto.c_str());
+    TEST_ASSERT_EQUAL_STRING("1h12", livre::textoTempo(72 * 60000ULL).c_str());
+    TEST_ASSERT_EQUAL_STRING("42 min", livre::textoTempo(42 * 60000ULL).c_str());
+    TEST_ASSERT_EQUAL_STRING("LIVRE · DESDE 14:20", livre::cabecalhoRodando(14 * 60 + 20).c_str());
+    TEST_ASSERT_EQUAL_STRING("LIVRE", livre::cabecalhoRodando(-1).c_str());
+    // relogio: "m:ss" ate 1 h, "h:mm:ss" depois (a mesma funcao da Batalha)
+    TEST_ASSERT_EQUAL_STRING("12:34", formatarRelogio(12 * 60 + 34).c_str());
+    TEST_ASSERT_EQUAL_STRING("1:12:30", formatarRelogio(3600 + 12 * 60 + 30).c_str());
+}
+
+void test_livre_desfazer_volta_a_contar_de_onde_parou() {
+    Estado e = novoEstado();
+    Cronometro c = cronLivre(40);
+    const Cronometro salvo = c;                               // o que a tela guarda no Concluir
+    InstanteBatalha inst = capturarBatalha(e);
+    const double saldoAntes = e.saldo;
+    aplicarBatalha(e, livre::entrada(c, Categoria::Projetos));
+    selarBatalha(inst, e);
+    TEST_ASSERT_TRUE(e.saldo > saldoAntes);
+    TEST_ASSERT_TRUE(podeDesfazerBatalha(e, inst));
+    TEST_ASSERT_TRUE(desfazerBatalha(e, inst));
+    NEAR(saldoAntes, e.saldo);
+    TEST_ASSERT_EQUAL_INT(0, e.dia.fochoPagoMin);
+    TEST_ASSERT_EQUAL_INT(0, e.dia.fochoValidoMin);
+    c = salvo;                                                // volta a contar de onde parou
+    c.avancar(5 * 60000ULL, true);
+    TEST_ASSERT_EQUAL_UINT64(45 * 60000ULL, c.focadoMs);
+    NEAR(45 * 0.4, liquidarBatalha(e, livre::entrada(c, Categoria::Projetos)).cr);
+}
+
+// ---- Etapa b: hora extra sem teto (decisao 24) ---------------------------------------------------------------------
+void test_hora_extra_sem_teto_paga_a_taxa_normal_ate_o_concluir() {
+    Estado e = novoEstado();
+    // plano 30, 5 h focadas (300 min): 270 min de hora extra, todos pagos
+    const LiquidacaoBatalha l = liquidarBatalha(e, batalha(Categoria::Projetos, 30, 300));
+    TEST_ASSERT_TRUE(l.vitoria);
+    TEST_ASSERT_EQUAL_INT(270, l.minutosOvertime);
+    TEST_ASSERT_EQUAL_INT(300, l.minutosPagos);
+    NEAR(300 * 0.4 + 30 * 0.4 * 0.25, l.cr);                  // bonus perfeito so sobre os 30 min planejados
+    // sem hora extra o bonus perfeito segue inteiro (o plano todo)
+    NEAR(30 * 0.4 * 1.25, liquidarBatalha(e, batalha(Categoria::Projetos, 30, 30)).cr);
+    // distracao curta (1 min): a cura soma ao plano; o que passa dai e hora extra, tambem sem teto
+    const LiquidacaoBatalha d = liquidarBatalha(e, batalha(Categoria::Projetos, 30, 200, 1, 1));
+    TEST_ASSERT_EQUAL_INT(200 - 31, d.minutosOvertime);
+    // abandono/fuga paga o que foi focado, sem corte em 2x o plano
+    EntradaBatalha f = batalha(Categoria::Projetos, 30, 150, 0, 4);
+    f.maiorDistracaoMin = 1;
+    TEST_ASSERT_EQUAL_INT(150, liquidarBatalha(e, f).minutosPagos);
+    // teto diario de 6 h continua valendo (nao e teto da sessao)
+    Estado t = novoEstado();
+    t.dia.fochoPagoMin = 340;
+    TEST_ASSERT_TRUE(liquidarBatalha(t, batalha(Categoria::Trabalho, 25, 100)).tetoCrAplicado);
+}
+
+// ---- Etapa b: aviso de 90 min sem toque ---------------------------------------------------------------------------
+void test_aviso_90_min_sem_toque_e_conclusao_em_5_min() {
+    using E = livre::AvisoOcioso::Evento;
+    livre::AvisoOcioso a;
+    TEST_ASSERT_TRUE(a.avancar(89 * 60000ULL, true) == E::Nada);
+    TEST_ASSERT_FALSE(a.ativo());
+    TEST_ASSERT_TRUE(a.avancar(59 * 1000ULL, true) == E::Nada);
+    TEST_ASSERT_TRUE(a.avancar(1000ULL, true) == E::Avisar);          // 90 min exatos
+    TEST_ASSERT_TRUE(a.ativo());
+    TEST_ASSERT_EQUAL_UINT64(5 * 60000ULL, a.restanteMs());
+    TEST_ASSERT_TRUE(a.avancar(4 * 60000ULL + 12000ULL, true) == E::Nada);
+    TEST_ASSERT_EQUAL_UINT64(48000ULL, a.restanteMs());              // "concluo em 0:48"
+    TEST_ASSERT_TRUE(a.avancar(47999ULL, true) == E::Nada);
+    TEST_ASSERT_TRUE(a.avancar(1ULL, true) == E::Concluir);          // 5 min sem resposta
+}
+
+void test_aviso_toque_ou_botao_zera_e_continuar_fecha() {
+    using E = livre::AvisoOcioso::Evento;
+    livre::AvisoOcioso a;
+    a.avancar(80 * 60000ULL, true);
+    a.tocou();                                                        // qualquer toque (ou botao) zera os 90 min
+    TEST_ASSERT_TRUE(a.avancar(89 * 60000ULL, true) == E::Nada);
+    TEST_ASSERT_TRUE(a.avancar(60000ULL, true) == E::Avisar);
+    a.avancar(3 * 60000ULL, true);
+    a.continuar();                                                    // "Continuar": fecha o aviso e recomeca os 90 min
+    TEST_ASSERT_FALSE(a.ativo());
+    TEST_ASSERT_EQUAL_UINT64(0, a.ociosoMs());
+    TEST_ASSERT_TRUE(a.avancar(89 * 60000ULL, true) == E::Nada);
+    TEST_ASSERT_TRUE(a.avancar(60000ULL, true) == E::Avisar);
+    a.zerar();
+    TEST_ASSERT_FALSE(a.ativo());
+}
+
+void test_aviso_pausado_e_distraido_nao_contam_para_os_90_min() {
+    using E = livre::AvisoOcioso::Evento;
+    livre::AvisoOcioso a;
+    TEST_ASSERT_TRUE(a.avancar(10 * 3600000ULL, false) == E::Nada);   // horas pausado/distraido: nada
+    TEST_ASSERT_EQUAL_UINT64(0, a.ociosoMs());
+    a.avancar(60 * 60000ULL, true);
+    a.avancar(2 * 3600000ULL, false);                                 // pausa no meio nao avanca nem zera o contador
+    TEST_ASSERT_EQUAL_UINT64(60 * 60000ULL, a.ociosoMs());
+    TEST_ASSERT_TRUE(a.avancar(29 * 60000ULL, true) == E::Nada);
+    TEST_ASSERT_TRUE(a.avancar(60000ULL, true) == E::Avisar);
+    TEST_ASSERT_TRUE(a.avancar(10 * 60000ULL, false) == E::Nada);     // pausar com o aviso aberto congela a contagem
+    TEST_ASSERT_EQUAL_UINT64(5 * 60000ULL, a.restanteMs());
+}
+
+void test_aviso_sem_resposta_paga_so_ate_a_hora_do_aviso() {
+    // sessao rodando 90 min + 5 min de espera: paga 90 (a hora do aviso), nao 95
+    Cronometro c;
+    c.zerar(0);
+    livre::AvisoOcioso a;
+    uint64_t noAviso = 0;
+    bool concluiu = false;
+    for (int s = 0; s < 95 * 60 && !concluiu; ++s) {
+        c.avancar(1000, true);
+        const auto ev = a.avancar(1000, true);
+        if (ev == livre::AvisoOcioso::Evento::Avisar) noAviso = c.focadoMs;
+        if (ev == livre::AvisoOcioso::Evento::Concluir) concluiu = true;
+    }
+    TEST_ASSERT_TRUE(concluiu);
+    TEST_ASSERT_EQUAL_UINT64(90 * 60000ULL, noAviso);
+    TEST_ASSERT_EQUAL_UINT64(95 * 60000ULL, c.focadoMs);
+    c.focadoMs = livre::pagoAteOAviso(c.focadoMs, noAviso);
+    TEST_ASSERT_EQUAL_UINT64(90 * 60000ULL, c.focadoMs);
+    TEST_ASSERT_EQUAL_INT(90, livre::entrada(c, Categoria::Trabalho).minutosFocados);
+    NEAR(90 * 0.2, liquidarBatalha(novoEstado(), livre::entrada(c, Categoria::Trabalho)).cr);
+    // Timer em hora extra: idem (a hora extra e paga so ate o aviso)
+    Cronometro t;
+    t.zerar(30);
+    t.focadoMs = 120 * 60000ULL;
+    const uint64_t noAv = 100 * 60000ULL;
+    t.focadoMs = livre::pagoAteOAviso(t.focadoMs, noAv);
+    const EntradaBatalha in = t.entrada(Categoria::Projetos, true);
+    TEST_ASSERT_EQUAL_INT(100, in.minutosFocados);
+    TEST_ASSERT_EQUAL_INT(70, liquidarBatalha(novoEstado(), in).minutosOvertime);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_datas);
@@ -2045,6 +2382,19 @@ int main(int, char**) {
     RUN_TEST(test_regua_toque_nas_metades_nas_duas_marchas_e_limites);
     RUN_TEST(test_regua_arrasto_leva_a_fita_1_para_1_e_encaixa);
     RUN_TEST(test_regua_marcas_rotulos_e_valor);
+    RUN_TEST(test_regua_infinito_posicao_encaixe_e_toque);
+    RUN_TEST(test_regua_infinito_arrasto_e_textos);
+    RUN_TEST(test_livre_liquidacao_taxa_por_minuto_sem_bonus_e_sem_vitoria);
+    RUN_TEST(test_livre_dia_valido_so_a_partir_de_15_min_e_tetos_continuam);
+    RUN_TEST(test_livre_distracao_nao_e_paga_e_relogio_do_foco_para);
+    RUN_TEST(test_livre_menos_de_1_min_nao_conta_e_pausa_longa_conclui);
+    RUN_TEST(test_livre_blocos_de_5_min_por_hora_e_formatos);
+    RUN_TEST(test_livre_desfazer_volta_a_contar_de_onde_parou);
+    RUN_TEST(test_hora_extra_sem_teto_paga_a_taxa_normal_ate_o_concluir);
+    RUN_TEST(test_aviso_90_min_sem_toque_e_conclusao_em_5_min);
+    RUN_TEST(test_aviso_toque_ou_botao_zera_e_continuar_fecha);
+    RUN_TEST(test_aviso_pausado_e_distraido_nao_contam_para_os_90_min);
+    RUN_TEST(test_aviso_sem_resposta_paga_so_ate_a_hora_do_aviso);
     RUN_TEST(test_4x_bloqueado_acima_de_90);
     RUN_TEST(test_formato_relogio_h_mm_ss);
     RUN_TEST(test_ciclo_4x_pausa_da_rodada);

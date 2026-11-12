@@ -289,6 +289,7 @@ void App::update(uint32_t nowMs) {
     Input::ActionMask actions;
     while (Input::poll(actions)) {
         lastActivityMs_ = nowMs;
+        tempoScreen_.atividade(nowMs, false);   // botao fisico conta como toque para o aviso de 90 min sem toque (Tempo)
         modoFoco_.botao(nowMs);   // BOOT/PWR acordam a tela escurecida e mantem a funcao de sempre
         handleInput(actions, nowMs);
         nowMs = millis();
@@ -302,6 +303,7 @@ void App::update(uint32_t nowMs) {
             continue;
         }
         moveAdiado = false;
+        if (toque != nullptr && ui::hasTouch(*toque, ui::TouchStart)) tempoScreen_.atividade(nowMs, true, int(toque->x), int(toque->y));   // inclusive o toque que so acorda o Modo Foco
         if (toque != nullptr && ui::hasTouch(*toque, ui::TouchStart) && modoFoco_.toque(nowMs)) {
             // Modo Foco: com a tela escurecida o 1o toque so acorda. O gesto inteiro e ignorado ate soltar, entao nunca
             // aciona o botao sob o dedo (nem "Fim · segure").

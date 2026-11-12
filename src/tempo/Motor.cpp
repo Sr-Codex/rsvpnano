@@ -252,6 +252,46 @@ namespace tempo {
         const int focados = std::max(0, in.minutosFocados);
         const int distraidos = std::max(0, in.minutosDistraidos);
 
+        if (in.livre) {   // modo livre (decisao 23): so taxa x minutos focados; nada de vitoria, bonus perfeito ou fuga
+            r.minutosPagos = focados;
+            r.crBruto = focados * taxa.crPorMin;
+            double crBase = r.crBruto, xpBase = focados * taxa.xpPorMin;
+            if (in.categoria == Categoria::Meditacao) {
+                const int cheios = std::clamp(param::kMeditacaoTetoMin - e.dia.meditacaoMin, 0, focados);
+                crBase = cheios * taxa.crPorMin + (focados - cheios) * param::kMeditacaoCrExcesso;
+                xpBase = cheios * taxa.xpPorMin + (focados - cheios) * param::kMeditacaoXpExcesso;
+                r.crBruto = crBase;
+            }
+            double bonusCr = 0.0, bonusXp = 0.0;   // sem perfeito; bonus de atributo/equipamento valem como sempre
+            const size_t ci = static_cast<size_t>(in.categoria);
+            if (ehTrabalhoOuProjetos(in.categoria)) {
+                bonusCr += std::min(e.dia.nivelAtributoInicio[static_cast<size_t>(Atributo::Oficio)] * param::kOficioPorNivel,
+                                    param::kTetoAtributoBonus) + e.equip.refinoCrExtra;
+            }
+            if (taxa.atributo == Atributo::Mente) {
+                bonusXp += std::min(e.dia.nivelAtributoInicio[static_cast<size_t>(Atributo::Mente)] * param::kMentePorNivel,
+                                    param::kTetoAtributoBonus);
+            }
+            bonusCr += e.equip.crExtra[ci];
+            bonusXp += e.equip.xpExtra[ci];
+            r.bonusCrPct = std::min(bonusCr, param::kTetoBonusCr);
+            r.bonusXpPct = std::min(bonusXp, param::kTetoBonusXp);
+            r.crBonus = crBase * r.bonusCrPct;
+            double fatorCr = 1.0, fatorXp = 1.0;
+            if (focados > 0) {
+                const int antes = e.dia.fochoPagoMin;
+                const int abaixoCr = std::clamp(param::kTetoFocoCrMin - antes, 0, focados);
+                const int abaixoXp = std::clamp(param::kTetoFocoXpMin - antes, 0, focados);
+                fatorCr = (abaixoCr + param::kFatorAposTeto * (focados - abaixoCr)) / focados;
+                fatorXp = (abaixoXp + param::kFatorAposTeto * (focados - abaixoXp)) / focados;
+                r.tetoCrAplicado = abaixoCr < focados;
+                r.tetoXpAplicado = abaixoXp < focados;
+            }
+            r.cr = (crBase + r.crBonus) * fatorCr;
+            r.xp = xpBase * (1.0 + r.bonusXpPct) * fatorXp;
+            return r;
+        }
+
         r.curaMin = std::min(distraidos, plan);
         bool fuga = in.abandonou || in.numDistracoes > param::kMaxDistracoes ||
                     in.maiorDistracaoMin > param::kDistracaoLongaMin;
@@ -266,11 +306,10 @@ namespace tempo {
         }
 
         if (r.vitoria) {
-            const int maxOver = static_cast<int>(std::floor(plan * param::kOvertimeMax + kEps));
-            r.minutosOvertime = std::clamp(focados - (plan + r.curaMin), 0, maxOver);
+            r.minutosOvertime = std::max(0, focados - (plan + r.curaMin));   // hora extra sem teto (decisao 24)
             r.minutosPagos = plan + r.minutosOvertime;
         } else {
-            r.minutosPagos = std::min(focados, static_cast<int>(plan * (1.0 + param::kOvertimeMax) + kEps));
+            r.minutosPagos = focados;
         }
         // Decisao 18: 1 distracao de ate 1 min NAO perde o bonus (so quando o chamador informa os segundos).
         const bool semDistracao = in.numDistracoes == 0 && distraidos == 0;
@@ -315,7 +354,14 @@ namespace tempo {
             r.bonusCrPct = std::min(bonusCr, param::kTetoBonusCr);
             r.bonusXpPct = std::min(bonusXp, param::kTetoBonusXp);
         }
-        r.crBonus = crBase * r.bonusCrPct;
+        // Decisao 24: o bonus perfeito (+25 %) vale so para a parte PLANEJADA; os minutos de hora extra ficam sem ele.
+        double pctCr = r.bonusCrPct, pctXp = r.bonusXpPct;
+        if (r.perfeita && pagos > 0 && r.minutosOvertime > 0) {
+            const double fracExtra = double(r.minutosOvertime) / pagos;
+            pctCr -= std::min(param::kBonusPerfeita, r.bonusCrPct) * fracExtra;
+            pctXp -= std::min(param::kBonusPerfeita, r.bonusXpPct) * fracExtra;
+        }
+        r.crBonus = crBase * pctCr;
 
         // Tetos diarios (6 h -> cr x0,5; 8 h -> XP x0,5), proporcional aos minutos acima do teto.
         double fatorCr = 1.0;
@@ -330,15 +376,15 @@ namespace tempo {
             r.tetoXpAplicado = abaixoXp < pagos;
         }
         r.cr = (crBase + r.crBonus) * fatorCr;
-        r.xp = xpBase * (1.0 + r.bonusXpPct) * fatorXp;
+        r.xp = xpBase * (1.0 + pctXp) * fatorXp;
         return r;
     }
 
     LiquidacaoBatalha aplicarBatalha(Estado& e, const EntradaBatalha& in) {
         LiquidacaoBatalha r = liquidarBatalha(e, in);
         e.dia.fochoPagoMin += r.minutosPagos;
-        if (r.vitoria) {
-            e.dia.fochoValidoMin += r.minutosPagos;
+        if (r.vitoria || (in.livre && r.minutosPagos >= param::kLivreDiaValidoMin)) {
+            e.dia.fochoValidoMin += r.minutosPagos;   // livre: nao e vitoria, mas >= 15 min conta para o dia valido
         }
         if (in.categoria == Categoria::Meditacao) {
             e.dia.meditacaoMin += r.minutosPagos;

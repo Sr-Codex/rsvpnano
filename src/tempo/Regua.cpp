@@ -20,6 +20,7 @@ namespace tempo::regua {
     }
 
     int indiceDaParada(int minutos) {
+        if (ehLivre(minutos)) return 0;
         int melhor = 0, dist = 1 << 30;
         for (int i = 0; i < kTotal; ++i) {
             const int d = std::abs(minutoDaParada(i) - minutos);
@@ -28,7 +29,7 @@ namespace tempo::regua {
         return melhor;
     }
 
-    double posicaoDaParada(int minutos) { return indiceDaParada(minutos); }
+    double posicaoDaParada(int minutos) { return ehLivre(minutos) ? kPosInf : double(indiceDaParada(minutos)); }
 
     double xDoIndice(int indice, double centroPos, double cx) { return cx + (indice - centroPos) * kPxPorParada; }
 
@@ -36,13 +37,28 @@ namespace tempo::regua {
         return cx + (posicaoDaParada(minutos) - centroPos) * kPxPorParada;
     }
 
+    int duracaoDoTimer(int ultimaDaRegua, int ultimaDeTimer) {
+        return ehLivre(ultimaDaRegua) ? limitarEncaixado(std::max(ultimaDeTimer, kMinMin)) : limitarEncaixado(ultimaDaRegua);
+    }
+
+    double xDoInf(double centroPos) { return kAgulhaX + (kPosInf - centroPos) * kPxPorParada; }
+    bool infFixo(double centroPos) { return xDoInf(centroPos) < kInfXMinVisivel; }
+    bool toqueNoInf(int x, double centroPos) {
+        if (infFixo(centroPos)) return x >= kInfAreaX0 && x <= kInfAreaX1;
+        return std::fabs(x - xDoInf(centroPos)) <= 22.0;
+    }
+
     double centroDeX(int minutos, double x, double cx) { return posicaoDaParada(minutos) - (x - cx) / kPxPorParada; }
 
-    double limitar(double pos) { return std::clamp(pos, 0.0, double(kTotal - 1)); }
+    double limitar(double pos) { return std::clamp(pos, kPosInf, double(kTotal - 1)); }
 
-    int encaixar(double pos) { return minutoDaParada(int(std::lround(limitar(pos)))); }
+    int encaixar(double pos) {
+        const double p = limitar(pos);
+        if (p < kPosInf / 2.0) return kLivre;   // mais perto do ∞ que do 5
+        return minutoDaParada(int(std::lround(std::max(p, 0.0))));
+    }
 
-    int limitarEncaixado(int minutos) { return minutoDaParada(indiceDaParada(minutos)); }
+    int limitarEncaixado(int minutos) { return ehLivre(minutos) ? kLivre : minutoDaParada(indiceDaParada(minutos)); }
 
     float opacidadePonta(float x, float xIni, float xFim, float larg) {
         if (larg <= 0) return (x >= xIni && x <= xFim) ? 1.0f : 0.0f;
@@ -52,10 +68,12 @@ namespace tempo::regua {
     bool metadeDireita(int x, int areaX, int areaW) { return x >= areaX + areaW / 2; }
 
     int ajustarPorToque(int atual, bool direita) {
+        if (ehLivre(atual)) return direita ? minutoDaParada(0) : kLivre;
         return minutoDaParada(indiceDaParada(atual) + (direita ? 1 : -1));
     }
 
     int passoDoLado(int atual, bool direita) {
+        if (ehLivre(atual)) return direita ? kPassoCurtoMin : 0;
         const int i = indiceDaParada(atual);
         const int j = i + (direita ? 1 : -1);
         if (j < 0 || j >= kTotal) return 0;
@@ -66,6 +84,7 @@ namespace tempo::regua {
     bool paradaHoraCheia(int m) { return m > kTrocaMarchaMin && m % 60 == 0; }
 
     std::string rotuloDaParada(int m) {
+        if (ehLivre(m)) return "∞";
         if (m <= kTrocaMarchaMin) return std::to_string(m);
         const int h = m / 60, r = m % 60;
         if (r == 0) return std::to_string(h) + " h";
@@ -75,6 +94,7 @@ namespace tempo::regua {
     }
 
     std::string textoDuracao(int m) {
+        if (ehLivre(m)) return "livre";
         if (m <= kTrocaMarchaMin) return std::to_string(m) + " min";
         const int h = m / 60, r = m % 60;
         if (r == 0) return std::to_string(h) + " h";
@@ -84,6 +104,7 @@ namespace tempo::regua {
     }
 
     std::vector<ParteValor> partesDoValor(int m) {
+        if (ehLivre(m)) return {{"livre", false}};
         if (m <= kTrocaMarchaMin) return {{std::to_string(m), true}, {"min", false}};
         const int h = m / 60, r = m % 60;
         std::vector<ParteValor> p{{std::to_string(h), true}, {"h", false}};

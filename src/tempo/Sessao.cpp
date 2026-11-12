@@ -98,6 +98,7 @@ namespace tempo {
     }
 
     std::string textoComecar(int rodadaMin, bool ciclo4x, bool horaValida, int minutoDoDia) {
+        if (regua::ehLivre(rodadaMin)) return "livre · sem meta";   // sem hora de fim: conta ate o Concluir
         ciclo4x = ciclo4x && ciclo4xPermitido(rodadaMin);
         std::string t = ciclo4x ? "4 × " + std::to_string(rodadaMin) : regua::textoDuracao(rodadaMin);
         if (horaValida) {

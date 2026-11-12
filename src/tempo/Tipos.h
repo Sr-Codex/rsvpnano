@@ -115,6 +115,9 @@ namespace tempo {
         int maiorDistracaoMin = 0;
         bool abandonou = false;
         bool porPrazer = false;      // Leitura "por prazer": 0 cr, so XP
+        // Modo livre (economia, decisao 23): sem meta, sem inimigo. Paga a taxa da categoria por minuto focado (minutosFocados),
+        // sem bonus perfeito, nao e vitoria nem fuga; conta para dia valido se >= kLivreDiaValidoMin. Tetos diarios valem.
+        bool livre = false;
     };
 
     struct LiquidacaoBatalha {
@@ -242,7 +245,8 @@ namespace tempo {
         Dia dia;
         // preferencias da tela inicial do Tempo (lembradas entre sessoes)
         int ultimaCategoria = 0;       // Categoria (enum) da ultima sessao
-        int ultimaDuracaoMin = 25;     // 5..300 (paradas da regua)
+        int ultimaDuracaoMin = 25;     // 5..300 (paradas da regua); 0 = livre (parada ∞, sem meta)
+        int ultimaDuracaoTimerMin = 25; // ultima duracao de TIMER (5..300); o BOOT do launcher sempre comeca um Timer com ela
         bool ciclopomodoro = false;    // interruptor "ciclo pomodoro 4x"
         std::vector<std::string> projetosRecentes;   // ids do TickTick dos projetos usados por ultimo (mais novo primeiro, ate 2)
         int metaSemanalMin = 900;      // meta de foco da semana no Perfil (padrao 15 h; editavel no estado.json)
