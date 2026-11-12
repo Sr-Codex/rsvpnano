@@ -571,9 +571,11 @@ namespace screens {
                 const Rect clip{alvo.x, alvo.y, int16_t(W), int16_t(H)};
                 for (const auto& r : rotulos)
                     textoEm(g, r.txt, 15, ox + r.x, oy + baselineCentrada(15, 88), r.cor, cPainel, clip, 1);
-                const uint16_t cLado = v.arrastando || !v.ativo ? cMudo : cLaranja;
-                textoEm(g, "‹ −5", 17, ox + 16, oy + baselineCentrada(17, 22), cLado, cPainel, clip, 0);
-                textoEm(g, "+5 ›", 17, ox + W - 16, oy + baselineCentrada(17, 22), cLado, cPainel, clip, 2);
+                const bool apagado = v.arrastando || !v.ativo;   // nos limites 5 / 90 o lado sem acao tambem apaga
+                const uint16_t cEsq = apagado || v.valor <= tempo::regua::kMinMin ? cMudo : cLaranja;
+                const uint16_t cDir = apagado || v.valor >= tempo::regua::kMaxMin ? cMudo : cLaranja;
+                textoEm(g, "‹ −5", 17, ox + 16, oy + baselineCentrada(17, 22), cEsq, cPainel, clip, 0);
+                textoEm(g, "+5 ›", 17, ox + W - 16, oy + baselineCentrada(17, 22), cDir, cPainel, clip, 2);
                 const std::string num = std::to_string(v.valor);
                 const int wNum = ui::sans::width(num, ui::sans::font(39)), wMin = ui::sans::width("min", ui::sans::font(17));
                 const int wTot = wNum + 6 + wMin, xNum = int(kCx) - wTot / 2;
@@ -1424,37 +1426,21 @@ namespace screens {
         const uint16_t cMudo = ui.color(Muted), cTexto = ui.color(Foreground), cBg = ui.color(Background);
         const uint16_t cLaranja = c565(kLaranja), cTonal = c565(kTonal);
 
-        // ---- "‹ Início" (alvo de 72 x 56)
-        {
-            const Rect area{8, 6, 72, 56};
-            Bloco voltar(ui, area, Background, 14, 90);
-            voltar.corFixa = cTonal;
-            voltar.suave = true;
-            voltar.apertado = ui.pressed(area);
-            voltar.linha(8, 34, 72, "‹ Início", 15, cTexto, TextAlign::Center);
-            voltar.desenhar();
-            if (ui.firmTap(area)) {
-                salvarPreferencias();
-                screen = Screen::Home;
-                return Action::None;
-            }
-        }
-
         // ---- cartao do foco: nome em 1 linha (reticencias), icone + categoria/"sem projeto" + cr/min, Trocar ›
         {
-            const Rect cartao{88, 6, 380, 56};
+            const Rect cartao{8, 6, 460, 56};
             const std::string nome = comProjeto ? (titulos_[escolha_].empty() ? std::string{"(sem título)"} : titulos_[escolha_])
                                                 : std::string{tempo::nomeCategoria(cat)};
-            const auto q = quebrar(nome, 270, 17, 15, 1);
+            const auto q = quebrar(nome, 350, 17, 15, 1);
             Bloco card(ui, cartao, SurfaceMuted, 14, 42 + comProjeto);
             card.suave = true;
             card.apertado = podeEditar && ui.pressed(cartao);
-            if (!q.linhas.empty()) card.linha(102, 24, 272, q.linhas[0], q.tam, cTexto);
-            card.linha(122, 46, 300, tempo::linhaTaxaDoFoco(comProjeto, categoria_), 15, cMudo);
+            if (!q.linhas.empty()) card.linha(22, 24, 352, q.linhas[0], q.tam, cTexto);
+            card.linha(42, 46, 340, tempo::linhaTaxaDoFoco(comProjeto, categoria_), 15, cMudo);
             if (podeEditar) card.linha(344, 34, 110, "Trocar ›", 17, cLaranja, TextAlign::Right);
             card.marca(uint32_t(cat) * 4U + podeEditar * 2U + comProjeto);
             const uint16_t corIcone = comProjeto ? rgb565(120, 160, 255) : cLaranja;
-            card.desenhar([&](Arduino_GFX& g, int, int) { icones::phosphor(g, iconeDaCategoria(cat), 110, 46, 15, corIcone, ui.color(SurfaceMuted)); });
+            card.desenhar([&](Arduino_GFX& g, int, int) { icones::phosphor(g, iconeDaCategoria(cat), 30, 46, 15, corIcone, ui.color(SurfaceMuted)); });
             if (ui.firmTap(cartao, podeEditar)) {
                 seletor_ = true;
                 pagina_ = 0;
