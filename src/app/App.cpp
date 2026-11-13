@@ -926,7 +926,7 @@ void App::handleScreenAction(screens::Action action, uint32_t nowMs) {
         screens::status(immediateUi_, immediateUi_.text(UiText::StorageEncryption),
                         immediateUi_.text(UiText::EnablingEncryption));
         ReadingProgress::save(readerScreen_.session, prefs_, true, nowMs);
-        ReadingProgress::mirror(readerScreen_.session, readerScreen_.store);
+        ReadingProgress::flush(readerScreen_.session, readerScreen_.store);
         if (!storage_.mounted() || !settings::enableNvsEncryption(prefs_, settingsStore_)) {
             showTransientStatus(immediateUi_.text(UiText::StorageEncryption), immediateUi_.text(UiText::Unavailable),
                                 {}, 1200, screens::Screen::Device);
@@ -1831,7 +1831,7 @@ void App::enterUsbTransfer(uint32_t nowMs) {
     if (serialCompanion_.active())
         return;
     ReadingProgress::save(readerScreen_.session, prefs_, true, nowMs);
-    ReadingProgress::mirror(readerScreen_.session, readerScreen_.store);
+    ReadingProgress::flush(readerScreen_.session, readerScreen_.store);
     if (auto result = settingsStore_.flush(); !result) {
         showTransientStatus("USB", immediateUi_.text(UiText::CouldNotStart), result.error().message, 1200,
                             screens::Screen::Reader);
@@ -1950,7 +1950,7 @@ void App::runOtaCheck(bool install, bool switching, bool automatic) {
     if (install) {
         const uint32_t nowMs = millis();
         ReadingProgress::save(readerScreen_.session, prefs_, true, nowMs);
-        ReadingProgress::mirror(readerScreen_.session, readerScreen_.store);
+        ReadingProgress::flush(readerScreen_.session, readerScreen_.store);
         settingsStore_.flush();
     }
     screen_ = screens::Screen::Status;
@@ -1994,7 +1994,7 @@ void App::exitStandby(uint32_t nowMs) {
 
 void App::lightSleepFromStandby() {
     ESP_LOGI("app", "screen-off standby; entering light sleep");
-    ReadingProgress::mirror(readerScreen_.session, readerScreen_.store);
+    ReadingProgress::flush(readerScreen_.session, readerScreen_.store);
     standbyScreen_.reset();
     if (usbTransfer_.active())
         usbTransfer_.end();
@@ -2123,7 +2123,7 @@ void App::powerOff(uint32_t nowMs, bool automatic) {
     focusScreen_.close();
     contarFocoLeitor(nowMs);   // desligar no meio de um foco: liquida os minutos ja focados
     ReadingProgress::save(readerScreen_.session, prefs_, true, nowMs);
-    ReadingProgress::mirror(readerScreen_.session, readerScreen_.store);
+    ReadingProgress::flush(readerScreen_.session, readerScreen_.store);
     ReadingLoop::pause(readerScreen_.session);
     std::optional<tempo::DecisaoDespertador> sono;
     if (automatic) sono = decidirSono(nowMs);   // so o desligamento AUTOMATICO pode virar sono com despertador

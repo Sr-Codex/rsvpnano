@@ -485,6 +485,166 @@ void test_rewind_sentence_ignores_abbreviation_periods(void) {
 }
 
 // ---------------------------------------------------------------------------
+// Portuguese sentence ends (lume.26): abbreviations, closing quotes, paragraph ends, "voltar uma frase"
+// ---------------------------------------------------------------------------
+
+static uint32_t durationIn(const char* locale, const char* word, const char* next) {
+    ReadingSession r = makeReader(300, {word, next});
+    r.metadata.locale = locale;
+    return ReadingLoop::currentWordDurationMs(r, testSettings);
+}
+
+void test_portuguese_abbreviations_before_a_name_or_number_do_not_pause(void) {
+    // 200 = no pause; 470 = sentence pause (135% of 200 ms). Before a capital or a digit only the list helps.
+    TEST_ASSERT_EQUAL(200u, durationIn("pt-BR", "Sra.", "Ana"));
+    TEST_ASSERT_EQUAL(200u, durationIn("pt-BR", "Dra.", "Marta"));
+    TEST_ASSERT_EQUAL(200u, durationIn("pt-BR", "p\xC3\xA1g.", "23"));
+    TEST_ASSERT_EQUAL(200u, durationIn("pt-BR", "p\xC3\xA1gs.", "677-684"));
+    TEST_ASSERT_EQUAL(200u, durationIn("pt-BR", "cap.", "4"));
+    TEST_ASSERT_EQUAL(200u, durationIn("pt-BR", "art.", "5"));
+    TEST_ASSERT_EQUAL(200u, durationIn("pt-BR", "al.,", "x") - 90u); // "et al.," is a comma (45%), never a sentence
+    // Other spellings of the language tag, including the odd "pt-TT" one of the books has.
+    for (const char* locale: {"pt", "pt-PT", "pt-TT", "pt_BR", "PT-br"})
+        TEST_ASSERT_EQUAL(200u, durationIn(locale, "Sra.", "Ana"));
+    // An ordinary Portuguese word still ends its sentence.
+    TEST_ASSERT_EQUAL(470u, durationIn("pt-BR", "fim.", "Depois"));
+}
+
+void test_portuguese_abbreviations_are_not_used_for_other_languages(void) {
+    // "art.", "ten.", "cap." and "id." end ordinary English sentences.
+    TEST_ASSERT_EQUAL(470u, durationIn("en", "art.", "The"));
+    TEST_ASSERT_EQUAL(470u, durationIn("en", "ten.", "The"));
+    TEST_ASSERT_EQUAL(470u, durationIn("", "cap.", "The"));
+    TEST_ASSERT_EQUAL(470u, durationIn("pl", "art.", "The")); // "pl" is Polish, not Portuguese
+    TEST_ASSERT_EQUAL(470u, durationIn("ptx", "art.", "The"));
+    // The shared list keeps working everywhere.
+    TEST_ASSERT_EQUAL(200u, durationIn("en", "Mr.", "Smith"));
+    TEST_ASSERT_EQUAL(200u, durationIn("pt-BR", "Dr.", "Paulo"));
+}
+
+void test_abbreviation_wrapped_in_brackets_quotes_or_capitals(void) {
+    TEST_ASSERT_EQUAL(200u, durationIn("pt-BR", "(p\xC3\xA1g.", "23)"));
+    TEST_ASSERT_EQUAL(200u, durationIn("en", "etc.)", "Then"));
+    TEST_ASSERT_EQUAL(200u, durationIn("en", "\xE2\x80\x9CMr.", "Smith"));     // “Mr.
+    // "PÁG." matches "pág."; all capitals add 14% (28 ms) but no sentence pause.
+    TEST_ASSERT_EQUAL(228u, durationIn("pt-BR", "P\xC3\x81G.", "23"));
+    // A real sentence end inside quotes still pauses.
+    TEST_ASSERT_EQUAL(470u, durationIn("en", "done.\"", "Then"));
+    // Only the lists look inside quotes: a short quoted sentence followed by lower case still ends, as before.
+    TEST_ASSERT_EQUAL(470u, durationIn("pt-BR", "\"Pare.\"", "ele"));
+    TEST_ASSERT_EQUAL(200u, durationIn("pt-BR", "Pare.", "ele")); // the old next-word guess, unchanged
+}
+
+void test_closing_guillemet_does_not_hide_the_full_stop(void) {
+    // «…fim.» is how European Portuguese closes a quotation.
+    TEST_ASSERT_EQUAL(470u, durationIn("pt-PT", "fim.\xC2\xBB", "Depois"));
+    TEST_ASSERT_EQUAL(500u, durationIn("pt-PT", "fim?\xC2\xBB", "Depois")); // 150%
+}
+
+void test_rewind_sentence_stops_at_portuguese_abbreviations_only_in_portuguese(void) {
+    ReadingSession pt = makeReader(300, {"A", "Sra.", "Ana", "chegou.", "Depois", "saiu."});
+    pt.metadata.locale = "pt-BR";
+    ReadingLoop::seekTo(pt, 3);
+    ReadingLoop::rewindSentence(pt);
+    TEST_ASSERT_EQUAL(0u, pt.state.wordIndex); // "Sra." is not a sentence end
+    ReadingSession en = makeReader(300, {"A", "Sra.", "Ana", "chegou.", "Depois", "saiu."});
+    ReadingLoop::seekTo(en, 3);
+    ReadingLoop::rewindSentence(en);
+    TEST_ASSERT_EQUAL(2u, en.state.wordIndex);
+}
+
+void test_paragraph_end_closes_a_sentence_without_a_full_stop(void) {
+    // A heading, or a sentence whose final period was lost in conversion.
+    ReadingSession r = makeReader(300, {"O", "principe", "Era", "uma", "vez", "Fim."});
+    r.metadata.paragraphStarts = {0, 2, 5};
+    ReadingLoop::seekTo(r, 1);
+    TEST_ASSERT_TRUE(ReadingLoop::currentWordEndsSentence(r));
+    ReadingLoop::seekTo(r, 3);
+    TEST_ASSERT_FALSE(ReadingLoop::currentWordEndsSentence(r));
+    ReadingLoop::rewindSentence(r);
+    TEST_ASSERT_EQUAL(2u, r.state.wordIndex); // not back to the heading
+    ReadingLoop::seekTo(r, 5);
+    ReadingLoop::rewindSentence(r); // at a sentence start: the one before
+    TEST_ASSERT_EQUAL(2u, r.state.wordIndex);
+}
+
+void test_paragraph_per_printed_line_does_not_cut_the_sentence(void) {
+    // A book born from a PDF: every printed line is a "paragraph" and the next one goes on in lower case.
+    ReadingSession r = makeReader(300, {"Ele", "passou", "a", "vida", "buscando", "abrigo.", "Depois", "saiu."});
+    r.metadata.paragraphStarts = {0, 2, 4, 6};
+    ReadingLoop::seekTo(r, 1);
+    TEST_ASSERT_FALSE(ReadingLoop::currentWordEndsSentence(r)); // "passou" | "a vida": same sentence
+    ReadingLoop::seekTo(r, 5);
+    TEST_ASSERT_TRUE(ReadingLoop::currentWordEndsSentence(r));
+    ReadingLoop::rewindSentence(r);
+    TEST_ASSERT_EQUAL(0u, r.state.wordIndex); // the whole sentence, not just its last line
+}
+
+void test_rewind_sentence_margin_replays_the_sentence_just_lost(void) {
+    // Sentences start at 0, 2 and 9. (Whole words: a single letter with a period is read as an initial.)
+    const std::vector<std::string> words{"Um",   "dois.", "Tres", "quatro", "cinco", "seis",
+                                         "sete", "oito",  "nove.", "Dez",   "onze",  "doze"};
+    ReadingSession r = makeReader(300, words);
+    // Words are running and the reader swipes 2 words into the new sentence: replay the one before.
+    ReadingLoop::seekTo(r, 11);
+    ReadingLoop::rewindSentence(r, ReadingLoop::kRewindMarginWhilePlaying);
+    TEST_ASSERT_EQUAL(2u, r.state.wordIndex);
+    // Well into a sentence: only back to its own start.
+    ReadingLoop::seekTo(r, 8);
+    ReadingLoop::rewindSentence(r, ReadingLoop::kRewindMarginWhilePlaying);
+    TEST_ASSERT_EQUAL(2u, r.state.wordIndex);
+    // Exactly at the margin still counts as "just started".
+    ReadingLoop::seekTo(r, 7);
+    ReadingLoop::rewindSentence(r, ReadingLoop::kRewindMarginWhilePlaying);
+    TEST_ASSERT_EQUAL(0u, r.state.wordIndex);
+    // Paused (no margin): two taps walk back one sentence at a time.
+    ReadingLoop::seekTo(r, 11);
+    ReadingLoop::rewindSentence(r);
+    TEST_ASSERT_EQUAL(9u, r.state.wordIndex);
+    ReadingLoop::rewindSentence(r);
+    TEST_ASSERT_EQUAL(2u, r.state.wordIndex);
+    // The first sentence has nothing before it.
+    ReadingLoop::seekTo(r, 1);
+    ReadingLoop::rewindSentence(r, ReadingLoop::kRewindMarginWhilePlaying);
+    TEST_ASSERT_EQUAL(0u, r.state.wordIndex);
+}
+
+void test_rewind_sentence_never_scans_back_without_limit(void) {
+    ReadingSession r = makeReader(300, std::vector<std::string>(1000, "palavra"));
+    ReadingLoop::seekTo(r, 900);
+    ReadingLoop::rewindSentence(r);
+    TEST_ASSERT_EQUAL(500u, r.state.wordIndex);
+}
+
+void test_sentence_scrub_walks_sentence_starts(void) {
+    // Sentences start at 0, 2, 9 and 12.
+    ReadingSession r = makeReader(300, {"Um", "dois.", "Tres", "quatro", "cinco", "seis", "sete", "oito", "nove.",
+                                        "Dez", "onze", "doze.", "Treze", "fim."});
+    using ReadingLoop::sentenceStartAfterSteps;
+    TEST_ASSERT_EQUAL(5u, sentenceStartAfterSteps(r, 5, 0));
+    // Back from the middle: first its own start, then the one before; never before the book.
+    TEST_ASSERT_EQUAL(2u, sentenceStartAfterSteps(r, 5, -1));
+    TEST_ASSERT_EQUAL(0u, sentenceStartAfterSteps(r, 5, -2));
+    TEST_ASSERT_EQUAL(0u, sentenceStartAfterSteps(r, 5, -9));
+    // Back from a sentence start: the previous sentence.
+    TEST_ASSERT_EQUAL(2u, sentenceStartAfterSteps(r, 9, -1));
+    // Forward from the middle or the start: the next sentence; never past the last one.
+    TEST_ASSERT_EQUAL(9u, sentenceStartAfterSteps(r, 5, 1));
+    TEST_ASSERT_EQUAL(9u, sentenceStartAfterSteps(r, 2, 1));
+    TEST_ASSERT_EQUAL(12u, sentenceStartAfterSteps(r, 5, 2));
+    TEST_ASSERT_EQUAL(12u, sentenceStartAfterSteps(r, 5, 9));
+    TEST_ASSERT_EQUAL(13u, sentenceStartAfterSteps(r, 13, 1)); // inside the last sentence: stays
+    // An out-of-range starting word counts as the last word of the book.
+    TEST_ASSERT_EQUAL(12u, sentenceStartAfterSteps(r, 99, -1));
+}
+
+void test_sentence_scrub_never_scans_without_limit(void) {
+    ReadingSession r = makeReader(300, std::vector<std::string>(1000, "palavra"));
+    TEST_ASSERT_EQUAL(401u, ReadingLoop::sentenceStartAfterSteps(r, 0, 1)); // looks 400 words ahead at most
+    TEST_ASSERT_EQUAL(500u, ReadingLoop::sentenceStartAfterSteps(r, 900, -1));
+}
+
+// ---------------------------------------------------------------------------
 // Word count / word access
 // ---------------------------------------------------------------------------
 
@@ -689,6 +849,17 @@ int main(void) {
     RUN_TEST(test_rewind_sentence_at_sentence_start_moves_to_previous_sentence);
     RUN_TEST(test_rewind_sentence_clamps_at_book_start);
     RUN_TEST(test_rewind_sentence_ignores_abbreviation_periods);
+    RUN_TEST(test_portuguese_abbreviations_before_a_name_or_number_do_not_pause);
+    RUN_TEST(test_portuguese_abbreviations_are_not_used_for_other_languages);
+    RUN_TEST(test_abbreviation_wrapped_in_brackets_quotes_or_capitals);
+    RUN_TEST(test_closing_guillemet_does_not_hide_the_full_stop);
+    RUN_TEST(test_rewind_sentence_stops_at_portuguese_abbreviations_only_in_portuguese);
+    RUN_TEST(test_paragraph_end_closes_a_sentence_without_a_full_stop);
+    RUN_TEST(test_paragraph_per_printed_line_does_not_cut_the_sentence);
+    RUN_TEST(test_rewind_sentence_margin_replays_the_sentence_just_lost);
+    RUN_TEST(test_rewind_sentence_never_scans_back_without_limit);
+    RUN_TEST(test_sentence_scrub_walks_sentence_starts);
+    RUN_TEST(test_sentence_scrub_never_scans_without_limit);
 
     RUN_TEST(test_word_at_returns_correct_word);
 

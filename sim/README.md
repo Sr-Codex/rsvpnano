@@ -67,6 +67,14 @@ Coordenadas = as da janela (640×172 deitada). Log de depuração: `LUME_SIM_DEB
 As capturas aplicam o brilho do painel (0,35 + 0,65 × %); `LUME_SIM_SHOT_RAW=1` grava os pixels exatamente como o
 firmware os escreveu (sem brilho), para comparar com os mockups.
 
+**Verificação do leitor:** `python3 sim/verificar_leitor.py` roda o firmware sem janela, numa cópia descartável do
+`sim/state` e com a tela lenta (80 ms por quadro), e confere o que os testes nativos não alcançam: pausar grava a posição
+no cartão e ela sobrevive a um corte de energia; religar continua de onde parou; um arquivo de posição interrompido é
+recuperado do `.tmp`/`.bak`; arrastar com a leitura parada anda de frase em frase (e grava); com as palavras
+correndo, um deslize rápido para a esquerda volta uma frase e segue lendo, e um arrasto lento não faz nada; desligar
+pelo botão grava uma vez só. Sai com código 1 se algo falhar. Opções: `--prog BINARIO`, `--state PASTA`, `--atraso MS`. Rode sempre que mexer em
+`library/ReadingProgress.*`, `reader/ReadingLoop.*` ou nos toques da tela de leitura.
+
 **Render lento (como a placa):** `LUME_SIM_RENDER_DELAY_MS=80` faz cada quadro desenhado levar 80 ms a mais (o Mac desenha
 em ~1 ms; na placa a batalha do Tempo passa dos 30 ms entre leituras do toque). Serve para reproduzir defeitos que dependem da
 fila de toques acumulando (ex.: "Fim · segure" que encerrava depois de soltar, lume.21). Roteiros em

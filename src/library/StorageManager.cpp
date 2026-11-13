@@ -108,8 +108,10 @@ std::expected<void, std::error_code> StorageManager::removeBook(std::string_view
         return std::unexpected(std::make_error_code(std::errc::io_error));
     Board::Storage::filesystem().remove(StoragePaths::indexedIndexPathFor(path).c_str());
     Board::Storage::filesystem().remove(StoragePaths::indexedDataPathFor(path).c_str());
-    Board::Storage::filesystem().remove(StoragePaths::bookStatePathFor(path).c_str());
-    Board::Storage::filesystem().remove(StoragePaths::bookmarksPathFor(path).c_str());
+    // The sidecars and what an interrupted write may have left beside them (ReadingProgress reads those back).
+    for (const std::string& sidecar: {StoragePaths::bookStatePathFor(path), StoragePaths::bookmarksPathFor(path)})
+        for (const char* suffix: {"", ".tmp", ".bak"})
+            Board::Storage::filesystem().remove((sidecar + suffix).c_str());
     for (const auto& cover : covers::sourceCandidates(path))
         Board::Storage::filesystem().remove(cover.c_str());
     Board::Storage::filesystem().remove(covers::cachePath(path).c_str());

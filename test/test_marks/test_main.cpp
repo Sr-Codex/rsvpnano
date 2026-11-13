@@ -168,15 +168,24 @@ void test_scrub_math() {
     TEST_ASSERT_FALSE(isScrubMove(8, 0));
     TEST_ASSERT_TRUE(isScrubMove(9, 2));
     TEST_ASSERT_FALSE(isScrubMove(20, 30)); // vertical wins
-    TEST_ASSERT_EQUAL_INT(0, scrubSteps(11));
-    TEST_ASSERT_EQUAL_INT(1, scrubSteps(12));
-    TEST_ASSERT_EQUAL_INT(-3, scrubSteps(-40));
-    TEST_ASSERT_EQUAL_INT(8, scrubSteps(96));
-    TEST_ASSERT_TRUE(scrubSteps(300) > 8 + 60); // accelerated past the linear zone
-    TEST_ASSERT_EQUAL_UINT32(116, scrubTarget(100, 120, 1000)); // 8 linear + 8 accelerated
-    TEST_ASSERT_EQUAL_UINT32(0, scrubTarget(5, -600, 1000));
-    TEST_ASSERT_EQUAL_UINT32(999, scrubTarget(990, 600, 1000));
-    TEST_ASSERT_EQUAL_UINT32(0, scrubTarget(0, 50, 0));
+    // By sentence (lume.26): the first one half a step in, then one every 70 px, never accelerating.
+    TEST_ASSERT_EQUAL_INT(0, scrubSentenceSteps(0));
+    TEST_ASSERT_EQUAL_INT(0, scrubSentenceSteps(34));
+    TEST_ASSERT_EQUAL_INT(1, scrubSentenceSteps(35));
+    TEST_ASSERT_EQUAL_INT(-1, scrubSentenceSteps(-35));
+    TEST_ASSERT_EQUAL_INT(-1, scrubSentenceSteps(-104));
+    TEST_ASSERT_EQUAL_INT(-2, scrubSentenceSteps(-105));
+    TEST_ASSERT_EQUAL_INT(4, scrubSentenceSteps(300));   // the old word scrub went 76 words here
+    TEST_ASSERT_EQUAL_INT(-9, scrubSentenceSteps(-630)); // across the whole screen
+}
+
+void test_rewind_swipe() {
+    TEST_ASSERT_TRUE(isRewindSwipe(-50, 0, 0));
+    TEST_ASSERT_TRUE(isRewindSwipe(-120, 30, 600));
+    TEST_ASSERT_FALSE(isRewindSwipe(-49, 0, 100));   // too short
+    TEST_ASSERT_FALSE(isRewindSwipe(80, 0, 100));    // to the right
+    TEST_ASSERT_FALSE(isRewindSwipe(-60, 60, 100));  // diagonal: not clearly horizontal
+    TEST_ASSERT_FALSE(isRewindSwipe(-200, 0, 601));  // a slow drag, not a flick
 }
 
 void test_backward_math() {
@@ -239,8 +248,32 @@ void test_jump_to_records_resume_but_rewind_does_not() {
     TEST_ASSERT_FALSE(s.state.resume.valid);
 }
 
+// Position on the card: lume.25 and earlier only wrote it at chapter starts, jumps and clean power off, so pausing
+// and then losing power threw the reader back. Pausing (a forced save point) must always write.
+void test_position_save_policy() {
+    const uint32_t interval = kPositionSaveIntervalMs, cap = kPositionSaveMaxIntervalMs;
+    // Nothing new to write: never, not even when forced.
+    TEST_ASSERT_FALSE(positionSaveDue(true, false, false, false, 0));
+    TEST_ASSERT_FALSE(positionSaveDue(false, true, true, false, cap * 2));
+    // Save points (pause, menu, leaving the reader, end of a drag or rewind): always, at once.
+    TEST_ASSERT_TRUE(positionSaveDue(true, false, false, true, 0));
+    TEST_ASSERT_TRUE(positionSaveDue(true, true, false, true, 5));
+    // Reading: not before the interval, even at a sentence end.
+    TEST_ASSERT_FALSE(positionSaveDue(false, true, true, true, interval - 1));
+    // After the interval it waits for a sentence end (the pause there hides the card write)...
+    TEST_ASSERT_FALSE(positionSaveDue(false, true, false, true, interval));
+    TEST_ASSERT_TRUE(positionSaveDue(false, true, true, true, interval));
+    // ...but a text without sentence ends cannot hold it forever.
+    TEST_ASSERT_FALSE(positionSaveDue(false, true, false, true, cap - 1));
+    TEST_ASSERT_TRUE(positionSaveDue(false, true, false, true, cap));
+    // Paused and not forced: the paused position only changes at save points, nothing to do per frame.
+    TEST_ASSERT_FALSE(positionSaveDue(false, false, true, true, cap * 2));
+    TEST_ASSERT_TRUE(interval < cap);
+}
+
 int main() {
     UNITY_BEGIN();
+    RUN_TEST(test_position_save_policy);
     RUN_TEST(test_jump_saves_current_position_as_resume);
     RUN_TEST(test_jump_to_same_word_is_not_a_jump);
     RUN_TEST(test_chained_jumps_keep_the_last_really_read_place);
@@ -256,6 +289,7 @@ int main() {
     RUN_TEST(test_old_sidecar_without_resume_still_loads);
     RUN_TEST(test_resume_round_trips_through_sidecar_toml);
     RUN_TEST(test_scrub_math);
+    RUN_TEST(test_rewind_swipe);
     RUN_TEST(test_backward_math);
     RUN_TEST(test_update_backward_walks_back_at_wpm_and_stops_at_zero);
     RUN_TEST(test_jump_to_records_resume_but_rewind_does_not);

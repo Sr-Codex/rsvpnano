@@ -51,6 +51,10 @@ namespace screens {
                                   settings::SettingsStore& settingsStore, Screen& screen);
         void cancelModernControls() { modernControl_ = 0; modernCanvasTouch_ = false; modernHolding_ = false; modernScrub_ = false; backward_ = false; }
         void stopBackward(Preferences& preferences, uint32_t nowMs);
+        // "Voltar uma frase" while the words run (lume.26: a quick flick to the left on the word canvas): back to
+        // the start of the sentence, or of the one before when it had just begun; keeps reading after holding the
+        // first word a moment. With the reading paused the same job is the sentence drag (handleModernControls).
+        void rewindSentenceSwipe(Preferences& preferences, uint32_t nowMs);
         void toggle(Preferences& preferences, uint32_t nowMs);
         void update(Preferences& preferences, uint32_t nowMs);
         void pauseImmediately(Preferences& preferences, uint32_t nowMs) { finishPause(preferences, nowMs); }
@@ -75,11 +79,18 @@ namespace screens {
         PageReader::BrowseState browse_;
         size_t pageSelected_ = 0;
         bool backward_ = false; // hold-left rewind in progress
-        bool modernScrub_ = false; // horizontal drag scrub in progress
+        bool modernScrub_ = false; // horizontal drag scrub in progress (by sentence)
         size_t scrubStartWord_ = 0;
         uint16_t scrubAnchorX_ = 0;
-        std::string scrubText_;
+        int scrubShownSteps_ = 0;  // sentence steps asked by the finger, already applied
+        int scrubTakenSteps_ = 0;  // sentence steps really walked (fewer at the first and last sentences)
+        std::vector<size_t> scrubBack_, scrubForward_; // sentence starts found during this drag, in order
+        std::string scrubText_;    // bottom label while dragging, and for a moment after a swipe
+        int16_t modernMinDx_ = 0;  // farthest left the finger went during this touch (swipe detection)
+        int16_t modernMaxAbsDy_ = 0;
         uint32_t backwardStartMs_ = 0;
+        uint32_t reorientUntilMs_ = 0;    // after "voltar uma frase" while playing: hold the first word until then
+        uint32_t scrubNoticeUntilMs_ = 0; // "‹ 1 frase" stays in the bottom label until then
         uint32_t lastTickMs_ = 0;
         uint32_t markNoticeUntilMs_ = 0;
         bool bookmarkFull_ = false;

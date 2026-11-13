@@ -492,6 +492,8 @@ namespace {
         if (codepoint <= 0x7FU)
             return isIgnoredTrailingChar(static_cast<char>(codepoint));
         switch (codepoint) {
+        case 0x00BBU: // » closes a quotation in Portuguese and French: "fim.»" still ends the sentence
+        case 0x203AU: // ›
         case 0x2019U:
         case 0x201DU:
         case 0x3009U:
@@ -663,16 +665,70 @@ namespace {
         return expectLetter && letterCount >= 2;
     }
 
-    bool looksLikeAbbreviation(std::string_view word, bool nextWordStartsLowercase) {
-        constexpr const char* kKnownAbbreviations[] = {
+    // The word without what hugs it: opening quotes and brackets in front, closing ones behind. "(pág." and
+    // "etc.)" are judged like "pág." and "etc.".
+    std::string_view abbreviationCore(std::string_view word) {
+        while (!word.empty()) {
+            std::string_view rest = word;
+            uint32_t codepoint = 0;
+            if (!Utf8Text::next(rest, codepoint) || UnicodeText::isWordCharacter(codepoint))
+                break;
+            word = rest;
+        }
+        while (!word.empty()) {
+            const size_t start = Utf8Text::lastCodepointStart(word);
+            std::string_view last = word.substr(start);
+            uint32_t codepoint = 0;
+            if (!Utf8Text::next(last, codepoint) || !isIgnoredTrailingCodepoint(codepoint))
+                break;
+            word.remove_suffix(word.size() - start);
+        }
+        return word;
+    }
+
+    // Case-insensitive beyond ASCII, so "PÁG." matches "pág.".
+    bool sameIgnoringCase(std::string_view left, std::string_view right) {
+        uint32_t a = 0;
+        uint32_t b = 0;
+        while (true) {
+            const bool hasA = Utf8Text::next(left, a);
+            const bool hasB = Utf8Text::next(right, b);
+            if (!hasA || !hasB)
+                return hasA == hasB;
+            if (UnicodeText::toLowercase(a) != UnicodeText::toLowercase(b))
+                return false;
+        }
+    }
+
+    bool isPortuguese(std::string_view locale) {
+        return locale.size() >= 2 && AsciiText::toLower(locale[0]) == 'p' && AsciiText::toLower(locale[1]) == 't'
+            && (locale.size() == 2 || locale[2] == '-' || locale[2] == '_');
+    }
+
+    bool looksLikeAbbreviation(std::string_view word, bool nextWordStartsLowercase, bool portuguese) {
+        constexpr std::string_view kKnownAbbreviations[] = {
             "mr.",  "mrs.", "ms.", "dr.",  "prof.", "sr.",  "jr.",  "st.", "vs.",   "etc.", "e.g.",
             "i.e.", "cf.",  "no.", "fig.", "eq.",   "inc.", "ltd.", "co.", "dept.", "mt.",  "ft.",
         };
+        // Portuguese forms that come before a name or a number ("Sra. Ana", "pág. 23", "cap. 4"), where the
+        // next-word rule below cannot help. Only for Portuguese text: "art.", "cap.", "ten." or "id." end ordinary
+        // English sentences.
+        constexpr std::string_view kPortugueseAbbreviations[] = {
+            "sra.",  "srta.", "srs.",  "sras.",  "dra.",  "drs.",  "dras.", "profa.", "profs.", "exmo.", "exma.",
+            "pe.",   "sto.",  "sta.",  "gen.",   "cel.",  "ten.",  "sgt.",  "eng.",   "pág.",   "págs.", "pp.",
+            "cap.",  "caps.", "art.",  "arts.",  "vol.",  "vols.", "ed.",   "eds.",   "séc.",   "sécs.", "núm.",
+            "tab.",  "tabs.", "figs.", "op.",    "cit.",  "ibid.", "id.",   "al.",    "trad.",  "org.",  "orgs.",
+            "coord.", "av.",  "tel.",  "ltda.",  "cia.",  "aprox.", "p.ex.",
+        };
 
-        if (std::ranges::any_of(kKnownAbbreviations, [word](const char* abbreviation) {
-                return std::ranges::equal(word, std::string_view{abbreviation}, {}, AsciiText::toLower,
-                                          AsciiText::toLower);
-            }))
+        // Only the lists see the word without its quotes and brackets. The guesses below keep judging the word as
+        // it is written, so a quoted sentence such as "Pare." still ends where it ends.
+        const std::string_view core = abbreviationCore(word);
+        const auto known = [core](std::string_view abbreviation) {
+            return sameIgnoringCase(core, abbreviation);
+        };
+        if (std::ranges::any_of(kKnownAbbreviations, known)
+            || (portuguese && std::ranges::any_of(kPortugueseAbbreviations, known)))
             return true;
 
         if (!word.ends_with(".")) {
@@ -771,7 +827,7 @@ namespace {
         return std::min<uint16_t>(kComplexWordMaxPercent, bonusPercent);
     }
 
-    uint16_t punctuationPausePercentForWord(std::string_view word, bool nextWordStartsLowercase) {
+    uint16_t punctuationPausePercentForWord(std::string_view word, bool nextWordStartsLowercase, bool portuguese) {
         if (endsWithEllipsis(word)) {
             return kEllipsisPausePercent;
         }
@@ -786,7 +842,7 @@ namespace {
         case ':':
             return kClausePausePercent;
         case '.':
-            if (!looksLikeAbbreviation(word, nextWordStartsLowercase)) {
+            if (!looksLikeAbbreviation(word, nextWordStartsLowercase, portuguese)) {
                 return kSentencePausePercent;
             }
             return 0;
@@ -799,7 +855,7 @@ namespace {
     }
 
     uint32_t pacingBonusMsForWord(std::string_view word, bool nextWordStartsLowercase,
-                                  const settings::PacingSettings& pacing) {
+                                  const settings::PacingSettings& pacing, bool portuguese) {
         if (word.empty()) {
             return 0;
         }
@@ -807,17 +863,17 @@ namespace {
         uint32_t totalBonusMs = 0;
         totalBonusMs += scaledDelayMs(lengthBonusPercentForWord(word), pacing.longWordDelayMs);
         totalBonusMs += scaledDelayMs(complexityBonusPercentForWord(word), pacing.complexWordDelayMs);
-        totalBonusMs +=
-            scaledDelayMs(punctuationPausePercentForWord(word, nextWordStartsLowercase), pacing.punctuationDelayMs);
+        totalBonusMs += scaledDelayMs(punctuationPausePercentForWord(word, nextWordStartsLowercase, portuguese),
+                                      pacing.punctuationDelayMs);
         return totalBonusMs;
     }
 
     uint32_t durationForWord(std::string_view word, bool nextWordStartsLowercase, uint32_t baseIntervalMs,
-                             const settings::PacingSettings& pacing) {
+                             const settings::PacingSettings& pacing, bool portuguese) {
         if (baseIntervalMs == 0) {
             return 0;
         }
-        return baseIntervalMs + pacingBonusMsForWord(word, nextWordStartsLowercase, pacing);
+        return baseIntervalMs + pacingBonusMsForWord(word, nextWordStartsLowercase, pacing, portuguese);
     }
 
 } // namespace
@@ -837,6 +893,14 @@ namespace ReadingLoop {
         bool wordEndsSentenceAt(const ReadingSession& session, size_t wordIndex) {
             if (wordIndex >= wordCount(session))
                 return false;
+            // The next word is read first: fetching it can reload the store's window of words, and `word` below
+            // is a view into that window.
+            const bool nextLowercase = nextWordStartsLowercaseAt(session, wordIndex);
+            // The last word of a paragraph closes its sentence even without a full stop: titles, list items, and
+            // the sentence ends that book conversion can lose ("palavra [20] ." arrives as "palavra"). Unless
+            // the next paragraph goes on in lower case: books born from a PDF have one "paragraph" per printed line.
+            if (!nextLowercase && std::ranges::binary_search(session.metadata.paragraphStarts, wordIndex + 1))
+                return true;
 
             const std::string_view word = wordAt(session, wordIndex);
             if (word.empty())
@@ -847,11 +911,15 @@ namespace ReadingLoop {
             case '?':
                 return true;
             case '.':
-                return !looksLikeAbbreviation(word, nextWordStartsLowercaseAt(session, wordIndex));
+                return !looksLikeAbbreviation(word, nextLowercase, isPortuguese(session.localeAt(wordIndex)));
             default:
                 return false;
             }
         }
+
+        // A text with no sentence end in sight (a table, a poem without punctuation) must not walk the card word
+        // by word for ever: sentence searches stop this many words away.
+        constexpr size_t kMaxSentenceScanWords = 400;
 
         size_t sentenceStartAtOrBefore(const ReadingSession& session, size_t wordIndex) {
             const size_t count = wordCount(session);
@@ -859,7 +927,8 @@ namespace ReadingLoop {
                 return 0;
 
             wordIndex = std::min(wordIndex, count - 1);
-            while (wordIndex > 0 && !wordEndsSentenceAt(session, wordIndex - 1))
+            const size_t floor = wordIndex > kMaxSentenceScanWords ? wordIndex - kMaxSentenceScanWords : 0;
+            while (wordIndex > floor && !wordEndsSentenceAt(session, wordIndex - 1))
                 --wordIndex;
             return wordIndex;
         }
@@ -981,16 +1050,17 @@ namespace ReadingLoop {
         const size_t nextIndex = index + 1;
         const bool nextWordStartsLowercase =
             nextIndex < wordCount(session) && startsWithLowercaseLetter(wordAt(session, nextIndex));
+        const bool portuguese = isPortuguese(session.localeAt(index));
 
         if (pacingMode(session) == settings::ReadingPacing::cjkPhrase) {
             const uint32_t characters =
                 static_cast<uint32_t>(std::max(1, codepointCount(word, UnicodeText::isWordCharacter)));
             const uint32_t base = (60'000UL * characters + settings.wpm - 1) / settings.wpm;
             return base
-                 + scaledDelayMs(punctuationPausePercentForWord(word, false),
+                 + scaledDelayMs(punctuationPausePercentForWord(word, false, portuguese),
                                  settings.pacing.punctuationDelayMs);
         }
-        return durationForWord(word, nextWordStartsLowercase, 60000UL / settings.wpm, settings.pacing);
+        return durationForWord(word, nextWordStartsLowercase, 60000UL / settings.wpm, settings.pacing, portuguese);
     }
 
     uint32_t currentWordDurationMs(const ReadingSession& session, const settings::ReadingSettings& settings) {
@@ -1101,16 +1171,44 @@ namespace ReadingLoop {
         return true;
     }
 
-    void rewindSentence(ReadingSession& session) {
+    void rewindSentence(ReadingSession& session, size_t marginWords) {
         if (wordCount(session) == 0)
             return;
 
-        const size_t currentSentenceStart = sentenceStartAtOrBefore(session, session.state.wordIndex);
-        if (currentSentenceStart == session.state.wordIndex && session.state.wordIndex > 0) {
-            seekTo(session, sentenceStartAtOrBefore(session, session.state.wordIndex - 1));
+        const size_t current = session.state.wordIndex;
+        const size_t currentSentenceStart = sentenceStartAtOrBefore(session, current);
+        // Already at the start of the sentence, or only `marginWords` into it: the reader wants the one before.
+        if (currentSentenceStart > 0 && current - currentSentenceStart <= marginWords) {
+            seekTo(session, sentenceStartAtOrBefore(session, currentSentenceStart - 1));
             return;
         }
         seekTo(session, currentSentenceStart);
+    }
+
+    size_t sentenceStartAfterSteps(const ReadingSession& session, size_t from, int steps) {
+        const size_t count = wordCount(session);
+        if (count == 0)
+            return 0;
+        size_t at = std::min(from, count - 1);
+        for (; steps < 0; ++steps) {
+            const size_t start = sentenceStartAtOrBefore(session, at);
+            if (start < at)
+                at = start; // from the middle of a sentence the first step back is its own start
+            else if (at > 0)
+                at = sentenceStartAtOrBefore(session, at - 1);
+            else
+                break;
+        }
+        for (; steps > 0; --steps) {
+            const size_t limit = std::min(count - 1, at + kMaxSentenceScanWords);
+            size_t end = at;
+            while (end < limit && !wordEndsSentenceAt(session, end))
+                ++end;
+            if (end + 1 >= count)
+                break; // already in the last sentence of the book
+            at = end + 1;
+        }
+        return at;
     }
 
     void adjustWpm(settings::ReadingSettings& settings, int delta) {

@@ -35,7 +35,16 @@ namespace ReadingLoop {
                         uint32_t speedPercent);
     void seekRelative(ReadingSession& session, size_t baseIndex, int steps);
     bool seekParagraph(ReadingSession& session, int steps);
-    void rewindSentence(ReadingSession& session);
+    // "Voltar uma frase": to the start of the current sentence; when already there (or at most `marginWords` into
+    // it), to the start of the sentence before. A paragraph end also closes a sentence. Not a jump: it never
+    // touches the "onde parei". While the words are running the reader reacts late, so the reading screen passes
+    // kRewindMarginWhilePlaying: a swipe a few words into a new sentence replays the one that was just lost.
+    inline constexpr size_t kRewindMarginWhilePlaying = 5;
+    void rewindSentence(ReadingSession& session, size_t marginWords = 0);
+    // Sentence scrub (drag with the reading paused): the start of the sentence `steps` sentences away from `from`.
+    // Back: the first step from the middle of a sentence is its own start, as in rewindSentence. Forward: the start
+    // of the next sentence. Stops at the first and last sentences; each step looks at most 400 words away.
+    size_t sentenceStartAfterSteps(const ReadingSession& session, size_t from, int steps);
     void adjustWpm(settings::ReadingSettings& settings, int delta);
 
     std::string_view wordAt(const ReadingSession& session, size_t index);

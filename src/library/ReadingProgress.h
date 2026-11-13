@@ -34,9 +34,15 @@ namespace ReadingProgress {
     // Bookmarks live in the hidden ".rmarks" sidecar next to the book (see reader/ReadingMarks.h).
     void loadBookmarks(ReadingSession& session, const IndexedBookStore& store);
     void saveBookmarks(ReadingSession& session);
+    // Called every frame (force = false) and at every save point (force = true: pause, menu, leaving the reader,
+    // end of a drag or rewind). Writes the position to the card when reading::positionSaveDue says so.
     void save(ReadingSession& session, Preferences& preferences, bool force, uint32_t nowMs);
     void cache(ReadingSession& session, Preferences& preferences, uint32_t wordIndex);
-    void mirror(const ReadingSession& session, const IndexedBookStore& store);
+    // Writes the whole reading state (position, "onde parei", book overrides) to the card now, power-cut safe.
+    void mirror(ReadingSession& session, const IndexedBookStore& store);
+    // Writes only when the card is behind (the position moved or the "onde parei" changed since the last write).
+    // For the places that used to mirror right after a forced save: closing a book, power off, sleep, OTA, USB.
+    void flush(ReadingSession& session, const IndexedBookStore& store);
     uint32_t restore(ReadingSession& session, const IndexedBookStore& store);
     bool saveChapterTransition(ReadingSession& session, Preferences& preferences, const IndexedBookStore& store,
                                size_t previousWordIndex, size_t currentWordIndex, uint32_t nowMs);

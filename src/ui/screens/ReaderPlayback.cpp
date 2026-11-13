@@ -1,4 +1,5 @@
 #include "ui/screens/ReaderScreen.h"
+#include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -17,6 +18,10 @@ namespace screens {
         if (pageBrowsing_) return;
         if (wpmFeedbackUntilMs_ > 0 && nowMs >= wpmFeedbackUntilMs_) {
             wpmFeedbackUntilMs_ = 0;
+        }
+        if (scrubNoticeUntilMs_ != 0 && static_cast<int32_t>(scrubNoticeUntilMs_ - nowMs) <= 0) {
+            scrubNoticeUntilMs_ = 0; // the "‹ 1 frase" after a swipe goes away (and never comes back on a wrap)
+            if (!modernScrub_) scrubText_.clear();
         }
         prepareChunk();
         if (shouldFinishPause(nowMs)) {
@@ -41,8 +46,19 @@ namespace screens {
                                         reading::backwardSpeedPercent(nowMs - backwardStartMs_));
             return;
         }
-        if (!session.playing)
+        if (!session.playing) {
+            reorientUntilMs_ = 0;
             return;
+        }
+        if (reorientUntilMs_ != 0) {
+            // Just jumped back a sentence with the words running: the eye is still coming back from the corner
+            // of the screen. The first word waits, then gets its full time.
+            if (static_cast<int32_t>(reorientUntilMs_ - nowMs) > 0) {
+                session.lastAdvanceMs = nowMs;
+                return;
+            }
+            reorientUntilMs_ = 0;
+        }
 #if defined(RSVP_BENCHMARK_MODE)
         // Reading benchmarks load indexed fixtures but intentionally exclude persistence I/O.
         ReadingLoop::update(session, settings_, nowMs, true, pauseAtSentenceEndRequested_);
@@ -61,6 +77,28 @@ namespace screens {
         if (!backward_) return;
         backward_ = false;
         ReadingProgress::save(session, preferences, true, nowMs);
+    }
+
+    void ReaderScreen::rewindSentenceSwipe(Preferences& preferences, uint32_t nowMs) {
+        constexpr uint32_t kReorientMs = 350;
+        constexpr uint32_t kNoticeMs = 700;
+        if (pageBrowsing_ || backward_ || modernScrub_ || ReadingLoop::wordCount(session) == 0)
+            return;
+        const bool playing = session.playing; // false when the pause asked earlier landed during the flick
+        const size_t from = session.state.wordIndex;
+        // The reader reacts a few words late, so a swipe just after a sentence began replays the one before.
+        // Not a jump: the "onde parei" is not touched.
+        ReadingLoop::rewindSentence(session, ReadingLoop::kRewindMarginWhilePlaying);
+        ESP_LOGI("reader", "rewind sentence %u -> %u (%s)", static_cast<unsigned int>(from),
+                 static_cast<unsigned int>(session.state.wordIndex), playing ? "playing" : "paused");
+        if (session.state.wordIndex == from) return; // already at the first word of the book: nothing to show
+        scrubText_ = "‹ 1 frase";
+        scrubNoticeUntilMs_ = nowMs + kNoticeMs;
+        session.lastAdvanceMs = nowMs;
+        if (playing)
+            reorientUntilMs_ = nowMs + kReorientMs; // the position reaches the card at the next pause
+        else
+            ReadingProgress::save(session, preferences, true, nowMs);
     }
 
     void ReaderScreen::start(uint32_t nowMs, bool locked) {

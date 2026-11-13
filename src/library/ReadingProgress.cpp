@@ -21,6 +21,7 @@ namespace ReadingProgress {
 
         constexpr size_t kMaxBookStateBytes = 2048;
         constexpr uint32_t kSaveIntervalMs = 15000;
+        constexpr uint32_t kWordSettledMs = 40; // the current word has been on screen for at least one frame
 
         bool isValidIdentity(const BookIdentity& identity) {
             return identity.sourceSize > 0 && identity.wordCount > 0;
@@ -30,12 +31,8 @@ namespace ReadingProgress {
             return state.identity == identity;
         }
 
-        std::expected<reading::StoredState, std::error_code> loadBookState(std::string_view bookPath,
+        std::expected<reading::StoredState, std::error_code> readStateFile(const std::string& statePath,
                                                                            const BookIdentity& identity) {
-            if (bookPath.empty() || !isValidIdentity(identity))
-                return std::unexpected(std::make_error_code(std::errc::invalid_argument));
-
-            const std::string statePath = StoragePaths::bookStatePathFor(bookPath);
             File file = Board::Storage::filesystem().open(statePath.c_str(), FILE_READ);
             if (!file || file.isDirectory()) {
                 if (file)
@@ -66,6 +63,35 @@ namespace ReadingProgress {
             return candidate;
         }
 
+        // The sidecar is always replaced through ".tmp" + ".bak" (StorageFiles::writeFileAtomic). When power is cut
+        // in the middle, the main file is missing or unreadable: the complete new copy is still in ".tmp" if the cut
+        // came between the two renames, and the previous good copy is in ".bak".
+        std::expected<reading::StoredState, std::error_code> loadBookState(std::string_view bookPath,
+                                                                           const BookIdentity& identity) {
+            if (bookPath.empty() || !isValidIdentity(identity))
+                return std::unexpected(std::make_error_code(std::errc::invalid_argument));
+
+            const std::string statePath = StoragePaths::bookStatePathFor(bookPath);
+            auto state = readStateFile(statePath, identity);
+            const bool interrupted = !state
+                                  && (state.error() == std::errc::no_such_file_or_directory
+                                      || state.error() == std::errc::invalid_argument
+                                      || state.error() == std::errc::io_error);
+            if (!interrupted)
+                return state;
+            for (const char* suffix: {".tmp", ".bak"}) {
+                const std::string copyPath = statePath + suffix;
+                if (!Board::Storage::filesystem().exists(copyPath.c_str()))
+                    continue;
+                if (auto copy = readStateFile(copyPath, identity)) {
+                    ESP_LOGW("storage-progress", "recovered position word=%u from %s",
+                             static_cast<unsigned int>(copy->reading.wordIndex), copyPath.c_str());
+                    return copy;
+                }
+            }
+            return state;
+        }
+
         bool canReplaceBookState(std::error_code error) {
             return error == std::errc::no_such_file_or_directory || error == std::errc::invalid_argument
                 || error == std::errc::value_too_large || error == std::errc::state_not_recoverable;
@@ -81,30 +107,18 @@ namespace ReadingProgress {
                 });
         }
 
+        // Always ".tmp" + rename: opening the sidecar for writing truncates it first, so a power cut in the middle
+        // used to leave an empty file (position 0 and the book overrides gone). loadBookState reads the copies back.
         std::expected<void, std::error_code> writeBookState(std::string_view bookPath,
-                                                            const reading::StoredState& state, bool atomic = false) {
+                                                            const reading::StoredState& state) {
             std::string output;
             if (glz::write_toml(state, output))
                 return std::unexpected(std::make_error_code(std::errc::io_error));
 
             const std::string sidecarPath = StoragePaths::bookStatePathFor(bookPath);
-            if (atomic) {
-                const auto temporary = sidecarPath + ".tmp", backup = sidecarPath + ".bak";
-                return StorageFiles::writeFileAtomic(Board::Storage::filesystem(), sidecarPath.c_str(),
-                                                      temporary.c_str(), backup.c_str(), output);
-            }
-            File file = Board::Storage::filesystem().open(sidecarPath.c_str(), FILE_WRITE);
-            if (!file || file.isDirectory()) {
-                if (file)
-                    file.close();
-                return std::unexpected(std::make_error_code(std::errc::io_error));
-            }
-            const size_t written = file.write(reinterpret_cast<const uint8_t*>(output.data()), output.size());
-            file.close();
-            if (written != output.size()) {
-                return std::unexpected(std::make_error_code(std::errc::io_error));
-            }
-            return {};
+            const auto temporary = sidecarPath + ".tmp", backup = sidecarPath + ".bak";
+            return StorageFiles::writeFileAtomic(Board::Storage::filesystem(), sidecarPath.c_str(), temporary.c_str(),
+                                                  backup.c_str(), output);
         }
 
         std::expected<void, std::error_code> writeSessionSidecar(const ReadingSession& session,
@@ -173,7 +187,7 @@ namespace ReadingProgress {
         return loadWritableBookState(bookPath, identity).and_then([&](reading::StoredState state) {
             state.identity = identity;
             state.reading.overrides = overrides;
-            return writeBookState(bookPath, state, true);
+            return writeBookState(bookPath, state);
         });
     }
 
@@ -237,15 +251,27 @@ namespace ReadingProgress {
             mirror(session, *session.bookStore);
         }
         if (session.stored() && session.bookmarksDirty) saveBookmarks(session);
+        // Position on the card: at every save point and, while reading, about once a minute at a sentence end
+        // (reading::positionSaveDue). Before this only the book name was kept below, so a crash, RESET or flat
+        // battery threw the reader back to the last chapter start even after pausing.
+        if (session.stored() && session.bookStore != nullptr
+            && session.state.wordIndex != session.lastMirroredWordIndex) {
+            const uint32_t since =
+                static_cast<int32_t>(nowMs - session.lastMirrorMs) > 0 ? nowMs - session.lastMirrorMs : 0;
+            // While playing, wait until the word has been drawn so the card write eats into its own display time.
+            const bool waiting = !force && session.playing && since >= reading::kPositionSaveIntervalMs;
+            const bool settled = !waiting || ReadingLoop::elapsedInCurrentWordMs(session, nowMs) >= kWordSettledMs;
+            const bool sentenceEnd = waiting && settled && ReadingLoop::currentWordEndsSentence(session);
+            if (settled && reading::positionSaveDue(force, session.playing, sentenceEnd, true, since))
+                mirror(session, *session.bookStore);
+        }
         if (!session.stored() || (!force && nowMs - session.lastSaveMs < kSaveIntervalMs))
             return;
         const size_t wordIndex = session.state.wordIndex;
         if (!force && wordIndex == session.lastSavedWordIndex)
             return;
         session.lastSaveMs = nowMs;
-        cache(session, preferences, static_cast<uint32_t>(wordIndex));
-        ESP_LOGI("storage-progress", "saved position word=%u path=%s", static_cast<unsigned int>(wordIndex),
-                 session.sourcePath().data());
+        cache(session, preferences, static_cast<uint32_t>(wordIndex)); // only remembers which book is open
     }
 
     void cache(ReadingSession& session, Preferences& preferences, uint32_t wordIndex) {
@@ -258,13 +284,19 @@ namespace ReadingProgress {
         session.lastSavedWordIndex = wordIndex;
     }
 
-    void mirror(const ReadingSession& session, const IndexedBookStore& store) {
+    void mirror(ReadingSession& session, const IndexedBookStore& store) {
         if (!session.stored())
             return;
         auto written = writeSessionSidecar(session, store);
-        if (!written)
+        session.lastMirrorMs = millis(); // also after a failure: never hammer a broken card every frame
+        if (!written) {
             Logger::failure("storage-progress", "mirror", StoragePaths::bookStatePathFor(session.sourcePath()).c_str(),
                             written.error());
+            return;
+        }
+        session.lastMirroredWordIndex = session.state.wordIndex;
+        ESP_LOGI("storage-progress", "position on card word=%u path=%s",
+                 static_cast<unsigned int>(session.state.wordIndex), session.sourcePath().data());
     }
 
     uint32_t restore(ReadingSession& session, const IndexedBookStore& store) {
@@ -289,9 +321,18 @@ namespace ReadingProgress {
         if (chapter == session.metadata.chapters.end())
             return false;
         ReadingLoop::seekTo(session, chapter->wordIndex);
-        save(session, preferences, true, nowMs);
-        mirror(session, store);
+        save(session, preferences, true, nowMs); // forced: writes the chapter start to the card
+        flush(session, store);                   // one more try if the write inside save failed
         return true;
+    }
+
+    void flush(ReadingSession& session, const IndexedBookStore& store) {
+        if (!session.stored())
+            return;
+        if (!session.resumeDirty && session.state.wordIndex == session.lastMirroredWordIndex)
+            return;
+        session.resumeDirty = false;
+        mirror(session, store);
     }
 
     std::string_view title(const ReadingSession& session, const StorageManager& storage) {

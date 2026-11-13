@@ -69,15 +69,28 @@ namespace reading {
     // Speed multiplier in percent for holdMs of continuous rewinding (100, 200 after 2 s, 300 after 4 s).
     uint32_t backwardSpeedPercent(uint32_t holdMs);
 
-    // Horizontal scrub (drag to walk the words). Left-to-right advances, right-to-left goes back.
-    // Movement under kScrubSlopPx is a still hold, not a scrub. Beyond it: 1 word per kScrubPxPerWord up to
-    // kScrubLinearPx, then 1 extra word every 3 px (distance-based acceleration). Scrub/rewind never
-    // change the "onde parei" (they are not jumps).
+    // Horizontal scrub with the reading paused (lume.26: by sentence, the old word-by-word scrub with acceleration
+    // jumped too far). Left-to-right advances, right-to-left goes back. Movement under kScrubSlopPx is a still
+    // hold, not a scrub. Counted from where the scrub began: the first sentence half a step in, then one sentence
+    // every kScrubPxPerSentence, no acceleration. Scrub/rewind never change the "onde parei" (they are not jumps).
     inline constexpr int kScrubSlopPx = 8;
-    inline constexpr int kScrubPxPerWord = 12;
-    inline constexpr int kScrubLinearPx = 96;
+    inline constexpr int kScrubPxPerSentence = 70;
     bool isScrubMove(int dx, int dy);              // horizontal and beyond the slop
-    int scrubSteps(int dxPixels);                  // signed word steps for a displacement
-    size_t scrubTarget(size_t startWord, int dxPixels, size_t wordCount); // clamped to [0, wordCount-1]
+    int scrubSentenceSteps(int dxPixels);          // signed sentence steps for a displacement
+
+    // "Voltar uma frase" while the words run: a quick flick to the left on the word canvas. `minDx` = the farthest
+    // the finger went to the left during the touch (negative), `maxAbsDy` = its largest vertical drift.
+    inline constexpr int kRewindSwipeMinPx = 50;
+    inline constexpr uint32_t kRewindSwipeMaxMs = 600;
+    bool isRewindSwipe(int minDx, int maxAbsDy, uint32_t durationMs);
+
+    // When the reading position must be written to the card (.rstate.toml). Pure policy; the write itself is
+    // ReadingProgress::mirror. `force` = a save point (pause, menu, leaving the reader, end of a drag or rewind):
+    // always written. While playing the write happens about once per kPositionSaveIntervalMs and waits for a
+    // sentence end, so the pause there hides the card write, but never longer than kPositionSaveMaxIntervalMs.
+    // `changed` = the word differs from the one already on the card. Paused positions only change at save points.
+    inline constexpr uint32_t kPositionSaveIntervalMs = 60000;
+    inline constexpr uint32_t kPositionSaveMaxIntervalMs = 120000;
+    bool positionSaveDue(bool force, bool playing, bool atSentenceEnd, bool changed, uint32_t sinceLastSaveMs);
 
 } // namespace reading

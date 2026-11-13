@@ -14,6 +14,8 @@
 struct ReadingSession {
     BookMetadata metadata;
     size_t lastSavedWordIndex = static_cast<size_t>(-1);
+    size_t lastMirroredWordIndex = static_cast<size_t>(-1); // word already on the card (.rstate.toml)
+    uint32_t lastMirrorMs = 0;                              // last card write attempt (ReadingProgress::mirror)
     uint32_t lastAdvanceMs = 0;
     uint32_t lastSaveMs = 0;
     std::string currentWord;

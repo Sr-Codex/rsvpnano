@@ -354,7 +354,7 @@ namespace screens {
     }
 
     void ReaderScreen::closeBook() {
-        ReadingProgress::mirror(session, store);
+        ReadingProgress::flush(session, store);
         store.close();
         session = {};
         pagePreview_ = false;
@@ -364,7 +364,7 @@ namespace screens {
 
     void ReaderScreen::prepareBookOpen(Preferences& preferences, uint32_t nowMs) {
         ReadingProgress::save(session, preferences, true, nowMs);
-        ReadingProgress::mirror(session, store);
+        ReadingProgress::flush(session, store);
         store.close();
         session.metadata.clear();
     }
@@ -387,6 +387,8 @@ namespace screens {
         ReadingProgress::loadBookmarks(session, store);
         reading::resetTracker(session.resumeTracker, session.state.wordIndex);
         session.resumeDirty = false;
+        session.lastMirroredWordIndex = session.state.wordIndex; // what the card holds (or the start of a new book)
+        session.lastMirrorMs = nowMs;
         lastTickMs_ = nowMs;
     }
 
@@ -710,7 +712,8 @@ namespace screens {
                                  .canRead = ReadingLoop::wordCount(session) > 0,
                                  .pressedControl = modernTouchMoved_ ? uint8_t{0} : modernControl_,
                                  .pausePending = pauseAtSentenceEndRequested_,
-                                 .scrubText = modernScrub_ ? std::string_view{scrubText_} : std::string_view{},
+                                 .scrubText = modernScrub_ || scrubNoticeUntilMs_ != 0 ? std::string_view{scrubText_}
+                                                                                    : std::string_view{},
                                  .backward = backward_,
                              },
                              settings, battery);

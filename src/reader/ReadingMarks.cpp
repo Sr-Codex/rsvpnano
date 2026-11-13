@@ -150,18 +150,21 @@ namespace reading {
         return ax > kScrubSlopPx && ax > ay;
     }
 
-    int scrubSteps(int dxPixels) {
-        const int sign = dxPixels < 0 ? -1 : 1;
+    int scrubSentenceSteps(int dxPixels) {
         const int ax = dxPixels < 0 ? -dxPixels : dxPixels;
-        const int linear = std::min(ax, kScrubLinearPx);
-        const int steps = linear / kScrubPxPerWord + (ax > kScrubLinearPx ? (ax - kScrubLinearPx) / 3 : 0);
-        return sign * steps;
+        const int steps = (ax + kScrubPxPerSentence / 2) / kScrubPxPerSentence;
+        return dxPixels < 0 ? -steps : steps;
     }
 
-    size_t scrubTarget(size_t startWord, int dxPixels, size_t wordCount) {
-        if (wordCount == 0) return 0;
-        const int64_t target = static_cast<int64_t>(startWord) + scrubSteps(dxPixels);
-        return static_cast<size_t>(std::clamp<int64_t>(target, 0, static_cast<int64_t>(wordCount) - 1));
+    bool isRewindSwipe(int minDx, int maxAbsDy, uint32_t durationMs) {
+        return minDx <= -kRewindSwipeMinPx && -minDx > maxAbsDy && durationMs <= kRewindSwipeMaxMs;
+    }
+
+    bool positionSaveDue(bool force, bool playing, bool atSentenceEnd, bool changed, uint32_t sinceLastSaveMs) {
+        if (!changed) return false;
+        if (force) return true;
+        if (!playing || sinceLastSaveMs < kPositionSaveIntervalMs) return false;
+        return atSentenceEnd || sinceLastSaveMs >= kPositionSaveMaxIntervalMs;
     }
 
 } // namespace reading
