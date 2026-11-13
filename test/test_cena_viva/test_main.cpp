@@ -297,6 +297,45 @@ void test_dois_pontos_piscam_uma_vez_por_segundo() {
     TEST_ASSERT_TRUE(doisPontosAcesos(1000));
 }
 
+void test_quadro_do_ciclo_das_animacoes() {
+    TEST_ASSERT_EQUAL_INT(0, quadroCiclo(0, 24));
+    TEST_ASSERT_EQUAL_INT(1, quadroCiclo(125, 24));
+    TEST_ASSERT_EQUAL_INT(23, quadroCiclo(2999, 24));
+    TEST_ASSERT_EQUAL_INT(0, quadroCiclo(3000, 24));                  // 1 fase = 24 quadros
+    for (uint32_t ms = 0; ms < 9000; ms += 37)                        // anda junto com o vapor/fumaca
+        TEST_ASSERT_EQUAL_INT(quadroSprite(ms), quadroCiclo(ms, kQuadrosSprite));
+    TEST_ASSERT_EQUAL_INT(4, quadroCiclo(500, 8));                    // ciclo de 1 s (cursor)
+    TEST_ASSERT_EQUAL_INT(0, quadroCiclo(1000, 8));
+    TEST_ASSERT_EQUAL_INT(0, quadroCiclo(12345, 0));                  // sem ciclo
+    TEST_ASSERT_EQUAL_INT(0, quadroCiclo(12345, -3));
+}
+
+void test_rolo_anda_uma_linha_a_cada_tres_quadros_e_recomeca() {
+    TEST_ASSERT_EQUAL_INT(0, passoRolo(0, 3, 23));
+    TEST_ASSERT_EQUAL_INT(0, passoRolo(374, 3, 23));
+    TEST_ASSERT_EQUAL_INT(1, passoRolo(375, 3, 23));
+    TEST_ASSERT_EQUAL_INT(22, passoRolo(375 * 22, 3, 23));
+    TEST_ASSERT_EQUAL_INT(0, passoRolo(375 * 23, 3, 23));             // volta ao comeco (8,625 s)
+    int anterior = passoRolo(0, 3, 23);
+    for (uint32_t ms = 125; ms < 30000; ms += 125) {                  // nunca pula nem volta (fora a virada)
+        const int p = passoRolo(ms, 3, 23);
+        TEST_ASSERT_TRUE(p == anterior || p == (anterior + 1) % 23);
+        anterior = p;
+    }
+    TEST_ASSERT_EQUAL_INT(0, passoRolo(5000, 0, 23));                 // sem rolo
+    TEST_ASSERT_EQUAL_INT(0, passoRolo(5000, 3, 0));
+}
+
+void test_cursor_pisca_uma_vez_por_segundo() {
+    TEST_ASSERT_TRUE(cursorAceso(0));
+    TEST_ASSERT_TRUE(cursorAceso(499));
+    TEST_ASSERT_FALSE(cursorAceso(500));
+    TEST_ASSERT_FALSE(cursorAceso(999));
+    TEST_ASSERT_TRUE(cursorAceso(1000));
+    // o mapa de 8 quadros da arte (4 acesos, 4 apagados) anda junto com o cursor desenhado pela placa
+    for (uint32_t ms = 0; ms < 5000; ms += 125) TEST_ASSERT_EQUAL(cursorAceso(ms), quadroCiclo(ms, 8) < 4);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_relogio_foco_mostra_o_restante_arredondado_para_cima);
@@ -319,5 +358,8 @@ int main(int, char**) {
     RUN_TEST(test_antenas_alternam_por_camada);
     RUN_TEST(test_letreiros_piscam_de_leve);
     RUN_TEST(test_dois_pontos_piscam_uma_vez_por_segundo);
+    RUN_TEST(test_quadro_do_ciclo_das_animacoes);
+    RUN_TEST(test_rolo_anda_uma_linha_a_cada_tres_quadros_e_recomeca);
+    RUN_TEST(test_cursor_pisca_uma_vez_por_segundo);
     return UNITY_END();
 }

@@ -50,8 +50,7 @@ namespace tempo::cenafoco {
     }
 
     int cursorModo1Topox10(int y0x10, int passox10, int cabecalho, int linhasMax, int tomados) {
-        if (tomados <= 0) return -1;
-        const int linha = cabecalho + std::min(tomados, std::max(0, linhasMax));
+        const int linha = cabecalho + std::clamp(tomados, 0, std::max(0, linhasMax));
         return y0x10 + linha * passox10 + 4;   // a arte desenha o cursor 0,4 px abaixo do topo da linha
     }
 

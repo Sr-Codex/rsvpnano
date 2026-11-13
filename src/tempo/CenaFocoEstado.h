@@ -60,8 +60,8 @@ namespace tempo::cenafoco {
     // QG Cidade (modo 1): cabecalho + 1 linha de terminal por no tomado (no maximo linhasMax). Linha i comeca em
     // y0x10/10 + i * passox10/10; copia ate o comeco da linha seguinte (o fim da ultima linha mostrada).
     int linhasModo1(int alt, int y0x10, int passox10, int cabecalho, int linhasMax, int tomados);
-    // Cursor (modo 1) na linha seguinte a ultima mostrada: topo em 1/10 de px (relativo), -1 se nao ha cursor (k = 0:
-    // o cursor ja esta na arte do fundo noite).
+    // Cursor (modo 1) na linha seguinte a ultima mostrada: topo em 1/10 de px (relativo). Com k = 0 fica logo depois do
+    // cabecalho: a arte do fundo noite vem SEM cursor (a placa desenha e faz piscar).
     int cursorModo1Topox10(int y0x10, int passox10, int cabecalho, int linhasMax, int tomados);
 
     // ---- Vitoria: a cena estava na tela quando a batalha passou de focando para hora extra -> kVitoriaMs de vitoria.

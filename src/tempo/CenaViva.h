@@ -57,6 +57,14 @@ namespace tempo::cenaviva {
     float carroLongeX(float fase0, float vel, uint32_t ms, float largura);
     bool doisPontosAcesos(uint32_t ms);            // ":" do relogio de LED pisca 1x/s
 
+    // ---- Animacoes por diferenca, rolo e cursores (respiracao do personagem, telas que mexem)
+    // A arte traz, por animacao, um mapa "quadro do ciclo -> pose" (kSemPose = neste quadro nada muda).
+    inline constexpr uint8_t kSemPose = 255;
+    int quadroCiclo(uint32_t ms, int periodo);     // 0..periodo-1 (0 se periodo <= 0); periodo 24 = 1 fase
+    // Tela que rola: anda 1 passo (1 linha de codigo) a cada `quadrosPorPasso` quadros e recomeca depois de `passos`.
+    int passoRolo(uint32_t ms, int quadrosPorPasso, int passos);
+    bool cursorAceso(uint32_t ms);                 // cursores dos terminais: acesos na 1a metade de cada segundo
+
     // ---- Relogio da cena
     enum class EstadoRelogio : uint8_t { Foco, Vitoria, HoraExtra, Livre };
     struct EntradaRelogio {

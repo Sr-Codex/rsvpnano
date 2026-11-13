@@ -132,6 +132,18 @@ namespace tempo::cenaviva {
 
     bool doisPontosAcesos(uint32_t ms) { return ms % 1000 < 500; }
 
+    // ---------------------------------------------------------------- animacoes por diferenca, rolo, cursores
+    int quadroCiclo(uint32_t ms, int periodo) {
+        return periodo > 0 ? static_cast<int>(quadro(ms) % static_cast<uint32_t>(periodo)) : 0;
+    }
+
+    int passoRolo(uint32_t ms, int quadrosPorPasso, int passos) {
+        if (quadrosPorPasso <= 0 || passos <= 0) return 0;
+        return static_cast<int>((quadro(ms) / static_cast<uint32_t>(quadrosPorPasso)) % static_cast<uint32_t>(passos));
+    }
+
+    bool cursorAceso(uint32_t ms) { return ms % 1000 < 500; }
+
     // ---------------------------------------------------------------- relogio
     void formatar(int64_t segundos, bool mais, std::array<char, 12>& saida) {
         const int64_t s = std::max<int64_t>(0, segundos);

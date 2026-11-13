@@ -328,6 +328,13 @@ namespace ui::cenas {
             }
             return p;
         }
+        // Soma a diferenca de uma animacao (antes das luzes).
+        void somar(int x, int y, const int8_t* d) {
+            float* p = px(x, y);
+            p[0] = std::clamp(p[0] + static_cast<float>(d[0]), 0.0f, 255.0f);
+            p[1] = std::clamp(p[1] + static_cast<float>(d[1]), 0.0f, 255.0f);
+            p[2] = std::clamp(p[2] + static_cast<float>(d[2]), 0.0f, 255.0f);
+        }
         // soma "screen" (como os brilhos dos mockups): p = 255 - (255 - p)(255 - l)/255
         void luz(int x, int y, const Rgb& l) {
             if (!dentro(x, y) || l.r + l.g + l.b < 0.06f) return;
@@ -563,14 +570,12 @@ namespace ui::cenas {
     void CenaFoco::comporRevelacao(const Quadro& q, int w, int h) {
         const Cena& c = *cena_;
         const Retangulo& r = c.revela;
-        int linhas = 0, cursor = -1;
+        int linhas = 0;
         if (q.revelar) {
             if (c.revelaModo == 0) {
                 linhas = tempo::cenafoco::linhasModo0(h, q.cheio);
-            } else {
+            } else {   // (o cursor do terminal e uma camada de luz do compositor: CursorTerminal)
                 linhas = tempo::cenafoco::linhasModo1(h, c.linhaY0x10, c.linhaPassox10, c.linhasCabecalho, c.linhasMax, q.tomados);
-                cursor = tempo::cenafoco::cursorModo1Topox10(c.linhaY0x10, c.linhaPassox10, c.linhasCabecalho, c.linhasMax,
-                                                             q.tomados);
             }
         }
         // O sprite vem TRUNCADO para RGB565 (sem pontilhado): cada nivel e o piso do valor real, ~meio nivel mais escuro
@@ -631,19 +636,6 @@ namespace ui::cenas {
                 }
                 saida[x] = pontilhar(std::clamp(static_cast<int>(sr + 0.5f), 0, 255), std::clamp(static_cast<int>(sg + 0.5f), 0, 255),
                                      std::clamp(static_cast<int>(sb + 0.5f), 0, 255), r.x0 + x, r.y0 + y);
-            }
-        }
-        if (cursor < 0) return;
-        // cursor do terminal: bloco de 2 x 3,2 px (como na arte), borda de cima/baixo suavizada pela cobertura da linha
-        const float topo = static_cast<float>(cursor) / 10.0f, base = topo + 3.2f;
-        const Rgbf cor = de565(c.corCursor);
-        for (int y = static_cast<int>(std::floor(topo)); y < static_cast<int>(std::ceil(base)) && y < h; ++y) {
-            if (y < 0) continue;
-            const float a = std::min(base, float(y + 1)) - std::max(topo, float(y));
-            if (a <= 0.0f) continue;
-            for (int x = 3; x < 5 && x < w; ++x) {
-                uint16_t& px = trabalho_[y * w + x];
-                px = pontilhar(mistura(de565(px), cor, a), r.x0 + x, r.y0 + y);
             }
         }
     }
@@ -872,6 +864,22 @@ namespace ui::cenas {
         }
     }
 
+    namespace {
+        // Cursor do terminal do QG Cidade (tools/mockup_qg2.py:terminal): 2 px de largura a 3 px da borda, 3,2 px de altura.
+        constexpr float kCursorX0 = 3.0f, kCursorX1 = 5.0f, kCursorAlt = 3.2f;
+
+        // Animacao por diferenca de uma camada neste fundo (nullptr = a camada nao e desse tipo).
+        const Animacao* animacaoDa(int camada, const CenaViva& v, int fundo) {
+            switch (camada) {
+            case CenaFoco::CursorRolo: return &v.cursorRolo[fundo];
+            case CenaFoco::Tubo: return &v.tubo[fundo];
+            case CenaFoco::Ondas: return &v.ondas[fundo];
+            case CenaFoco::Personagem: return &v.respira[fundo];
+            default: return nullptr;
+            }
+        }
+    } // namespace
+
     Retangulo CenaFoco::caixa(int camada) const {
         Retangulo vazio{0, 0, 0, 0};
         if (cena_ == nullptr || cena_->viva == nullptr) return vazio;
@@ -882,7 +890,10 @@ namespace ui::cenas {
             x0 = std::min(x0, a0 - m), y0 = std::min(y0, b0 - m), x1 = std::max(x1, a1 + m), y1 = std::max(y1, b1 + m);
         };
         const auto juntaCaixa = [&](const Caixa8& c) { junta(px8(c.x0), px8(c.y0), px8(c.x1), px8(c.y1)); };
+        const int fundo = std::clamp(static_cast<int>(fundoAtual_), 0, 2);
+        if (const Animacao* a = animacaoDa(camada, v, fundo)) return a->nPoses ? a->r : vazio;
         switch (camada) {
+        case Rolo: return v.rolo.quadrosPorPasso && v.rolo.passo && v.rolo.px[fundo] ? v.rolo.r : vazio;
         case Janela: junta(v.janela.x0, v.janela.y0, v.janela.x1, v.janela.y1); break;
         case Relogio: return v.relogio.brilho;
         case Roteador: for (int i = 0; i < v.nRoteador; ++i) juntaCaixa(v.roteador[i].caixa); break;
@@ -891,6 +902,12 @@ namespace ui::cenas {
         case Teclado: for (int i = 0; i < v.nTeclas; ++i) juntaCaixa(v.teclas[i]); break;
         case FaixaGabinete: for (int i = 0; i < v.nFaixa; ++i) juntaCaixa(v.faixa[i]); break;
         case Sprite: return v.sprite.quadros ? v.sprite.r : vazio;
+        case CursorTerminal:
+            if (cursorTerminalTopox10_ < 0) return vazio;
+            junta(static_cast<float>(cena_->revela.x0) + kCursorX0, static_cast<float>(cena_->revela.y0) + cursorTerminalTopox10_ / 10.0f,
+                  static_cast<float>(cena_->revela.x0) + kCursorX1,
+                  static_cast<float>(cena_->revela.y0) + cursorTerminalTopox10_ / 10.0f + kCursorAlt);
+            break;
         default: return vazio;
         }
         if (x1 <= x0) return vazio;
@@ -903,7 +920,14 @@ namespace ui::cenas {
         if (cena_ == nullptr || cena_->viva == nullptr) return 0;
         const CenaViva& v = *cena_->viva;
         uint32_t s = ui::Context::combine(0x56495600u + static_cast<uint32_t>(camada), static_cast<uint32_t>(in.fundo));
+        if (const Animacao* a = animacaoDa(camada, v, in.fundo))
+            return ui::Context::combine(s, a->nPoses ? a->mapa[cv::quadroCiclo(in.ms, a->periodo)] : cv::kSemPose);
         switch (camada) {
+        case Rolo: {
+            const int h = v.rolo.r.y1 - v.rolo.r.y0;
+            return ui::Context::combine(s, v.rolo.passo ? static_cast<uint32_t>(cv::passoRolo(in.ms, v.rolo.quadrosPorPasso,
+                                                                                                h / v.rolo.passo)) : 0u);
+        }
         case Janela:
             if (v.tipo == 1 || v.forcaGota[in.fundo] > 0) return ui::Context::combine(s, in.quadro);   // gotas/carros: todo quadro
             for (int i = 0; i < v.nJanelas; ++i) s = ui::Context::combine(s, cv::janelaAcesa(i, in.ms) ? 1u : 0u);
@@ -935,6 +959,9 @@ namespace ui::cenas {
         case Teclado: return ui::Context::combine(s, in.fundo == 1 ? 0u : in.quadro);
         case FaixaGabinete: return ui::Context::combine(s, in.quadro);
         case Sprite: return ui::Context::combine(s, static_cast<uint32_t>(cv::quadroSprite(in.ms)));
+        case CursorTerminal:
+            return ui::Context::combine(s, static_cast<uint32_t>(cursorTerminalTopox10_ + 1) * 2u
+                                               + (cursorTerminalTopox10_ >= 0 && cv::cursorAceso(in.ms) ? 1u : 0u));
         default: return 0;
         }
     }
@@ -950,7 +977,41 @@ namespace ui::cenas {
             a0 = px8(c.x0), b0 = px8(c.y0), a1 = px8(c.x1), b1 = px8(c.y1);
         };
         float a0, b0, a1, b1;
+        if (const Animacao* a = animacaoDa(camada, v, in.fundo)) {   // diferenca da pose deste quadro, em corridas de uma linha
+            if (a->nPoses == 0) return;
+            const uint8_t pose = a->mapa[cv::quadroCiclo(in.ms, a->periodo)];
+            if (pose >= a->nPoses) return;   // kSemPose: neste quadro a arte e a do fundo
+            const int w = a->r.x1 - a->r.x0;
+            const int8_t* d = a->delta + static_cast<size_t>(a->inicioPx[pose]) * 3;
+            for (uint32_t k = a->inicio[pose]; k < a->inicio[pose + 1]; ++k) {
+                const int n = a->n[k];
+                const int y = a->r.y0 + a->pos[k] / w;
+                int x = a->r.x0 + a->pos[k] % w;
+                if (y < t.f.y0 || y >= t.f.y1 || x >= t.f.x1 || x + n <= t.f.x0) {
+                    d += n * 3;
+                    continue;
+                }
+                for (int i = 0; i < n; ++i, ++x, d += 3)
+                    if (x >= t.f.x0 && x < t.f.x1) t.somar(x, y, d);
+            }
+            return;
+        }
         switch (camada) {
+        case Rolo: {   // a luz do codigo sobre o monitor vazio do fundo, deslocada `passo` linhas por passo (ciclica): as
+                       // linhas andam; a luz da sala (feixes da persiana, vinheta) e o pontilhado ficam parados
+            const auto& ro = v.rolo;
+            const uint8_t* arte = ro.px[in.fundo];
+            const int w = ro.r.x1 - ro.r.x0, h = ro.r.y1 - ro.r.y0;
+            if (arte == nullptr || ro.quadrosPorPasso == 0 || ro.passo == 0 || h <= 0) break;
+            const int desloc = cv::passoRolo(in.ms, ro.quadrosPorPasso, h / ro.passo) * ro.passo;
+            const Faixa f = cobrir(ro.r.x0, ro.r.y0, ro.r.x1, ro.r.y1, t.f);
+            for (int y = f.y0; y < f.y1; ++y) {
+                const uint8_t* linha = arte + (static_cast<size_t>((y - ro.r.y0 + desloc) % h) * w + (f.x0 - ro.r.x0)) * 3;
+                for (int x = f.x0; x < f.x1; ++x, linha += 3)
+                    if (linha[0] | linha[1] | linha[2]) t.luz(x, y, Rgb{float(linha[0]), float(linha[1]), float(linha[2])});
+            }
+            break;
+        }
         case Janela: {
             p.vis = Vis{janelaVis_, v.janela};
             p.limite = janela;   // a imagem da cidade so existe dentro da janela
@@ -1093,6 +1154,12 @@ namespace ui::cenas {
                         Pincel::Luz);
             }
             break;
+        case CursorTerminal: {   // bloco de 2 x 3,2 px (como na arte), aceso na 1a metade de cada segundo
+            if (cursorTerminalTopox10_ < 0 || !cv::cursorAceso(in.ms)) break;
+            const float x = static_cast<float>(cena_->revela.x0), y = static_cast<float>(cena_->revela.y0) + cursorTerminalTopox10_ / 10.0f;
+            p.forma(t, false, x + kCursorX0, y, x + kCursorX1, y + kCursorAlt, deCor(v.cursorTerminal[in.fundo]), Pincel::Luz);
+            break;
+        }
         case Sprite: {
             const SpriteLuz& s = v.sprite;
             const int w = s.r.x1 - s.r.x0, h = s.r.y1 - s.r.y0;
@@ -1164,8 +1231,17 @@ namespace ui::cenas {
             std::memcpy(base_, fundo_, size_t(kLarg) * kAlt * sizeof(uint16_t));
             basePronta_ = true;
         }
-        Retangulo sujos[kCamadas + 2];
+        Retangulo sujos[2 * kCamadas + 2];
         int nSujos = 0;
+        // cursor do terminal (QG Cidade): no foco, na linha seguinte a ultima do terminal; na hora extra, a posicao da arte
+        cursorTerminalTopox10_ = -1;
+        if (v != nullptr && c.revelaModo == 1) {
+            if (q.revelar)
+                cursorTerminalTopox10_ = tempo::cenafoco::cursorModo1Topox10(c.linhaY0x10, c.linhaPassox10, c.linhasCabecalho,
+                                                                             c.linhasMax, q.tomados);
+            else if (in.fundo == 2)
+                cursorTerminalTopox10_ = v->cursorHoraExtraTopox10;
+        }
         {   // revelacao (no maximo ~1x/s: o App recalcula o quadro 1x/s)
             const Retangulo& r = c.revela;
             const int w = r.x1 - r.x0, h = r.y1 - r.y0;
@@ -1208,11 +1284,16 @@ namespace ui::cenas {
             for (int k = 0; k < kCamadas; ++k) {
                 const uint32_t s = assinatura(k, in);
                 const Retangulo cx = caixa(k);
-                if ((s != sigCamada_[k] || tudo) && cx.x1 > cx.x0 && cx.y1 > cx.y0) {
-                    sujos[nSujos++] = cx;
+                const Retangulo antes = caixaAnterior_[k];
+                const bool mudouDeLugar = antes.x0 != cx.x0 || antes.y0 != cx.y0 || antes.x1 != cx.x1 || antes.y1 != cx.y1;
+                if (s != sigCamada_[k] || tudo || mudouDeLugar) {
+                    if (cx.x1 > cx.x0 && cx.y1 > cx.y0) sujos[nSujos++] = cx;
+                    // a camada mudou de lugar (o cursor desceu uma linha) ou sumiu: limpa onde ela estava
+                    if (!tudo && mudouDeLugar && antes.x1 > antes.x0 && antes.y1 > antes.y0) sujos[nSujos++] = antes;
                     ++camadasMudaram;
                 }
                 sigCamada_[k] = s;
+                caixaAnterior_[k] = cx;
             }
         }
         if (tudo) ui.paint(tela, [&](Arduino_GFX& g, ui::Rect r) { g.draw16bitRGBBitmap(r.x, r.y, base_, kLarg, kAlt); });

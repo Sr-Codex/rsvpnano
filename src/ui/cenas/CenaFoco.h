@@ -10,10 +10,20 @@
 //   desenhar(ui, ...)      compositor por camadas (v2), tudo na PSRAM:
 //                            fundo_  = JPEG decodificado (nunca muda)
 //                            base_   = fundo + revelacao + mapa (recompostos no maximo ~1x/s, como no v1)
-//                            camadas = luz viva por cima da base, cada uma com a sua caixa e a sua assinatura por quadro:
+//                            camadas = por cima da base, cada uma com a sua caixa e a sua assinatura por quadro.
+//                                      Primeiro o que TROCA a arte (antes das luzes):
+//                                        rolo (QG Cidade: o monitor em pe rola o codigo; a luz do codigo, ciclica,
+//                                        somada ao monitor vazio do fundo) ·
+//                                        animacoes por diferenca (soma R, G, B por pixel, por pose): cursor do rolo,
+//                                        hex do monitor de tubo e ondas do monitor central (QG Neon), respiracao do
+//                                        personagem (as duas cenas)
+//                                      Depois a luz viva:
 //                                      QG Neon: janela (chuva, janelas acendendo, drone) · relogio de neon + barra ·
 //                                      roteador · rack · olhos do gato · teclado RGB · faixa do gabinete · vapor
 //                                      QG Cidade: janela (gotas, carros, antenas, letreiros) · relogio de LED · fumaca
+//                                      Cursor do terminal do QG Cidade: bloco de luz (nucleo + brilho curto, como
+//                                      os LEDs) que pisca 1x/s na linha seguinte a ultima do terminal (hora extra:
+//                                      posicao fixa da arte). Os fundos vem sem cursor.
 //                          A cada quadro (8/s) so as caixas que mudaram sao recompostas (base + TODAS as camadas que
 //                          cruzam a caixa, na ordem) e enviadas a tela. Luz por soma "screen" (como os brilhos dos
 //                          mockups): nucleo com borda suavizada (cobertura 4x4 / area exata) + halo gaussiano curto; o
@@ -59,7 +69,11 @@ namespace ui::cenas {
         // Tempo (us) da ultima composicao que pintou alguma coisa e quantos pixels foram enviados (log/diagnostico).
         uint32_t ultimoQuadroUs() const { return ultimoQuadroUs_; }
 
-        enum Camada : uint8_t { Janela, Relogio, Roteador, Rack, Olhos, Teclado, FaixaGabinete, Sprite, kCamadas };
+        // Na ordem em que sao aplicadas: o que troca a arte vem antes das luzes.
+        enum Camada : uint8_t {
+            Rolo, CursorRolo, Tubo, Ondas, Personagem,
+            Janela, Relogio, Roteador, Rack, Olhos, Teclado, FaixaGabinete, Sprite, CursorTerminal, kCamadas
+        };
         struct Instante;   // estado do quadro (interno)
         struct Tile;       // faixa de composicao (interno)
 
@@ -100,6 +114,8 @@ namespace ui::cenas {
         uint32_t geracao_ = 0;           // muda a cada fundo decodificado (forca repintar tudo)
         uint32_t sigRevela_ = 0, sigMapa_ = 0, sigRelogioPronto_ = 0;
         uint32_t sigCamada_[kCamadas] = {};
+        Retangulo caixaAnterior_[kCamadas] = {};   // onde cada camada pintou por ultimo (o cursor do terminal muda de linha)
+        int cursorTerminalTopox10_ = -1;           // QG Cidade: topo do cursor do terminal neste quadro (-1 = nao ha)
         bool basePronta_ = false;
         uint32_t ultimoQuadroUs_ = 0;
     };

@@ -50,6 +50,23 @@ namespace ui::cenas {
         Cor tinta;
         const uint8_t* px;        // quadros x (x1-x0) x (y1-y0)
     };
+    struct Animacao {             // animação por diferença num fundo: pixels que mudam em cada pose (nPoses 0 = não tem)
+        Retangulo r;
+        uint8_t nPoses, periodo;  // pose = mapa[quadro % periodo]; 255 = neste quadro nada muda
+        const uint8_t* mapa;
+        const uint16_t* inicio;   // nPoses + 1: a pose p usa as corridas [inicio[p], inicio[p + 1]) ...
+        const uint32_t* inicioPx; // ... e os pixels de `delta` a partir de inicioPx[p]
+        const uint16_t* pos;      // corrida: 1º pixel = (y - r.y0) * (r.x1 - r.x0) + (x - r.x0) ...
+        const uint8_t* n;         // ... e quantos pixels seguidos na mesma linha
+        const int8_t* delta;      // 3 por pixel: soma em R, G, B (0..255), antes das luzes
+    };
+    struct Rolo {                 // tela que rola de verdade (QG Cidade: monitor em pé); quadrosPorPasso 0 = não tem
+        Retangulo r;              // onde a faixa aparece; a altura é o período (a faixa é cíclica)
+        uint8_t passo;            // linhas de pixel por passo (1 linha de código)
+        uint8_t quadrosPorPasso;  // quadros (125 ms) entre um passo e o seguinte
+        const uint8_t* px[3];     // por fundo: a LUZ do código em RGB888, linha a linha (no fundo a faixa está vazia);
+        //                           a linha y da tela soma por "screen" a linha (y - r.y0 + passo * n) mod altura
+    };
     struct RelogioCena {
         uint8_t estilo;           // 0 = neon (fonte do firmware, Atkinson); 1 = LED de 7 segmentos
         uint8_t fonte;            // neon: tamanho da fonte
@@ -87,6 +104,15 @@ namespace ui::cenas {
         const Caixa8* letreiros; uint8_t nLetreiros;
         const CarroLonge* carrosLonge; uint8_t nCarrosLonge;
         const CarroViva* carrosViva; uint8_t nCarrosViva;
+        // animações por diferença, por fundo (noite, vitória, amanhecer)
+        Animacao respira[3];                   // respiração do personagem (a vitória não respira)
+        Animacao tubo[3];                      // QG Neon: hex do monitor de tubo trocando
+        Animacao ondas[3];                     // QG Neon: ondas do monitor central
+        Rolo rolo;                             // QG Cidade: monitor em pé rolando o código
+        Animacao cursorRolo[3];                // QG Cidade: cursor do monitor em pé (pisca 1x/s)
+        Cor cursorTerminal[3];                 // QG Cidade: cor (emissiva) do cursor do terminal, por fundo
+        int16_t cursorHoraExtraTopox10;        // ... e onde ele fica na hora extra (topo em 1/10 px, relativo ao
+        //                                        retângulo da revelação; -1 = não tem). No foco ele acompanha as linhas.
     };
 
     struct Cena {
@@ -103,7 +129,6 @@ namespace ui::cenas {
         uint8_t ordem[12];             // ordem em que os nós acendem
         uint8_t elos[14][2];
         uint16_t corNoApagado, corNoAntes, corNoNovo, corEloApagado, corEloAntes, corEloNovo;
-        uint16_t corCursor;
         const CenaViva* viva;          // v2: o que a placa anima/escreve por cima do fundo
     };
 

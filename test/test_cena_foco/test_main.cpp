@@ -132,7 +132,8 @@ void test_revelacao_cidade_por_linha_de_terminal() {
 }
 
 void test_cursor_do_terminal_na_linha_seguinte() {
-    TEST_ASSERT_EQUAL_INT(-1, cursorModo1Topox10(30, 48, 4, 7, 0));   // k = 0: o cursor ja esta na arte
+    TEST_ASSERT_EQUAL_INT(30 + 4 * 48 + 4, cursorModo1Topox10(30, 48, 4, 7, 0));   // k = 0: logo depois do cabecalho
+    TEST_ASSERT_EQUAL_INT(30 + 4 * 48 + 4, cursorModo1Topox10(30, 48, 4, 7, -3));
     TEST_ASSERT_EQUAL_INT(30 + 5 * 48 + 4, cursorModo1Topox10(30, 48, 4, 7, 1));
     TEST_ASSERT_EQUAL_INT(30 + 11 * 48 + 4, cursorModo1Topox10(30, 48, 4, 7, 9));
     // o cursor fica logo abaixo do que foi revelado
