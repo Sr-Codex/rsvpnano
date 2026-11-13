@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <mutex>
+#include <system_error>
 
 #include "storage/fs/StorageFiles.h"
 
@@ -49,6 +50,31 @@ namespace TempoStorage {
         // gravacao interrompida entre os renames: o .bak guarda a ultima versao boa
         auto backup = StorageFiles::readTextFile(filesystem, tempo::kCaminhoEstadoBak, tempo::kMaxBytesEstado);
         return backup && tempo::lerEstado(*backup, out);
+    }
+
+    tempo::cartao::Leitura loadStateChecked(fs::FS& filesystem, tempo::Estado& out) {
+        using tempo::cartao::Arquivo;
+        const auto ler = [&](const char* caminho, tempo::Estado& destino) {
+            auto text = StorageFiles::readTextFile(filesystem, caminho, tempo::kMaxBytesEstado);
+            if (text) return tempo::lerEstado(*text, destino) ? Arquivo::Valido : Arquivo::Invalido;
+            return text.error() == std::make_error_code(std::errc::no_such_file_or_directory) ? Arquivo::Ausente
+                                                                                                : Arquivo::Invalido;
+        };
+        tempo::Estado lido;
+        const Arquivo estado = ler(tempo::kCaminhoEstado, lido);
+        if (estado == Arquivo::Valido) {
+            out = lido;
+            return tempo::cartao::Leitura::Ok;
+        }
+        lido = tempo::Estado{};
+        const Arquivo backup = ler(tempo::kCaminhoEstadoBak, lido);
+        if (backup == Arquivo::Valido) {
+            out = lido;
+            return tempo::cartao::Leitura::Ok;
+        }
+        // estado sumiu: se o Perfil (resumo) ou o .bak dele existem, nao e cartao novo
+        const bool outros = filesystem.exists(tempo::kCaminhoResumo) || filesystem.exists(tempo::kCaminhoResumoBak);
+        return tempo::cartao::classificar(estado, backup, outros);
     }
 
     bool saveState(fs::FS& filesystem, const tempo::Estado& state) {

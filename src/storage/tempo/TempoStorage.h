@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "tempo/Cartao.h"
 #include "tempo/Codec.h"
 #include "tempo/Habitos.h"
 #include "tempo/Perfil.h"
@@ -21,6 +22,9 @@ namespace TempoStorage {
     // false = JSON invalido, cartao ausente ou falha de escrita; o arquivo anterior fica intacto.
     bool saveProjects(fs::FS& filesystem, std::string_view json);
     bool loadState(fs::FS& filesystem, tempo::Estado& out);
+    // Como loadState, mas diz se e cartao novo (Ausente) ou se o estado existe e nao deu para ler (Ilegivel): nesse caso o
+    // app NAO pode gravar o estado zerado por cima (tempo/Cartao.h).
+    tempo::cartao::Leitura loadStateChecked(fs::FS& filesystem, tempo::Estado& out);
     bool saveState(fs::FS& filesystem, const tempo::Estado& state);
     // Perfil (lume.5): eventos de um dia (acrescenta em `out`), resumo acumulado /tempo/resumo.json.
     bool loadLogDay(fs::FS& filesystem, const tempo::Data& date, std::vector<tempo::EventoLog>& out);

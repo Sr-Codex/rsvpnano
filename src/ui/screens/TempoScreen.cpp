@@ -955,7 +955,10 @@ namespace screens {
     }
 
     void TempoScreen::salvar(fs::FS* filesystem) {
-        if (filesystem != nullptr) TempoStorage::saveState(*filesystem, estado_);
+        if (filesystem == nullptr || !tempo::cartao::podeGravar(cartao_)) return;
+        const auto antes = cartao_;
+        cartao_ = tempo::cartao::aposGravar(cartao_, TempoStorage::saveState(*filesystem, estado_));
+        if (cartao_ != antes) ESP_LOGW("tempo", "cartao SD: %s", cartao_ == tempo::cartao::Situacao::Ok ? "gravou de novo" : tempo::cartao::aviso(cartao_));
     }
 
     void TempoScreen::pedirSom(som::SomId id) {
@@ -983,7 +986,12 @@ namespace screens {
         fs_ = filesystem;
         if (recarregarEstado) {
             estado_ = tempo::Estado{};
-            if (filesystem != nullptr) TempoStorage::loadState(*filesystem, estado_);
+            // estado ilegivel (cartao falhando): comeca do zero SO na memoria e nao grava por cima (tempo/Cartao.h)
+            const auto leitura = filesystem != nullptr ? TempoStorage::loadStateChecked(*filesystem, estado_)
+                                                       : tempo::cartao::Leitura::Ausente;
+            cartao_ = tempo::cartao::aposCarregar(filesystem != nullptr, leitura);
+            if (cartao_ != tempo::cartao::Situacao::Ok)
+                ESP_LOGW("tempo", "cartao SD: %s", tempo::cartao::aviso(cartao_));
             if (syncAtiva_) {
                 recargaPedida_ = true;   // o job grava habitos.json agora: le depois do sinal de "terminou"
             } else {
@@ -1281,7 +1289,7 @@ namespace screens {
                 pedirSom(*id);
         }
         if (filesystem == nullptr) filesystem = fs_;
-        if (filesystem != nullptr) TempoStorage::saveState(*filesystem, estado_);
+        salvar(filesystem);
     }
 
     // Ciclo pomodoro: a rodada terminou (inimigo derrotado). Liquida a batalha sozinha. Rodadas intermediarias vao direto ao saque
@@ -1379,7 +1387,7 @@ namespace screens {
         eventoMedPend_.reset();
         liquidado_ = false;
         if (filesystem == nullptr) filesystem = fs_;
-        if (filesystem != nullptr) TempoStorage::saveState(*filesystem, estado_);
+        salvar(filesystem);
         saqueAtivo_ = false;
         if (saqueLivre_) {   // livre: volta para a sessao contando de onde parou (nao vai ao Inicio)
             saqueLivre_ = false;
@@ -1425,7 +1433,7 @@ namespace screens {
                                            tempo::nivelDeXp(estado_.xpTotal) > nivelAntes ? som::SomId::PowerUp : som::SomId::Bip,
                                            conquistaNova(filesystem, *evento, streakAntes) ? som::SomId::Jingle : som::SomId::Bip}))
             pedirSom(*id);
-        TempoStorage::saveState(*filesystem, estado_);
+        salvar(filesystem);
         if (agora.valida) {
             TempoStorage::appendLog(*filesystem, agora.data, *evento);
             TempoStorage::recordBattle(*filesystem, *evento, estado_.streak);   // resumo.json do Perfil
@@ -1628,6 +1636,7 @@ namespace screens {
         {
             const Rect cartao{8, 6, 460, 56};
             const bool avisoSaiu = projetoSaiu_ && !comProjeto;
+            const char* avisoSd = tempo::cartao::aviso(cartao_);   // cartao SD: tem prioridade (o progresso pode nao estar salvando)
             const std::string nome = comProjeto ? (titulos_[escolha_].empty() ? std::string{"(sem título)"} : titulos_[escolha_])
                                                 : std::string{tempo::nomeCategoria(cat)};
             const auto q = quebrar(nome, 316, 17, 15, 1);
@@ -1635,10 +1644,12 @@ namespace screens {
             card.suave = true;
             card.apertado = podeEditar && ui.pressed(cartao);
             if (!q.linhas.empty()) card.linha(64, 24, 316, q.linhas[0], q.tam, cTexto);
-            card.linha(64, 46, 316, avisoSaiu ? std::string{"o projeto saiu da coluna AGORA"} : tempo::linhaTaxaDoFoco(comProjeto, categoria_), 15,
-                       avisoSaiu ? c565(kAmbar) : cMudo);
+            card.linha(64, 46, 316,
+                       avisoSd ? std::string{avisoSd}
+                               : avisoSaiu ? std::string{"o projeto saiu da coluna AGORA"} : tempo::linhaTaxaDoFoco(comProjeto, categoria_),
+                       15, avisoSd || avisoSaiu ? c565(kAmbar) : cMudo);
             if (podeEditar) card.linha(344, 34, 110, "Trocar ›", 17, cLaranja, TextAlign::Right);
-            card.marca(uint32_t(cat) * 4U + podeEditar * 2U + comProjeto + avisoSaiu * 64U);
+            card.marca(uint32_t(cat) * 4U + podeEditar * 2U + comProjeto + avisoSaiu * 64U + uint32_t(cartao_) * 256U);
             card.desenhar([&](Arduino_GFX& g, int, int) {
                 if (comProjeto) icones::emoji(g, icons::emoji::Id::Bullseye, 36, 34, 34, ui.color(SurfaceMuted));
                 else icones::phosphor(g, iconeDaCategoria(cat), 36, 34, 28, cLaranja, ui.color(SurfaceMuted));

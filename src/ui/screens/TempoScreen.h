@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "tempo/Cartao.h"
 #include "tempo/CenaViva.h"
 #include "tempo/Codec.h"
 #include "tempo/Cronometro.h"
@@ -254,6 +255,7 @@ namespace screens {
         void garantirDia(uint32_t nowMs);
         void registrarHabitoMeditacao(fs::FS* filesystem);     // batalha de Meditacao vencida: marca o habito
         void gravarEventoHabito(fs::FS* filesystem, const tempo::ResultadoOcorrencia& r, std::string_view origem);
+        // Grava o estado, a menos que o cartao esteja sem ler (tempo/Cartao.h): nunca grava estado zerado por cima.
         void salvar(fs::FS* filesystem);
         void pedirSom(som::SomId id);
         // A rodada/batalha liquidada ainda ganha uma conquista nova? (resumo.json antes x depois do evento; sem resumo = vazio)
@@ -304,6 +306,9 @@ namespace screens {
         std::vector<std::string> titulos_;   // titulos limpos (sem emoji), 1:1 com lista_.projetos
         size_t pagina_ = 0;                  // pagina do "Trocar ›" (2 projetos por pagina; setas so com mais de 2)
         std::string erroSync_;               // erro da ultima sync do TickTick (aparece no "Trocar ›" sem projetos)
+        // Cartao SD (revisao do Fable): sem cartao / estado ilegivel (nao grava por cima) / falha ao gravar. Aviso ambar no
+        // cartao do foco do Inicio enquanto nao estiver Ok.
+        tempo::cartao::Situacao cartao_ = tempo::cartao::Situacao::Ok;
         bool projetoSaiu_ = false;           // o projeto lembrado saiu da coluna AGORA (aviso ambar no cartao ate a proxima escolha/sessao)
         std::string projetoBatalhaId_;       // id do TickTick do projeto da batalha em curso ("" = sem projeto)
         bool pedidoSync_ = false;            // "Sincronizar" tocado no seletor vazio
