@@ -10,7 +10,7 @@ placa, e confere o que nenhum teste nativo alcança (cartão + toque + tempo):
      arquivo estragado não trava o leitor;
   4. arrastar com a leitura parada anda de frase em frase (para trás e para frente) e grava; com as
      palavras correndo, um deslize rápido para a esquerda volta uma frase e segue lendo, e um arrasto
-     lento não faz nada;
+     lento não faz nada; chegar à borda e ficar parado continua andando até soltar ou voltar;
   5. desligar pelo botão grava a posição uma vez só.
 
 Uso (da raiz do fork, depois de `pio run -e native_sim` e de existir `sim/state`):
@@ -171,6 +171,42 @@ def main() -> int:
                  f"+{frente[0]} frase: palavra {frente[1]} → {frente[2]}" if frente else "nenhum arrasto registrado")
         conferir(bool(frente) and palavra_no_arquivo(arquivo) == frente[2], "parado, gravou",
                  f"o cartão ficou com a palavra {palavra_no_arquivo(arquivo)}")
+
+        # Borda (lume.28): o dedo chega ao fim da tela e fica parado. Espera 0,5 s e anda 1 frase a cada 0,5 s, sem novas
+        # amostras de toque. O arrasto conta a partir da 1ª amostra (400): 400 → 620 = 3 frases
+        # do dedo; parado 2,7 s na borda = 5 frases a mais. Folga de 1 para a tela lenta.
+        def na_borda(xs, parado_ms, depois=()):
+            arquivo.write_text(com_palavra(modelo, 400), encoding="utf-8")
+            for sobra in arquivo.parent.glob(arquivo.name + ".*"):
+                sobra.unlink()
+            t0, passo = 7000, 100
+            roteiro = [f"down {xs[0]},{LINHA} @{t0}"]
+            roteiro += [f"move {x},{LINHA} @{t0 + passo * i}" for i, x in enumerate(xs[1:], 1)]
+            fim = t0 + passo * (len(xs) - 1) + parado_ms
+            for x in depois:
+                roteiro.append(f"move {x},{LINHA} @{fim}")
+                fim += passo
+            fim += 1500 if depois else 0  # parado fora da borda: não pode andar mais
+            roteiro.append(f"up @{fim}")
+            saida = sim.rodar(f"{ENTRAR}; {'; '.join(roteiro)}", fim + 1500)
+            achou = ARRASTOU.search(saida)
+            return (int(achou.group(1)), int(achou.group(2)), int(achou.group(3))) if achou else None
+
+        ida = na_borda([320, 400, 480, 560, 620], 2700)
+        conferir(bool(ida) and 7 <= ida[0] <= 8 and ida[2] > ida[1], "borda direita, segue para frente",
+                 f"{ida[0]} frases (3 do dedo + a borda): palavra {ida[1]} → {ida[2]}" if ida else "nenhum arrasto")
+        conferir(bool(ida) and palavra_no_arquivo(arquivo) == ida[2], "borda, gravou ao soltar",
+                 f"o cartão ficou com a palavra {palavra_no_arquivo(arquivo)}")
+        volta = na_borda([320, 240, 160, 80, 20], 1700)
+        conferir(bool(volta) and -6 <= volta[0] <= -5 and volta[2] < volta[1], "borda esquerda, segue para trás",
+                 f"{volta[0]} frases (3 do dedo + a borda): palavra {volta[1]} → {volta[2]}" if volta else "nenhum arrasto")
+        curta = na_borda([320, 400, 480, 560, 620], 300)
+        conferir(bool(curta) and curta[0] == 3, "borda, soltar logo não anda a mais",
+                 f"{curta[0]} frases (só as 3 do dedo)" if curta else "nenhum arrasto")
+        puxou = na_borda([320, 400, 480, 560, 620], 1700, depois=[580, 550])
+        conferir(bool(puxou) and 4 <= puxou[0] <= 5, "borda, puxar de volta para",
+                 f"{puxou[0]} frases depois de voltar 70 px e ficar 1,5 s parado (2 do dedo + a borda)" if puxou
+                 else "nenhum arrasto")
 
         arquivo.write_text(com_palavra(modelo, 60), encoding="utf-8")
         # Lendo: deslize rápido (240 ms) e depois um arrasto lento (1,2 s), que não pode fazer nada.

@@ -179,6 +179,51 @@ void test_scrub_math() {
     TEST_ASSERT_EQUAL_INT(-9, scrubSentenceSteps(-630)); // across the whole screen
 }
 
+void test_scrub_edge() {
+    ScrubEdge e;
+    e.finger(320, 640, 0, 1000); // middle of the screen: nothing
+    TEST_ASSERT_EQUAL_INT(0, e.due(9000));
+    // Right edge, dragging right: waits 500 ms, then one sentence every 500 ms.
+    e.finger(598, 640, 4, 9000); // 1 px before the zone
+    TEST_ASSERT_EQUAL_INT(0, e.due(9600));
+    e.finger(599, 640, 4, 10000);
+    TEST_ASSERT_EQUAL_INT(0, e.due(10499));
+    e.finger(630, 640, 4, 10300); // moving inside the zone does not restart the wait
+    TEST_ASSERT_EQUAL_INT(1, e.due(10500));
+    TEST_ASSERT_EQUAL_INT(0, e.due(10999));
+    TEST_ASSERT_EQUAL_INT(1, e.due(11000));
+    TEST_ASSERT_EQUAL_INT(1, e.due(15000)); // a slow frame walks one sentence, not a burst
+    TEST_ASSERT_EQUAL_INT(0, e.due(15001));
+    TEST_ASSERT_EQUAL_INT(3, e.steps);
+    e.undo(); // end of the book
+    TEST_ASSERT_EQUAL_INT(2, e.steps);
+    // Pulling back stops it and keeps what was walked; coming back waits again.
+    e.finger(500, 640, 3, 15100);
+    TEST_ASSERT_EQUAL_INT(0, e.due(99000));
+    TEST_ASSERT_EQUAL_INT(2, e.steps);
+    e.finger(639, 640, 4, 99100);
+    TEST_ASSERT_EQUAL_INT(0, e.due(99599));
+    TEST_ASSERT_EQUAL_INT(1, e.due(99600));
+    // Left edge, dragging left.
+    e.reset();
+    e.finger(40, 640, -3, 1000);
+    TEST_ASSERT_EQUAL_INT(-1, e.due(1500));
+    TEST_ASSERT_EQUAL_INT(-1, e.steps);
+    // At an edge but not heading to it, or without having walked a sentence yet: nothing.
+    e.reset();
+    e.finger(10, 640, 0, 1000);
+    TEST_ASSERT_EQUAL_INT(0, e.due(9000));
+    e.finger(10, 640, 2, 1000);
+    TEST_ASSERT_EQUAL_INT(0, e.due(9000));
+    e.finger(639, 640, -2, 1000);
+    TEST_ASSERT_EQUAL_INT(0, e.due(9000));
+    // millis() wrap.
+    e.reset();
+    e.finger(639, 640, 2, 0xFFFFFF00u);
+    TEST_ASSERT_EQUAL_INT(0, e.due(0xFFFFFFF0u));
+    TEST_ASSERT_EQUAL_INT(1, e.due(0xFFFFFF00u + 500u));
+}
+
 void test_rewind_swipe() {
     TEST_ASSERT_TRUE(isRewindSwipe(-50, 0, 0));
     TEST_ASSERT_TRUE(isRewindSwipe(-120, 30, 600));
@@ -289,6 +334,7 @@ int main() {
     RUN_TEST(test_old_sidecar_without_resume_still_loads);
     RUN_TEST(test_resume_round_trips_through_sidecar_toml);
     RUN_TEST(test_scrub_math);
+    RUN_TEST(test_scrub_edge);
     RUN_TEST(test_rewind_swipe);
     RUN_TEST(test_backward_math);
     RUN_TEST(test_update_backward_walks_back_at_wpm_and_stops_at_zero);

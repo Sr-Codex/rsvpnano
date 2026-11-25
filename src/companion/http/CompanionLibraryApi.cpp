@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -29,6 +30,13 @@ namespace {
                                   "name");
         }
         return api::httpError(HTTP_CODE_INTERNAL_SERVER_ERROR, "storage_error", "Book could not be installed");
+    }
+
+    // The book's saved position, or null. Not inlined: its frame must be gone before the JSON is built.
+    [[gnu::noinline]] std::unique_ptr<reading::State> storedState(std::string_view path,
+                                                                  const reading::BookIdentity& identity) {
+        auto state = ReadingProgress::readBookState(path, identity);
+        return state ? std::make_unique<reading::State>(std::move(*state)) : nullptr;
     }
 
     std::expected<void, std::error_code> appendBookUpload(void* context, std::span<const uint8_t> bytes) {
@@ -116,28 +124,40 @@ companion::api::Result<std::string> CompanionApi::encodeBook(size_t index, const
                                               "Book could not be read"));
     }
 
-    BookMetadata storedMetadata;
-    const BookMetadata* metadata = availableMetadata == nullptr ? &storedMetadata : availableMetadata;
+    // This runs on the loop task for USB requests: what is big lives on the heap, and reading the card and building the
+    // JSON are separate calls, so their frames are never on the stack at the same time.
+    std::unique_ptr<BookMetadata> storedMetadata;
+    const BookMetadata* metadata = availableMetadata;
     const reading::BookIdentity* identity = availableIdentity;
     std::optional<reading::BookIdentity> storedIdentity;
-    std::optional<reading::State> storedReading;
+    std::unique_ptr<reading::State> storedReading;
     const reading::State* reading = nullptr;
     const ReadingSession& session = readerScreen_.session;
     if (session.sourcePath() == entry->path) {
         metadata = &session.metadata;
         reading = &session.state;
         identity = &readerScreen_.store.identity();
-    } else if (identity == nullptr) {
-        storedIdentity = storage_.readBookMetadata(index, storedMetadata);
-        identity = storedIdentity ? &*storedIdentity : nullptr;
-    }
-    if (reading == nullptr && identity != nullptr) {
-        if (auto state = ReadingProgress::readBookState(entry->path, *identity)) {
-            storedReading = std::move(*state);
-            reading = &*storedReading;
+    } else if (metadata == nullptr || identity == nullptr) {
+        storedMetadata = std::make_unique<BookMetadata>();
+        metadata = metadata == nullptr ? storedMetadata.get() : metadata;
+        if (identity == nullptr) {
+            storedIdentity = storage_.readBookMetadata(index, *storedMetadata);
+            identity = storedIdentity ? &*storedIdentity : nullptr;
         }
     }
+    if (reading == nullptr && identity != nullptr) {
+        storedReading = storedState(entry->path, *identity);
+        reading = storedReading.get();
+    }
+    return encodeBookJson(*entry, *metadata, identity, reading);
+}
 
+companion::api::Result<std::string> CompanionApi::encodeBookJson(const BookLibrary::Entry& bookEntry,
+                                                                 const BookMetadata& bookMeta,
+                                                                 const reading::BookIdentity* identity,
+                                                                 const reading::State* reading) {
+    const BookLibrary::Entry* entry = &bookEntry;
+    const BookMetadata* metadata = &bookMeta;
     const std::string id = BookLibrary::id(*entry);
     const std::string_view name = BookLibrary::relativeName(*entry);
     auto scripts = UnicodeText::scriptTags(metadata->scriptMask);
@@ -166,7 +186,9 @@ companion::api::Result<std::string> CompanionApi::encodeBook(size_t index, const
     return encodeResponse(response);
 }
 
-companion::api::Result<std::string> CompanionApi::installLibraryItem(httpd_req_t& request) {
+// Receives, indexes and installs the book. Separate from the answer (installLibraryItem) so the builder and the upload
+// are off the stack when the answer reads the card.
+auto CompanionApi::receiveLibraryItem(httpd_req_t& request) -> companion::api::Result<std::unique_ptr<ReceivedBook>> {
     if (request.content_len == 0) {
         return std::unexpected(companion::api::httpError(HTTP_CODE_BAD_REQUEST, "missing_upload",
                                                          "Book file is required", "file"));
@@ -243,6 +265,19 @@ companion::api::Result<std::string> CompanionApi::installLibraryItem(httpd_req_t
                                                          builder.failure(), "file"));
     }
 
+    auto received = std::make_unique<ReceivedBook>();
+    received->path = finalPath;
+    received->identity = builder.header().identity;
+    received->metadata = builder.takeMetadata();
+    return received;
+}
+
+companion::api::Result<std::string> CompanionApi::installLibraryItem(httpd_req_t& request) {
+    auto received = receiveLibraryItem(request);
+    if (!received)
+        return std::unexpected(std::move(received.error()));
+    const std::string& finalPath = (*received)->path;
+
     libraryScreen_.invalidate();
     const int index = storage_.findBook(finalPath);
     if (index < 0) {
@@ -253,8 +288,7 @@ companion::api::Result<std::string> CompanionApi::installLibraryItem(httpd_req_t
         return std::unexpected(companion::api::httpError(HTTP_CODE_INTERNAL_SERVER_ERROR, "storage_error",
                                                          "Book is missing from the library"));
     }
-    BookMetadata metadata = builder.takeMetadata();
-    auto response = encodeBook(static_cast<size_t>(index), &metadata, &builder.header().identity);
+    auto response = encodeBook(static_cast<size_t>(index), &(*received)->metadata, &(*received)->identity);
     const BookLibrary::Entry* book = storage_.book(static_cast<size_t>(index));
     if (response && book != nullptr) {
         const std::string location = "/api/v2/library/" + BookLibrary::id(*book);

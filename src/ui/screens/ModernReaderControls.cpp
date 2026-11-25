@@ -3,6 +3,43 @@
 #include <esp_log.h>
 
 namespace screens {
+    // Goes to the sentence `steps` away from where the drag began (finger + edge). Sentence starts are found one step
+    // at a time and kept for the rest of this drag, so moving the finger back and forth never searches the same text
+    // again.
+    void ReaderScreen::applyScrub(int steps) {
+        if(steps==scrubShownSteps_ && !scrubText_.empty())return;
+        scrubShownSteps_=steps;
+        auto& stops=steps<0?scrubBack_:scrubForward_;
+        const size_t wanted=static_cast<size_t>(steps<0?-steps:steps);
+        while(stops.size()<wanted){
+            const size_t from=stops.empty()?scrubStartWord_:stops.back();
+            const size_t next=ReadingLoop::sentenceStartAfterSteps(session,from,steps<0?-1:1);
+            if(next==from)break; // the first or the last sentence of the book
+            stops.push_back(next);
+        }
+        const size_t taken=std::min(wanted,stops.size());
+        scrubTakenSteps_=steps<0?-static_cast<int>(taken):static_cast<int>(taken);
+        const size_t target=taken==0?scrubStartWord_:stops[taken-1];
+        if(target!=session.state.wordIndex)ReadingLoop::seekTo(session,target);
+        const auto* chapter=session.metadata.chapterAt(session.state.wordIndex);
+        const unsigned pct=reading::percentOf(session.state.wordIndex,
+                                              static_cast<uint32_t>(ReadingLoop::wordCount(session)));
+        scrubText_=taken==0?std::string{}
+                  :std::string{steps<0?"‹ ":"› "}+std::to_string(taken)+(taken==1?" frase · ":" frases · ");
+        scrubText_+=chapter?"Cap. "+std::to_string(chapter-session.metadata.chapters.data()+1)+" · "+std::to_string(pct)+"%"
+                           :std::to_string(pct)+"%";
+    }
+
+    // Every frame, with or without a new touch sample: a still finger sends none.
+    void ReaderScreen::tickScrubEdge(uint32_t nowMs) {
+        if(!modernScrub_)return;
+        const int step=scrubEdge_.due(nowMs);
+        if(step==0)return;
+        const int wanted=scrubFingerSteps_+scrubEdge_.steps;
+        applyScrub(wanted);
+        if(scrubTakenSteps_!=wanted){scrubEdge_.undo();applyScrub(scrubFingerSteps_+scrubEdge_.steps);}
+    }
+
     bool ReaderScreen::handleModernControls(ui::Context& ui,uint32_t nowMs,Preferences& preferences,
                                            settings::SettingsStore& store,Screen& screen) {
         using modern::ReaderControl;
@@ -43,34 +80,13 @@ namespace screens {
             if(!modernScrub_ && !modernHoldStarted_ && !modernHolding_ && !backward_ && !modernPressedPlaying_ && !session.playing
                && ReadingLoop::wordCount(session)>0 && reading::isScrubMove(dx,dy)){
                 modernScrub_=true;scrubStartWord_=session.state.wordIndex;scrubAnchorX_=touch->x;scrubShownSteps_=0;
+                scrubFingerSteps_=0;scrubEdge_.reset();
                 scrubTakenSteps_=0;scrubBack_.clear();scrubForward_.clear();scrubNoticeUntilMs_=0;scrubText_.clear();
             }
             if(modernScrub_){
-                const int steps=reading::scrubSentenceSteps(int(touch->x)-int(scrubAnchorX_));
-                if(steps!=scrubShownSteps_ || scrubText_.empty()){
-                    scrubShownSteps_=steps;
-                    // Sentence starts are found one step at a time and kept for the rest of this drag, so moving the
-                    // finger back and forth never searches the same text again.
-                    auto& stops=steps<0?scrubBack_:scrubForward_;
-                    const size_t wanted=static_cast<size_t>(steps<0?-steps:steps);
-                    while(stops.size()<wanted){
-                        const size_t from=stops.empty()?scrubStartWord_:stops.back();
-                        const size_t next=ReadingLoop::sentenceStartAfterSteps(session,from,steps<0?-1:1);
-                        if(next==from)break; // the first or the last sentence of the book
-                        stops.push_back(next);
-                    }
-                    const size_t taken=std::min(wanted,stops.size());
-                    scrubTakenSteps_=steps<0?-static_cast<int>(taken):static_cast<int>(taken);
-                    const size_t target=taken==0?scrubStartWord_:stops[taken-1];
-                    if(target!=session.state.wordIndex)ReadingLoop::seekTo(session,target);
-                    const auto* chapter=session.metadata.chapterAt(session.state.wordIndex);
-                    const unsigned pct=reading::percentOf(session.state.wordIndex,
-                                                          static_cast<uint32_t>(ReadingLoop::wordCount(session)));
-                    scrubText_=taken==0?std::string{}
-                              :std::string{steps<0?"‹ ":"› "}+std::to_string(taken)+(taken==1?" frase · ":" frases · ");
-                    scrubText_+=chapter?"Cap. "+std::to_string(chapter-session.metadata.chapters.data()+1)+" · "+std::to_string(pct)+"%"
-                                       :std::to_string(pct)+"%";
-                }
+                scrubFingerSteps_=reading::scrubSentenceSteps(int(touch->x)-int(scrubAnchorX_));
+                scrubEdge_.finger(int(touch->x),ui.width(),scrubFingerSteps_,nowMs);
+                applyScrub(scrubFingerSteps_+scrubEdge_.steps);
                 if(released){
                     ESP_LOGI("reader","scrub sentences %d: %u -> %u",scrubTakenSteps_,
                              static_cast<unsigned int>(scrubStartWord_),static_cast<unsigned int>(session.state.wordIndex));

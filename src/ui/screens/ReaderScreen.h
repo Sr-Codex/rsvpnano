@@ -73,6 +73,8 @@ namespace screens {
 
     private:
         bool handlePage(ui::Context& ui, uint32_t nowMs, Preferences& preferences, settings::SettingsStore& store, Screen& screen);
+        void applyScrub(int steps);
+        void tickScrubEdge(uint32_t nowMs);
         void commitPlace(size_t index, Preferences& preferences, uint32_t nowMs);
         std::string placeExcerpt(size_t index, size_t maxWords = 32) const;
         bool pageBrowsing_ = false;
@@ -82,7 +84,9 @@ namespace screens {
         bool modernScrub_ = false; // horizontal drag scrub in progress (by sentence)
         size_t scrubStartWord_ = 0;
         uint16_t scrubAnchorX_ = 0;
-        int scrubShownSteps_ = 0;  // sentence steps asked by the finger, already applied
+        int scrubFingerSteps_ = 0; // sentence steps of the finger alone
+        reading::ScrubEdge scrubEdge_; // sentences walked by holding at the edge
+        int scrubShownSteps_ = 0;  // sentence steps asked (finger + edge), already applied
         int scrubTakenSteps_ = 0;  // sentence steps really walked (fewer at the first and last sentences)
         std::vector<size_t> scrubBack_, scrubForward_; // sentence starts found during this drag, in order
         std::string scrubText_;    // bottom label while dragging, and for a moment after a swipe

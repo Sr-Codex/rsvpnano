@@ -23,6 +23,7 @@ namespace screens {
             scrubNoticeUntilMs_ = 0; // the "‹ 1 frase" after a swipe goes away (and never comes back on a wrap)
             if (!modernScrub_) scrubText_.clear();
         }
+        tickScrubEdge(nowMs);
         prepareChunk();
         if (shouldFinishPause(nowMs)) {
             finishPause(preferences, nowMs);

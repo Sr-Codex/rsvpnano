@@ -298,6 +298,8 @@ namespace {
     }
 } // namespace
 
+extern TaskHandle_t loopTaskHandle;   // do core Arduino (cores/esp32/main.cpp); sem cabecalho que a declare
+
 companion::api::DeviceInfo CompanionApi::deviceInfo() const {
     constexpr uint32_t kInternal = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
     auto toque = atrasotoque::resumoGlobal();
@@ -309,6 +311,8 @@ companion::api::DeviceInfo CompanionApi::deviceInfo() const {
         .largestInternalBlock = static_cast<uint32_t>(heap_caps_get_largest_free_block(kInternal)),
         .minFreeInternalHeap = static_cast<uint32_t>(heap_caps_get_minimum_free_size(kInternal)),
         .freePsram = static_cast<uint32_t>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+        .loopStackSize = static_cast<uint32_t>(getArduinoLoopTaskStackSize()),
+        .loopStackMinFree = loopTaskHandle == nullptr ? 0U : static_cast<uint32_t>(uxTaskGetStackHighWaterMark(loopTaskHandle)),
         .uptimeSeconds = static_cast<uint32_t>(esp_timer_get_time() / 1000000LL),
         .lastResetReason = resetReasonName(esp_reset_reason()),
         .wakeCause = wakeCauseName(esp_sleep_get_wakeup_cause()),

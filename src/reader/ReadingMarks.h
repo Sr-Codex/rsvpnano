@@ -78,6 +78,28 @@ namespace reading {
     bool isScrubMove(int dx, int dy);              // horizontal and beyond the slop
     int scrubSentenceSteps(int dxPixels);          // signed sentence steps for a displacement
 
+    // Scrub that keeps going at the edge of the screen (owner's idea, lume.28): when the finger that is dragging reaches
+    // the edge it was heading to and stays there, one more sentence is walked every kScrubEdgeRepeatMs (no
+    // acceleration) until it leaves the edge or is lifted. `steps` = sentences walked this way, kept for the rest of
+    // the drag (finger steps are added to it), so pulling back from the edge undoes them one by one.
+    inline constexpr int kScrubEdgePx = 40;
+    inline constexpr uint32_t kScrubEdgeDelayMs = 500;
+    inline constexpr uint32_t kScrubEdgeRepeatMs = 500;
+    struct ScrubEdge {
+        int steps = 0;
+        int side = 0; // -1 = held at the left edge, +1 = at the right edge, 0 = not at an edge
+        uint32_t dueMs = 0;
+
+        void reset() { *this = {}; }
+        // Each touch sample. `fingerSteps` = scrubSentenceSteps of the finger: the edge only counts in the direction
+        // of the drag, and only after the finger walked at least one sentence by itself.
+        void finger(int x, int width, int fingerSteps, uint32_t nowMs);
+        // Each frame. Returns the sentence to walk now (-1, 0 or +1). A slow frame never causes a burst.
+        int due(uint32_t nowMs);
+        // The book ended: the step just returned by due() was not walked.
+        void undo() { steps -= side; }
+    };
+
     // "Voltar uma frase" while the words run: a quick flick to the left on the word canvas. `minDx` = the farthest
     // the finger went to the left during the touch (negative), `maxAbsDy` = its largest vertical drift.
     inline constexpr int kRewindSwipeMinPx = 50;

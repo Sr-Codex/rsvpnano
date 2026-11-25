@@ -258,7 +258,8 @@ void CompanionSerial::sendImprovResponse(improv::Command command, const std::vec
     sendImprov(improv::TYPE_RPC_RESPONSE, data);
 }
 
-void CompanionSerial::readFrames() {
+// Separate so its buffer is off the stack while a request runs.
+void CompanionSerial::receiveBytes() {
     std::array<uint8_t, 512> bytes{};
     while (Serial.available() > 0) {
         const size_t count = Serial.readBytes(bytes.data(), std::min<size_t>(Serial.available(), bytes.size()));
@@ -266,6 +267,10 @@ void CompanionSerial::readFrames() {
             break;
         decoder_.append(std::span{bytes}.first(count));
     }
+}
+
+void CompanionSerial::readFrames() {
+    receiveBytes();
     for (auto& frame: decoder_.takeFrames()) {
         handleFrame(std::move(frame));
         if (writeFailed_)
@@ -391,17 +396,60 @@ void CompanionSerial::handleRequestEnd(const companion::serial::Frame& frame) {
 }
 
 void CompanionSerial::dispatchRequest(companion::BufferedRequest& buffered) {
-    namespace api = companion::api;
-
     httpd_req_t request{};
     request.handle = nullptr;
     request.content_len = static_cast<size_t>(request_.totalBytes);
     request.user_ctx = &buffered;
     buffered.path = request_.path;
 
+    const std::lock_guard operationLock{api_.operationsMutex_};
+    // A book upload is the deepest path of the loop task: it does not go through dispatchEndpoint, whose frame is large.
+    if (request_.method == "POST" && request_.path == "/api/v2/library") {
+        installBook(request);
+        return;
+    }
+    if (request_.method == "GET" && request_.path == "/api/v2/library" && request_.totalBytes == 0) {
+        sendLibrary();
+        return;
+    }
+    dispatchEndpoint(request);
+}
+
+void CompanionSerial::sendFailure(companion::api::HttpError error) {
+    sendError(requestId_, error.status, std::move(error.error.code), std::move(error.error.message),
+              std::move(error.error.field));
+}
+
+void CompanionSerial::installBook(httpd_req_t& request) {
+    auto result = api_.installLibraryItem(request);
+    if (!result) {
+        sendFailure(std::move(result.error()));
+        return;
+    }
+    sendResponse(requestId_, 201, std::move(*result));
+}
+
+void CompanionSerial::sendLibrary() {
+    std::string json{"["};
+    for (size_t index = 0; index < api_.storage_.books().size(); ++index) {
+        auto book = api_.encodeBook(index);
+        if (!book) {
+            sendFailure(std::move(book.error()));
+            return;
+        }
+        if (index != 0)
+            json += ',';
+        json += *book;
+    }
+    json += ']';
+    sendResponse(requestId_, 200, std::move(json));
+}
+
+void CompanionSerial::dispatchEndpoint(httpd_req_t& request) {
+    namespace api = companion::api;
+
     const auto failed = [this](api::HttpError error) {
-        sendError(requestId_, error.status, std::move(error.error.code), std::move(error.error.message),
-                  std::move(error.error.field));
+        sendFailure(std::move(error));
     };
     const auto sendValue = [this, &failed]<typename T>(api::Result<T> result, int status = 200) {
         if (!result) {
@@ -441,28 +489,11 @@ void CompanionSerial::dispatchRequest(companion::BufferedRequest& buffered) {
         return;
     }
 
-    const std::lock_guard operationLock{api_.operationsMutex_};
     const std::string_view method = request_.method;
     const std::string_view path = request_.path;
 
     if (method == "GET" && path == "/api/v2/device") {
         sendValue(api_.getDevice(request));
-        return;
-    }
-    if (method == "GET" && path == "/api/v2/library") {
-        std::string json{"["};
-        for (size_t index = 0; index < api_.storage_.books().size(); ++index) {
-            auto book = api_.encodeBook(index);
-            if (!book) {
-                failed(std::move(book.error()));
-                return;
-            }
-            if (index != 0)
-                json += ',';
-            json += *book;
-        }
-        json += ']';
-        sendResponse(requestId_, 200, std::move(json));
         return;
     }
     if (method == "GET" && path == "/api/v2/themes") {
@@ -505,15 +536,6 @@ void CompanionSerial::dispatchRequest(companion::BufferedRequest& buffered) {
         return;
     }
 
-    if (method == "POST" && path == "/api/v2/library") {
-        auto result = api_.installLibraryItem(request);
-        if (!result) {
-            failed(std::move(result.error()));
-            return;
-        }
-        sendResponse(requestId_, 201, std::move(*result));
-        return;
-    }
     if (method == "POST" && path == "/api/v2/themes") {
         sendLocated(api_.postTheme(request));
         return;

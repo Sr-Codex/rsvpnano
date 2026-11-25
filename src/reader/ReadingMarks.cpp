@@ -156,6 +156,21 @@ namespace reading {
         return dxPixels < 0 ? -steps : steps;
     }
 
+    void ScrubEdge::finger(int x, int width, int fingerSteps, uint32_t nowMs) {
+        const int now = fingerSteps < 0 && x <= kScrubEdgePx                ? -1
+                      : fingerSteps > 0 && x >= width - 1 - kScrubEdgePx ? 1
+                                                                           : 0;
+        if (now != side) dueMs = nowMs + kScrubEdgeDelayMs;
+        side = now;
+    }
+
+    int ScrubEdge::due(uint32_t nowMs) {
+        if (side == 0 || static_cast<int32_t>(nowMs - dueMs) < 0) return 0;
+        dueMs = nowMs + kScrubEdgeRepeatMs;
+        steps += side;
+        return side;
+    }
+
     bool isRewindSwipe(int minDx, int maxAbsDy, uint32_t durationMs) {
         return minDx <= -kRewindSwipeMinPx && -minDx > maxAbsDy && durationMs <= kRewindSwipeMaxMs;
     }

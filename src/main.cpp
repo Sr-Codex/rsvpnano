@@ -10,6 +10,11 @@
 
 App app;
 
+// Pilha do laço principal: 16 KB (o padrão do Arduino é 8). Receber um livro pela USB (dispatchRequest → instalar → índice →
+// posição → FAT) estourava os 8 KB e reiniciava a placa (lume.27, 2026-11-25). Folga medida: `loopStackMinFree` em
+// GET /api/v2/device.
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);
+
 // ADR-010: o core Arduino marcaria a imagem OTA como valida ANTES do setup(). Adiamos: quem confirma e o app, quando
 // esta saudavel (src/update/OtaRollback.*). Sem isto, um firmware que sobe e trava nao voltaria sozinho.
 extern "C" bool verifyRollbackLater() {

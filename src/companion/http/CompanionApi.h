@@ -10,6 +10,7 @@
 #include <expected>
 #include <mutex>
 #include <optional>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -81,6 +82,12 @@ private:
     companion::api::Result<StorageMigration::Report> repairStorage(httpd_req_t& request);
 
     // Library
+    struct ReceivedBook {
+        std::string path;
+        BookMetadata metadata;
+        reading::BookIdentity identity;
+    };
+    [[gnu::noinline]] companion::api::Result<std::unique_ptr<ReceivedBook>> receiveLibraryItem(httpd_req_t& request);
     companion::api::Result<std::string> installLibraryItem(httpd_req_t& request);
     companion::api::Result<> deleteLibraryItem(httpd_req_t& request);
     companion::api::Result<> putBookPosition(httpd_req_t& request);
@@ -235,6 +242,10 @@ private:
                                                 std::string_view suffix = {}) const;
 
     // Shared domain helpers
+    [[gnu::noinline]] companion::api::Result<std::string> encodeBookJson(const BookLibrary::Entry& bookEntry,
+                                                                         const BookMetadata& bookMeta,
+                                                                         const reading::BookIdentity* identity,
+                                                                         const reading::State* reading);
     companion::api::Result<std::string> encodeBook(size_t index, const BookMetadata* availableMetadata = nullptr,
                                                    const reading::BookIdentity* availableIdentity = nullptr);
     companion::api::Result<std::string> readSelectionId(httpd_req_t& request);

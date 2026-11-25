@@ -47,6 +47,8 @@ namespace companion::api {
         uint32_t largestInternalBlock = 0;   // maior bloco interno livre (fragmentacao)
         uint32_t minFreeInternalHeap = 0;    // minimo historico da heap interna desde o boot
         uint32_t freePsram = 0;              // PSRAM livre
+        uint32_t loopStackSize = 0;          // pilha do laco principal (loopTask), em bytes
+        uint32_t loopStackMinFree = 0;       // menor folga que ela ja teve desde o boot (estouro reinicia a placa)
         uint32_t uptimeSeconds = 0;
         std::string lastResetReason;         // esp_reset_reason(): "power_on", "software", "panic", "task_wdt", "deep_sleep"...
         std::string wakeCause;               // esp_sleep_get_wakeup_cause(): "undefined" (boot normal), "timer", "ext0"...

@@ -9,8 +9,10 @@
 #include <string>
 #include <vector>
 
+#include <esp_http_server.h>
 #include <improv.h>
 
+#include "companion/http/CompanionHttp.h"
 #include "companion/serial/CompanionSerialProtocol.h"
 
 class CompanionApi;
@@ -55,10 +57,15 @@ private:
     void sendImprovState(improv::State state);
     void sendImprovError(improv::Error error);
     void sendImprovResponse(improv::Command command, const std::vector<std::string>& values);
+    [[gnu::noinline]] void receiveBytes();
     void readFrames();
     void handleFrame(companion::serial::Frame frame);
     void handleRequestEnd(const companion::serial::Frame& frame);
     void dispatchRequest(companion::BufferedRequest& buffered);
+    [[gnu::noinline]] void dispatchEndpoint(httpd_req_t& request);
+    [[gnu::noinline]] void installBook(httpd_req_t& request);
+    [[gnu::noinline]] void sendLibrary();
+    [[gnu::noinline]] void sendFailure(companion::api::HttpError error);
     void sendResponse(uint32_t requestId, int status, std::string body);
     void sendNextResponseChunk();
     void sendError(uint32_t requestId, int status, std::string code, std::string message,
