@@ -1,3 +1,12 @@
+# Lume Nano fork (read first)
+
+This is the `Sr-Codex/rsvpnano` fork. The product line is **`feat/app-tempo`** (Lume Nano firmware, releases `v0.2.0-rev2.1-lume.N`,
+installed by OTA). Publishing a release needs the owner's explicit approval. This repository is public: no personal data, purchased
+assets, tokens or Wi-Fi names. Run `pio test -e native_test` and `sim/verificar_leitor.py` (reader changes) before calling work done.
+Never edit `*.generated.*` by hand. The section below comes unchanged from upstream and applies when proposing work **to upstream**.
+
+---
+
 # RSVP Nano UI and dictionary release
 
 Read `docs/releases/ui-dictionary-preview.md` for scope and release requirements.

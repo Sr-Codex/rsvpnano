@@ -17,3 +17,8 @@ unmodified. `src/ui/icons/EmojiSprites.generated.*` are RGB565 + alpha sprites r
 `tools/generate_emoji_sprites.py`. Full licence text: `assets/icons/fluent/LICENSE`.
 
 > MIT License — Copyright (c) Microsoft Corporation.
+
+## JPEGDEC 1.8.5 (Apache-2.0)
+
+Book covers are decoded with JPEGDEC by Larry Bank (https://github.com/bitbank2/JPEGDEC), fetched at build time from the commit
+pinned in `platformio.ini` and not vendored here. Full licence text: `LICENSE` in that repository.

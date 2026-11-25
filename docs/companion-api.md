@@ -29,6 +29,7 @@ over USB in a browser supporting Web Serial.
 | `DELETE` | `/api/v2/library/{id}` | `204` |
 | `PUT` | `/api/v2/library/{id}/position` | `204` |
 | `PUT` | `/api/v2/library/{id}/language-fonts` | `204` |
+| `PUT`, `DELETE` | `/api/v2/library/{id}/cover` | `204` (`PUT` body: JPEG or PNG, up to 2 MB; `DELETE` returns to the generated stand-in) |
 | `GET` | `/api/v2/themes` | Bare array of `{ "id": "…", "name": "…" }` |
 | `POST` | `/api/v2/themes` | Created theme (`201` and `Location`) |
 | `DELETE` | `/api/v2/themes/{id}` | `204` |
@@ -51,9 +52,12 @@ over USB in a browser supporting Web Serial.
 | `PUT` | `/api/v2/feeds` | `204` |
 | `GET` | `/api/v2/focus-timers` | Bare array of timers |
 | `PUT` | `/api/v2/focus-timers` | `204` |
-| `GET` | `/api/v2/tempo/ticktick` | `{ "configurado": true, "tag": "…", "lista": "", "coluna": "", "ultimaSync": "AAAA-MM-DDTHH:MM:SSZ", "erro": "" }` |
+| `GET` | `/api/v2/tempo/ticktick` | `{ "configurado": true, "tag": "…", "lista": "", "coluna": "", "ultimaSync": "AAAA-MM-DDTHH:MM:SSZ", "erro": "", "erroHabitos": "" }` |
 | `PUT` | `/api/v2/tempo/ticktick` | `204` |
 | `PUT` | `/api/v2/tempo/projetos` | `204` |
+| `PUT` | `/api/v2/tempo/habitos` | `204` (body: `/tempo/habitos.json`, up to 48 KB) |
+| `PUT` | `/api/v2/som/teste` | `204`, **USB only** (`{ "som": 0–11, "ganho": 0–4 }`; plays a sound for volume tuning) |
+| `POST` | `/api/v2/storage/repair` | Repair result |
 
 ### Diagnóstico em `GET /api/v2/device`
 
@@ -84,8 +88,9 @@ indicam fila acumulando (render mais lento que a leitura do toque, 30 ms na 3.49
 `PUT /api/v2/tempo/ticktick` recebe `{ "token": "…", "lista": "PROJETOS", "coluna": "AGORA" }` (qualquer um; token vazio apaga a
 integração). Os projetos do Tempo são as tarefas abertas da coluna `coluna` da lista `lista` (padrões `AGORA` / `PROJETOS`;
 o nome só precisa *conter* o texto, sem diferenciar maiúsculas nem emoji: "🎯 PROJETOS", "🚀 AGORA"). O campo antigo `tag`
-continua aceito e gravado, mas a sincronização não o usa mais. O token fica só na NVS criptografada (`DeviceSecrets`) e **nunca** é devolvido: o `GET` mostra apenas
-`configurado`, `tag`, `ultimaSync` (UTC, vazio = nunca) e `erro` (último erro, ex. `401: token inválido ou expirado`,
+continua aceito e gravado, mas a sincronização não o usa mais. O token fica só na NVS (`DeviceSecrets`), que **só é criptografada se o usuário ligar a criptografia em Ajustes** (grava uma chave no eFuse,
+sem volta; por padrão a NVS não é criptografada), e **nunca** é devolvido pela API: o `GET` mostra apenas
+`configurado`, `tag`, `lista`, `coluna`, `ultimaSync` (UTC, vazio = nunca), `erroHabitos` (falha só da parte dos hábitos) e `erro` (último erro, ex. `401: token inválido ou expirado`,
 `Sem rede: Wi-Fi não conectou`; vazio = última tentativa deu certo; fica em RAM, zera no reinício).
 `PUT /api/v2/tempo/projetos` recebe o JSON pronto (esquema de `/tempo/projetos.json`, até 96 KB), valida e grava de
 forma atômica no cartão SD. Com Wi-Fi e token, a própria placa sincroniza com `api.ticktick.com` ao abrir o launcher/Tempo

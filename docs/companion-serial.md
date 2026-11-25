@@ -1,9 +1,10 @@
 # USB companion protocol
 
-The browser opens the existing CDC port at 115200 baud and sends
-`RSVPNANO/COMPANION/1\n`. The reader answers with `READY`, `BUSY MSC`, or
-`UNSUPPORTED` on the same line. Companion mode never changes line signals or
-opens the reset-triggering 1200-baud rate.
+The browser opens the existing CDC port at 115200 baud, asserts DTR and RTS, and
+sends `RSVPNANO/COMPANION/1\n`. The reader answers on the same line with
+`RSVPNANO/COMPANION/1 READY persistent`, or `BUSY MSC` while the card is exposed
+as USB storage. Clients must accept the `persistent` suffix; see "USB connection
+lifetime" in `companion-api.md`. Never open the reset-triggering 1200-baud rate.
 
 After `READY`, traffic uses resynchronizable `RSV2` frames:
 
@@ -27,8 +28,9 @@ in flight. JSON request metadata carries `method`, `path`, `query`,
 
 Large request bodies are spooled to a temporary SD file, checked for final
 size and CRC, then passed to the same endpoint operations and temporary-upload
-logic used by HTTP. Cancellation, checksum failure, disconnect, and the
-15-second traffic timeout remove the spool. Settings persistence remains
+logic used by HTTP. Cancellation, checksum failure, and disconnect remove the
+spool. There is no idle timeout: the session lasts until the host closes the
+port, the cable disconnects, or a transport error ends it. Settings persistence remains
 deferred to `SettingsStore::update()` on the app loop.
 
 Improv Serial is recognized before a companion handshake. It only provisions

@@ -109,7 +109,8 @@ log gravados pelo app ficam em `sim/state/sd/tempo/estado.json` e `sim/state/sd/
 Implementação: `sim/support/` (Arduino, FS, Preferences, FreeRTOS, ESP-IDF mínimos), `sim/platform/`
 (placa virtual: tela, toque, botões, energia, SD, IMU), `sim/stubs/` (rede/USB/OTA indisponíveis),
 `sim/main.cpp` (janela SDL, roteiro, PNG), `sim/pio_sim.py` (integração PlatformIO). O firmware da placa
-não muda: nenhum arquivo de `src/` foi alterado para o simulador.
+não muda de comportamento. `src/` só tem trechos sob `#if defined(LUME_SIM)` em quatro arquivos (`app/App.cpp`, `board/BoardClock.cpp`,
+`platforms/waveshare_lcd_349/BoardDeepSleep.cpp`, `update/OtaRollback.cpp`).
 
 **Funcionalidade nova que usar hardware** (sensor, rádio, áudio…) precisa de um equivalente em
 `sim/platform/` ou `sim/stubs/` — senão o `native_sim` não linka.
