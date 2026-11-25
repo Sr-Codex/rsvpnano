@@ -172,16 +172,17 @@ def main() -> int:
         conferir(bool(frente) and palavra_no_arquivo(arquivo) == frente[2], "parado, gravou",
                  f"o cartão ficou com a palavra {palavra_no_arquivo(arquivo)}")
 
-        # Borda (lume.28): o dedo chega ao fim da tela e fica parado. Espera 0,5 s e anda 1 frase a cada 0,5 s, sem novas
-        # amostras de toque. O arrasto conta a partir da 1ª amostra (400): 400 → 620 = 3 frases
+        # Borda (lume.28): o dedo chega ao fim da tela e fica parado. Espera 0,5 s e anda 1 frase a cada 0,5 s. O arrasto conta a partir da 1ª amostra (400): 400 → 620 = 3 frases
         # do dedo; parado 2,7 s na borda = 5 frases a mais. Folga de 1 para a tela lenta.
-        def na_borda(xs, parado_ms, depois=()):
+        def na_borda(xs, parado_ms, depois=(), no_meio=""):
             arquivo.write_text(com_palavra(modelo, 400), encoding="utf-8")
             for sobra in arquivo.parent.glob(arquivo.name + ".*"):
                 sobra.unlink()
             t0, passo = 7000, 100
             roteiro = [f"down {xs[0]},{LINHA} @{t0}"]
             roteiro += [f"move {x},{LINHA} @{t0 + passo * i}" for i, x in enumerate(xs[1:], 1)]
+            if no_meio:  # o roteiro é executado na ordem escrita: antes do "up"
+                roteiro.append(no_meio)
             fim = t0 + passo * (len(xs) - 1) + parado_ms
             for x in depois:
                 roteiro.append(f"move {x},{LINHA} @{fim}")
@@ -207,6 +208,11 @@ def main() -> int:
         conferir(bool(puxou) and 4 <= puxou[0] <= 5, "borda, puxar de volta para",
                  f"{puxou[0]} frases depois de voltar 70 px e ficar 1,5 s parado (2 do dedo + a borda)" if puxou
                  else "nenhum arrasto")
+
+        lendo_na_borda = na_borda([320, 400, 480, 560, 620], 2700, no_meio="press boot @7600")
+        conferir(bool(lendo_na_borda) and lendo_na_borda[0] == 3, "borda, BOOT começou a ler: não pula",
+                 f"{lendo_na_borda[0]} frases (só as 3 do dedo; a borda não mexe nas palavras correndo)"
+                 if lendo_na_borda else "nenhum arrasto")
 
         arquivo.write_text(com_palavra(modelo, 60), encoding="utf-8")
         # Lendo: deslize rápido (240 ms) e depois um arrasto lento (1,2 s), que não pode fazer nada.

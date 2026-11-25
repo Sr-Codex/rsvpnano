@@ -63,7 +63,7 @@ over USB in a browser supporting Web Serial.
 
 Além da identidade (`ssid`, `firmwareVersion`, `otaAsset`), o handshake traz diagnóstico só de leitura, em RAM (zera no
 reinício): memória interna (`freeInternalHeap`, `largestInternalBlock`, `minFreeInternalHeap`), `freePsram`,
-`uptimeSeconds`, `lastResetReason`, `wakeCause` e o objeto **`touch`**, o medidor de atraso do toque
+`loopStackSize`/`loopStackMinFree` (pilha do laço principal e a menor folga desde o boot, em bytes), `uptimeSeconds`, `lastResetReason`, `wakeCause` e o objeto **`touch`**, o medidor de atraso do toque
 (`src/input/MedidorToque.h`). Para cada soltura do dedo tratada pelo laço do App, **atraso** = `millis()` no tratamento −
 instante em que a amostra foi lida do controlador; a **volta** é uma passada do laço que esvazia a fila de toques.
 

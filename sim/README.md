@@ -70,7 +70,7 @@ firmware os escreveu (sem brilho), para comparar com os mockups.
 **Verificação do leitor:** `python3 sim/verificar_leitor.py` roda o firmware sem janela, numa cópia descartável do
 `sim/state` e com a tela lenta (80 ms por quadro), e confere o que os testes nativos não alcançam: pausar grava a posição
 no cartão e ela sobrevive a um corte de energia; religar continua de onde parou; um arquivo de posição interrompido é
-recuperado do `.tmp`/`.bak`; arrastar com a leitura parada anda de frase em frase (e grava); com as palavras
+recuperado do `.tmp`/`.bak`; arrastar com a leitura parada anda de frase em frase (e grava) e, parado na borda, continua andando até soltar ou voltar; com as palavras
 correndo, um deslize rápido para a esquerda volta uma frase e segue lendo, e um arrasto lento não faz nada; desligar
 pelo botão grava uma vez só. Sai com código 1 se algo falhar. Opções: `--prog BINARIO`, `--state PASTA`, `--atraso MS`. Rode sempre que mexer em
 `library/ReadingProgress.*`, `reader/ReadingLoop.*` ou nos toques da tela de leitura.

@@ -30,9 +30,10 @@ namespace screens {
                            :std::to_string(pct)+"%";
     }
 
-    // Every frame, with or without a new touch sample: a still finger sends none.
+    // Every frame. A finger on the screen sends a sample every 30 ms even when still; if they stop without a release
+    // (a USB session takes the touches, for instance), scrubEdge_ stops too. Never moves the words that are running.
     void ReaderScreen::tickScrubEdge(uint32_t nowMs) {
-        if(!modernScrub_)return;
+        if(!modernScrub_ || session.playing)return;
         const int step=scrubEdge_.due(nowMs);
         if(step==0)return;
         const int wanted=scrubFingerSteps_+scrubEdge_.steps;

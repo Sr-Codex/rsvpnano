@@ -192,12 +192,20 @@ void test_scrub_edge() {
     TEST_ASSERT_EQUAL_INT(1, e.due(10500));
     TEST_ASSERT_EQUAL_INT(0, e.due(10999));
     TEST_ASSERT_EQUAL_INT(1, e.due(11000));
+    TEST_ASSERT_EQUAL_INT(0, e.due(11600)); // no sample for more than 1 s: the release was lost, it stops
+    e.finger(630, 640, 4, 14900);
     TEST_ASSERT_EQUAL_INT(1, e.due(15000)); // a slow frame walks one sentence, not a burst
     TEST_ASSERT_EQUAL_INT(0, e.due(15001));
     TEST_ASSERT_EQUAL_INT(3, e.steps);
     e.undo(); // end of the book
     TEST_ASSERT_EQUAL_INT(2, e.steps);
     // Pulling back stops it and keeps what was walked; coming back waits again.
+    e.finger(589, 640, 4, 15050); // trembling inside the 10 px slack: still at the edge
+    TEST_ASSERT_EQUAL_INT(1, e.side);
+    e.finger(588, 640, 4, 15080);
+    TEST_ASSERT_EQUAL_INT(0, e.side);
+    e.finger(589, 640, 4, 15090); // out: the slack does not bring it back in
+    TEST_ASSERT_EQUAL_INT(0, e.side);
     e.finger(500, 640, 3, 15100);
     TEST_ASSERT_EQUAL_INT(0, e.due(99000));
     TEST_ASSERT_EQUAL_INT(2, e.steps);
@@ -221,6 +229,7 @@ void test_scrub_edge() {
     e.reset();
     e.finger(639, 640, 2, 0xFFFFFF00u);
     TEST_ASSERT_EQUAL_INT(0, e.due(0xFFFFFFF0u));
+    e.finger(639, 640, 2, 0xFFFFFFF0u);
     TEST_ASSERT_EQUAL_INT(1, e.due(0xFFFFFF00u + 500u));
 }
 

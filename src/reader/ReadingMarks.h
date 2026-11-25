@@ -83,12 +83,15 @@ namespace reading {
     // acceleration) until it leaves the edge or is lifted. `steps` = sentences walked this way, kept for the rest of
     // the drag (finger steps are added to it), so pulling back from the edge undoes them one by one.
     inline constexpr int kScrubEdgePx = 40;
+    inline constexpr int kScrubEdgeSlackPx = 10;          // a trembling finger does not leave the edge
+    inline constexpr uint32_t kScrubEdgeLostMs = 1000;    // no sample for this long = the release was lost: stop
     inline constexpr uint32_t kScrubEdgeDelayMs = 500;
     inline constexpr uint32_t kScrubEdgeRepeatMs = 500;
     struct ScrubEdge {
         int steps = 0;
         int side = 0; // -1 = held at the left edge, +1 = at the right edge, 0 = not at an edge
         uint32_t dueMs = 0;
+        uint32_t sampleMs = 0;
 
         void reset() { *this = {}; }
         // Each touch sample. `fingerSteps` = scrubSentenceSteps of the finger: the edge only counts in the direction

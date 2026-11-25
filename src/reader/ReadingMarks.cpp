@@ -157,15 +157,17 @@ namespace reading {
     }
 
     void ScrubEdge::finger(int x, int width, int fingerSteps, uint32_t nowMs) {
-        const int now = fingerSteps < 0 && x <= kScrubEdgePx                ? -1
-                      : fingerSteps > 0 && x >= width - 1 - kScrubEdgePx ? 1
-                                                                           : 0;
+        const int left = kScrubEdgePx + (side < 0 ? kScrubEdgeSlackPx : 0);
+        const int right = width - 1 - kScrubEdgePx - (side > 0 ? kScrubEdgeSlackPx : 0);
+        const int now = fingerSteps < 0 && x <= left ? -1 : fingerSteps > 0 && x >= right ? 1 : 0;
+        sampleMs = nowMs;
         if (now != side) dueMs = nowMs + kScrubEdgeDelayMs;
         side = now;
     }
 
     int ScrubEdge::due(uint32_t nowMs) {
         if (side == 0 || static_cast<int32_t>(nowMs - dueMs) < 0) return 0;
+        if (static_cast<int32_t>(nowMs - sampleMs) > static_cast<int32_t>(kScrubEdgeLostMs)) return 0;
         dueMs = nowMs + kScrubEdgeRepeatMs;
         steps += side;
         return side;
