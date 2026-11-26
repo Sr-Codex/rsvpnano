@@ -27,6 +27,7 @@ namespace screens {
     public:
         Action draw(ui::Context& ui, uint32_t nowMs, Screen& screen, TempoScreen& tempo, fs::FS* filesystem,
                     const HabitosInfo& info);
+        std::optional<tempo::Aviso> pegarDose();
         void back(Screen& screen) const { screen = Screen::Home; }   // PWR
 
     private:
@@ -45,6 +46,7 @@ namespace screens {
         void iniciarCelebracao(const Cena& c, size_t indice, const tempo::ResultadoOcorrencia& r, bool pulo, double janelaAntes);
         void arrastar(ui::Context& ui, ui::Rect area, int& rolagemPx, int maximoPx);
 
+        std::optional<tempo::Aviso> dose_;
         bool aberta_ = false;
         uint32_t ultimoDesenhoMs_ = 0;
         uint32_t ultimaFilaMs_ = 0;

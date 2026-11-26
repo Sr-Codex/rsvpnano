@@ -9,6 +9,7 @@
 #include "tempo/Codec.h"
 #include "tempo/Habitos.h"
 #include "tempo/HabitosVista.h"
+#include "tempo/HabitosMes.h"
 #include "tempo/Lembretes.h"
 #include "tempo/Motor.h"
 #include "tempo/Parametros.h"
@@ -331,6 +332,19 @@ namespace {
         TEST_ASSERT_FALSE(ag.avaliar(e, 12 * 60 + 51, 101000, false).has_value());   // so uma vez
     }
 
+    void test_despertador_mantem_alvo_com_dois_lembretes_vencidos() {
+        auto e = estadoCom(lista({def("a", "Alfa", {"14:40"}), def("b", "Beta", {"08:00", "14:42"})}), 882);
+        AgendaLembretes agenda;
+        agenda.forcarAvisoInicial(e, 882);
+        const auto aviso = agenda.avaliar(e, 882, 100000, false);
+        TEST_ASSERT_TRUE(aviso.has_value());
+        TEST_ASSERT_EQUAL_STRING("b", aviso->habitoId.c_str());
+        TEST_ASSERT_EQUAL_INT(882, aviso->minuto);
+        TEST_ASSERT_EQUAL_INT(1, aviso->indiceNoDia);
+        TEST_ASSERT_EQUAL_INT(20261110, aviso->stamp);
+        TEST_ASSERT_EQUAL_INT(1, aviso->outros);
+    }
+
     void test_forcar_aviso_so_vale_para_o_minuto_do_alvo_e_pendentes() {
         const auto l = lista({def("al", "Almo\xC3\xA7o", {"12:30"}), def("de", "Dentes", {"12:00"})});
         Estado e = estadoCom(l, 12 * 60 + 40);
@@ -620,6 +634,23 @@ namespace {
         TEST_ASSERT_EQUAL_INT((int)DestinoDesfazer::CorrecaoEnfileirada, (int)desfazerNaFila(f3, itemFilaDoHabito(e, "md")));
         TEST_ASSERT_EQUAL_UINT(1, (unsigned)f3.size());
         TEST_ASSERT_EQUAL_FLOAT(1.0, f3[0].valor);
+    }
+
+    void test_desfazer_persiste_zero_depois_de_envio_sem_resposta() {
+        ItemFila feito{.id = "md", .stamp = 20261110, .valor = 1, .despachado = true};
+        std::vector<ItemFila> fila{feito};
+        aplicarEnvio(fila, feito, 0);
+        auto reiniciada = lerFila(serializarFila(fila));
+        auto zero = feito;
+        zero.valor = 0;
+        desfazerNaFila(reiniciada, zero);
+        aplicarEnvio(reiniciada, feito, 200); // resposta atrasada do primeiro POST
+        TEST_ASSERT_EQUAL_UINT(1, (unsigned)reiniciada.size());
+        TEST_ASSERT_TRUE(reiniciada[0].correcao);
+        TEST_ASSERT_TRUE(reiniciada[0].despachado);
+        TEST_ASSERT_EQUAL_FLOAT(0, reiniciada[0].valor);
+        aplicarEnvio(reiniciada, reiniciada.front(), 200);
+        TEST_ASSERT_TRUE(reiniciada.empty());
     }
 
     void test_log_desfeito_anula_o_evento_anterior() {
@@ -924,6 +955,61 @@ namespace {
         TEST_ASSERT_EQUAL_STRING("#A0EFED", volta.dia.ocorrencias[0].color.c_str());
     }
 
+    void test_mes_gregoriano_e_dias_unicos_com_desfazer() {
+        MesHabitos fev(chaveMes({2024, 2, 1})), agosto(chaveMes({2026, 8, 1}));
+        TEST_ASSERT_EQUAL_INT(29, fev.dias);
+        TEST_ASSERT_EQUAL_INT(6, agosto.primeiro);
+        TEST_ASSERT_EQUAL_INT(6, agosto.linhas());
+        DiasPorHabito dias;
+        EventoLog feito;
+        feito.tipo = "habito";
+        feito.projetoId = "a";
+        feito.resultado = "no_horario";
+        feito.projeto = "Caminhar";
+        EventoLog tarde = feito, desfazer = feito, pulado = feito;
+        tarde.planejadoMin = 900;
+        desfazer.resultado = "desfeito";
+        pulado.projetoId = "b";
+        pulado.resultado = "pulado";
+        std::vector<EventoLog> eventos{feito, tarde, desfazer, pulado};
+        incluirDia(dias, 31, 1, eventos);
+        TEST_ASSERT_EQUAL_UINT32(bitDia(31), dias.at("a").dias);
+        TEST_ASSERT_EQUAL_STRING("Caminhar", dias.at("a").nome.c_str());
+        TEST_ASSERT_FALSE(dias.contains("b"));
+        TEST_ASSERT_TRUE(dias.at("a").recentes[1]);
+        eventos = {feito, desfazer};
+        incluirDia(dias, 1, 0, eventos);
+        TEST_ASSERT_EQUAL_UINT32(bitDia(31), dias.at("a").dias);
+        TEST_ASSERT_FALSE(dias.at("a").recentes[0]);
+        eventos = {feito};
+        incluirDia(dias, 0, 32, eventos);
+        TEST_ASSERT_TRUE(dias.at("a").recentes[32]);
+        TEST_ASSERT_EQUAL_UINT32(bitDia(31), dias.at("a").dias);
+    }
+
+    void test_grade_semanal_desloca_na_segunda_e_cruza_virada_do_ano() {
+        const Data domingo{2027, 1, 3}, segunda{2027, 1, 4};
+        const auto dataCelula = [](const Data& hoje, int coluna, int linha) {
+            return dataDeSerial(diaSerial(hoje) - diasAtrasNaGrade(diaDaSemana(hoje), coluna, linha));
+        };
+        const Data quinta{2026, 12, 31};
+        TEST_ASSERT_TRUE(dataCelula(domingo, 11, 3) == quinta);
+        TEST_ASSERT_TRUE(dataCelula(segunda, 10, 3) == quinta);
+        TEST_ASSERT_TRUE(dataCelula(segunda, 10, 6) == domingo);
+        TEST_ASSERT_TRUE(dataCelula(segunda, 11, 0) == segunda);
+        TEST_ASSERT_EQUAL_INT(-1, diasAtrasNaGrade(0, 11, 1));
+        TEST_ASSERT_EQUAL_INT(83, diasAtrasNaGrade(6, 0, 0));
+    }
+
+    void test_cartao_mensal_escolhe_horario_por_id() {
+        Estado e = estadoCom(lista({def("a","A",{"08:00","18:00"}), def("b","B")}), 18*60);
+        auto i = horarioDoCartao(e,"a",18*60,{});
+        TEST_ASSERT_TRUE(i.has_value());
+        TEST_ASSERT_EQUAL_INT(18*60,e.dia.ocorrencias[*i].minuto);
+        i = horarioDoCartao(e,"a",18*60,8*60);
+        TEST_ASSERT_EQUAL_INT(8*60,e.dia.ocorrencias[*i].minuto);
+        TEST_ASSERT_FALSE(horarioDoCartao(e,"ausente",18*60,{}).has_value());
+    }
 } // namespace
 
 int main(int, char**) {
@@ -934,11 +1020,15 @@ int main(int, char**) {
     RUN_TEST(test_cartao_automatico_proximo_agora_atrasado_completo);
     RUN_TEST(test_cartao_futuro_distante_e_perdido_e_selecao);
     RUN_TEST(test_selecao_e_rolagem_da_lista);
+    RUN_TEST(test_mes_gregoriano_e_dias_unicos_com_desfazer);
+    RUN_TEST(test_grade_semanal_desloca_na_segunda_e_cruza_virada_do_ano);
+    RUN_TEST(test_cartao_mensal_escolhe_horario_por_id);
     RUN_TEST(test_totais_e_minuto_proximo);
     RUN_TEST(test_detector_pegada_dispara_uma_vez_e_rearma_so_quieto);
     RUN_TEST(test_lembrete_na_hora_uma_vez_e_sem_qualquer_hora);
     RUN_TEST(test_lembrete_atrasado_so_toca_com_aviso_forcado_do_despertar);
     RUN_TEST(test_forcar_aviso_so_vale_para_o_minuto_do_alvo_e_pendentes);
+    RUN_TEST(test_despertador_mantem_alvo_com_dois_lembretes_vencidos);
     RUN_TEST(test_recarga_so_com_sync_terminada_virada_ou_tela);
     RUN_TEST(test_recarga_nunca_com_a_sync_rodando);
     RUN_TEST(test_status_por_versao_nao_copia_a_cada_segundo);
@@ -952,6 +1042,7 @@ int main(int, char**) {
     RUN_TEST(test_desfazer_pular_e_medicacao_atrasada_coracoes);
     RUN_TEST(test_desfazer_respeita_teto_de_cr_e_recusa_se_algo_mudou);
     RUN_TEST(test_desfazer_fila_remove_substitui_ou_enfileira_correcao);
+    RUN_TEST(test_desfazer_persiste_zero_depois_de_envio_sem_resposta);
     RUN_TEST(test_log_desfeito_anula_o_evento_anterior);
     RUN_TEST(test_lembrete_ja_avisada_nao_toca_de_novo_na_hora);
     RUN_TEST(test_icones_por_tipo_e_nome);

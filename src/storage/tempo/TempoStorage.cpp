@@ -8,24 +8,73 @@
 
 namespace TempoStorage {
     namespace {
-        std::mutex gQueueMutex;
+        std::mutex gRegistroMutex;
 
-        std::vector<tempo::ItemFila> readQueue(fs::FS& filesystem) {
-            auto text = StorageFiles::readTextFile(filesystem, tempo::kCaminhoFilaHabitos, tempo::kMaxBytesFila);
-            if (!text) text = StorageFiles::readTextFile(filesystem, tempo::kCaminhoFilaHabitosBak, tempo::kMaxBytesFila);
-            return text ? tempo::lerFila(*text) : std::vector<tempo::ItemFila>{};
+        std::optional<std::vector<tempo::ItemFila>> readQueue(fs::FS& fs) {
+            const char* path = tempo::kCaminhoFilaHabitos;
+            if (!fs.exists(path)) path = tempo::kCaminhoFilaHabitosBak;
+            if (!fs.exists(path)) return std::vector<tempo::ItemFila>{};
+            File f = fs.open(path, FILE_READ);
+            if (!f || f.isDirectory()) return std::nullopt;
+            if (f.size() == 0) return std::vector<tempo::ItemFila>{};
+            f.close();
+            auto texto = StorageFiles::readTextFile(fs, path, tempo::kMaxBytesFila);
+            if (!texto) return std::nullopt;
+            auto fila = tempo::lerFila(*texto);
+            size_t linhas = 0;
+            for (std::string_view resto = *texto; !resto.empty();) {
+                const auto fim = resto.find('\n');
+                if (!resto.substr(0, fim).empty()) ++linhas;
+                if (fim == resto.npos) break;
+                resto.remove_prefix(fim + 1);
+            }
+            if (linhas != fila.size()) return std::nullopt;
+            return fila;
         }
 
         bool writeQueue(fs::FS& filesystem, const std::vector<tempo::ItemFila>& queue) {
             if (!TempoStorage::ensureFolders()) return false;
-            return StorageFiles::writeFileAtomic(filesystem, tempo::kCaminhoFilaHabitos, tempo::kCaminhoFilaHabitosTmp,
-                                                 tempo::kCaminhoFilaHabitosBak, tempo::serializarFila(queue))
-                .has_value();
+            const auto texto = tempo::serializarFila(queue);
+            if (!StorageFiles::writeFileAtomic(filesystem, tempo::kCaminhoFilaHabitos, tempo::kCaminhoFilaHabitosTmp,
+                                               tempo::kCaminhoFilaHabitosBak, texto)) return false;
+            if (!filesystem.exists(tempo::kCaminhoFilaHabitos)) return false;
+            const auto salvo = readQueue(filesystem);
+            return salvo && tempo::serializarFila(*salvo) == texto;
         }
     } // namespace
 
     bool ensureFolders() {
         return StorageFiles::ensureDirectory(tempo::kPastaTempo) && StorageFiles::ensureDirectory(tempo::kPastaLog);
+    }
+
+    bool recuperarRegistroHabito(fs::FS& fs) {
+        const std::lock_guard lock{gRegistroMutex};
+        return registro::recuperar(fs);
+    }
+
+    GravacaoHabito registrarHabito(fs::FS& fs, const tempo::Estado& novo, const std::vector<tempo::EventoLog>& eventos,
+                                   const tempo::ItemFila* item, bool desfazer) {
+        const std::lock_guard lock{gRegistroMutex};
+        if (!registro::recuperar(fs) || !ensureFolders()) return GravacaoHabito::Recusada;
+        std::string linhas;
+        for (const auto& evento : eventos) {
+            const auto linha = tempo::linhaLog(evento);
+            if (linha.empty()) return GravacaoHabito::Recusada;
+            linhas += linha;
+        }
+        std::string jsonFila;
+        if (item) {
+            auto fila = readQueue(fs);
+            if (!fila) return GravacaoHabito::Recusada;
+            const bool existe = std::any_of(fila->begin(), fila->end(), [&](const auto& i) {
+                return i.id == item->id && i.stamp == item->stamp;
+            });
+            if (!existe && fila->size() >= tempo::kMaxFila) return GravacaoHabito::FilaCheia;
+            if (desfazer) tempo::desfazerNaFila(*fila, *item);
+            else tempo::enfileirar(*fila, *item);
+            jsonFila = tempo::serializarFila(*fila);
+        }
+        return registro::gravar(fs, novo, linhas, item ? std::optional<std::string_view>{jsonFila} : std::nullopt);
     }
 
     bool loadProjects(fs::FS& filesystem, tempo::ListaProjetos& out) {
@@ -45,6 +94,10 @@ namespace TempoStorage {
     }
 
     bool loadState(fs::FS& filesystem, tempo::Estado& out) {
+        const std::lock_guard lock{gRegistroMutex};
+        if (!registro::recuperar(filesystem)) {
+            return registro::lerEstadoPendente(filesystem, out);
+        }
         auto text = StorageFiles::readTextFile(filesystem, tempo::kCaminhoEstado, tempo::kMaxBytesEstado);
         if (text && tempo::lerEstado(*text, out)) return true;
         // gravacao interrompida entre os renames: o .bak guarda a ultima versao boa
@@ -53,6 +106,10 @@ namespace TempoStorage {
     }
 
     tempo::cartao::Leitura loadStateChecked(fs::FS& filesystem, tempo::Estado& out) {
+        const std::lock_guard lock{gRegistroMutex};
+        if (!registro::recuperar(filesystem)) {
+            return registro::lerEstadoPendente(filesystem, out) ? tempo::cartao::Leitura::Ok : tempo::cartao::Leitura::Ilegivel;
+        }
         using tempo::cartao::Arquivo;
         const auto ler = [&](const char* caminho, tempo::Estado& destino) {
             auto text = StorageFiles::readTextFile(filesystem, caminho, tempo::kMaxBytesEstado);
@@ -78,6 +135,8 @@ namespace TempoStorage {
     }
 
     bool saveState(fs::FS& filesystem, const tempo::Estado& state) {
+        const std::lock_guard lock{gRegistroMutex};
+        if (!registro::recuperar(filesystem)) return false;
         const std::string json = tempo::serializarEstado(state);
         if (json.empty() || !ensureFolders()) return false;
         return StorageFiles::writeFileAtomic(filesystem, tempo::kCaminhoEstado, tempo::kCaminhoEstadoTmp,
@@ -86,6 +145,8 @@ namespace TempoStorage {
     }
 
     bool loadLogDay(fs::FS& filesystem, const tempo::Data& date, std::vector<tempo::EventoLog>& out) {
+        const std::lock_guard lock{gRegistroMutex};
+        if (registro::diaPendente(filesystem, date)) return false;
         const std::string path = tempo::caminhoLog(date);
         if (!filesystem.exists(path.c_str())) return false;
         auto text = StorageFiles::readTextFile(filesystem, path.c_str(), 256 * 1024);
@@ -175,34 +236,42 @@ namespace TempoStorage {
             .has_value();
     }
 
-    std::vector<tempo::ItemFila> loadQueue(fs::FS& filesystem) {
-        const std::lock_guard lock{gQueueMutex};
+    std::optional<std::vector<tempo::ItemFila>> loadQueue(fs::FS& filesystem) {
+        const std::lock_guard lock{gRegistroMutex};
+        if (!registro::recuperar(filesystem)) return std::nullopt;
         return readQueue(filesystem);
     }
 
-    bool enqueueCheckin(fs::FS& filesystem, const tempo::ItemFila& item) {
-        const std::lock_guard lock{gQueueMutex};
-        auto queue = readQueue(filesystem);
-        tempo::enfileirar(queue, item);
-        return writeQueue(filesystem, queue);
-    }
-
-    tempo::DestinoDesfazer undoCheckin(fs::FS& filesystem, const tempo::ItemFila& item, bool& ok) {
-        const std::lock_guard lock{gQueueMutex};
-        auto queue = readQueue(filesystem);
-        const auto destino = tempo::desfazerNaFila(queue, item);
-        ok = writeQueue(filesystem, queue);
-        return destino;
+    std::optional<std::vector<tempo::ItemFila>> filaParaEnvio(fs::FS& filesystem) {
+        const std::lock_guard lock{gRegistroMutex};
+        if (!registro::recuperar(filesystem)) return std::nullopt;
+        auto fila = readQueue(filesystem);
+        if (!fila) return std::nullopt;
+        std::vector<tempo::ItemFila> lote;
+        bool mudou = false;
+        for (auto& i : *fila) {
+            if (!tempo::devePreEnviar(i)) continue;
+            if (!i.despachado) mudou = true;
+            i.despachado = true;
+            lote.push_back(i);
+        }
+        // Gravar antes de expor o lote ao HTTP. Uma resposta perdida ou um reinício conserva o Desfazer.
+        if (mudou && !writeQueue(filesystem, *fila)) return std::nullopt;
+        return lote;
     }
 
     bool applyQueueResults(fs::FS& filesystem, const std::vector<std::pair<tempo::ItemFila, int>>& results) {
-        const std::lock_guard lock{gQueueMutex};
+        const std::lock_guard lock{gRegistroMutex};
+        if (!registro::recuperar(filesystem)) return false;
         auto queue = readQueue(filesystem);
-        for (const auto& [item, http] : results) tempo::aplicarEnvio(queue, item, http);
-        return writeQueue(filesystem, queue);
+        if (!queue) return false;
+        for (const auto& [item, http] : results) tempo::aplicarEnvio(*queue, item, http);
+        return writeQueue(filesystem, *queue);
     }
 
     bool appendLog(fs::FS& filesystem, const tempo::Data& date, const tempo::EventoLog& event) {
+        const std::lock_guard lock{gRegistroMutex};
+        if (!registro::recuperar(filesystem)) return false;
         const std::string line = tempo::linhaLog(event);
         if (line.empty() || !ensureFolders()) return false;
         File file = filesystem.open(tempo::caminhoLog(date).c_str(), FILE_APPEND);

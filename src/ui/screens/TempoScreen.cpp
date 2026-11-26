@@ -802,20 +802,16 @@ namespace screens {
         if (!habitos_.habitos.empty() || !estado_.dia.ocorrencias.empty()) tempo::reconciliarDia(estado_, habitos_);
     }
 
-    void TempoScreen::gravarEventoHabito(fs::FS* filesystem, const tempo::ResultadoOcorrencia& r, std::string_view origem) {
-        if (filesystem == nullptr || !r.registrado || estado_.dia.data.ano < tempo::kAnoMinimoValido) return;
-        TempoStorage::appendLog(*filesystem, estado_.dia.data, tempo::eventoHabito(estado_, r, origem));
-    }
-
     void TempoScreen::registrarHabitoMeditacao(fs::FS* filesystem) {
-        if (filesystem == nullptr) filesystem = fs_;
-        if (filesystem == nullptr) return;
+        if (!filesystem || estado_.dia.data != dataPendente_) return;
+        auto novo = std::make_unique<tempo::Estado>(estado_);
+        novo->dia.minutoAtual = minutoMeditacao_;
         std::vector<tempo::ItemFila> fila;
-        const auto r = tempo::marcarMeditacaoPorTimer(estado_, fila);
-        if (!r.registrado) return;
-        // Etapa 2: nada vai para a fila nem para o log antes de confirmarSaque (o Desfazer da batalha tem que poder apagar tudo).
-        filaMed_ = std::move(fila);
-        if (estado_.dia.data.ano >= tempo::kAnoMinimoValido) eventoMedPend_ = tempo::eventoHabito(estado_, r, "timer");
+        const auto r = tempo::marcarMeditacaoPorTimer(*novo, fila);
+        if (!r.registrado || fila.empty()) return;
+        const auto evento = tempo::eventoHabito(*novo, r, "timer");
+        novo->dia.minutoAtual = estado_.dia.minutoAtual;
+        if (guardarRegistro(*filesystem, *novo, {evento}, &fila.front())) checkinNovo_ = true;
     }
 
     void TempoScreen::atualizarHabitos(fs::FS* filesystem, uint32_t nowMs) {
@@ -828,36 +824,61 @@ namespace screens {
         }
         garantirDia(nowMs);
         if (syncAtiva_) return;                               // idem para os check-ins do celular
-        bool mudou = false;
         tempo::ArquivoCheckins remotos;
-        if (TempoStorage::loadHabitCheckins(*filesystem, remotos)) {
-            const auto resultados = tempo::aplicarCheckinsRemotos(estado_, remotos.checkins);
-            for (const auto& r : resultados) gravarEventoHabito(filesystem, r, "ticktick");
-            mudou = !resultados.empty();
+        if (TempoStorage::loadHabitCheckins(*filesystem, remotos) && !remotos.checkins.empty()) {
+            const auto pendentes = TempoStorage::loadQueue(*filesystem);
+            if (!pendentes) return; // Há uma possível correção local que tem precedência sobre o cache remoto.
+            auto novo = std::make_unique<tempo::Estado>(estado_);
+            std::erase_if(remotos.checkins, [&](const auto& remoto) {
+                return std::any_of(pendentes->begin(), pendentes->end(), [&](const auto& i) {
+                    return i.correcao && i.id == remoto.habitId && i.stamp == remoto.stamp;
+                });
+            });
+            const auto resultados = tempo::aplicarCheckinsRemotos(*novo, remotos.checkins);
+            std::vector<tempo::EventoLog> eventos;
+            for (const auto& r : resultados) eventos.push_back(tempo::eventoHabito(*novo, r, "ticktick"));
+            if (!eventos.empty()) guardarRegistro(*filesystem, *novo, eventos);
         }
-        if (mudou) salvar(filesystem);
+    }
+
+    bool TempoScreen::guardarRegistro(fs::FS& fs, tempo::Estado& novo, const std::vector<tempo::EventoLog>& eventos,
+                                      const tempo::ItemFila* item, bool desfazer) {
+        if (avisoRegistro_ == AvisoRegistro::Pendente && !TempoStorage::recuperarRegistroHabito(fs)) return false;
+        if (!tempo::cartao::podeGravar(cartao_)) {
+            avisoRegistro_ = AvisoRegistro::Recusado;
+            return false;
+        }
+        const auto gravacao = TempoStorage::registrarHabito(fs, novo, eventos, item, desfazer);
+        if (gravacao == TempoStorage::GravacaoHabito::FilaCheia) {
+            avisoRegistro_ = AvisoRegistro::FilaCheia;
+            return false;
+        }
+        if (gravacao == TempoStorage::GravacaoHabito::Recusada) {
+            avisoRegistro_ = AvisoRegistro::Recusado;
+            return false;
+        }
+        estado_ = std::move(novo);
+        avisoRegistro_ = gravacao == TempoStorage::GravacaoHabito::Completa ? AvisoRegistro::Nenhum : AvisoRegistro::Pendente;
+        return true; // Com marcador durável, o registro já pertence ao estado e nunca deve ser repetido.
     }
 
     bool TempoScreen::marcarHabito(uint32_t nowMs, fs::FS* filesystem, size_t indice, tempo::ResultadoOcorrencia* resultado) {
         if (filesystem == nullptr) return false;
         if (!carregado_) carregar(filesystem, true, nowMs);
-        garantirDia(nowMs);
+        if (indice >= estado_.dia.ocorrencias.size() || estado_.dia.data != tempo::agora(nowMs).data) return false;
+        auto novo = std::make_unique<tempo::Estado>(estado_);
         std::vector<tempo::ItemFila> fila;
         const int nivelAntes = tempo::nivelDeXp(estado_.xpTotal);
-        tempo::InstanteHabito instante = tempo::capturarHabito(estado_, indice);
-        const auto r = tempo::marcarFeita(estado_, indice, fila);
-        if (!r.registrado) return false;
-        tempo::fecharCapturaHabito(instante, estado_);
+        auto instante = tempo::capturarHabito(estado_, indice);
+        const auto r = tempo::marcarFeita(*novo, indice, fila);
+        if (!r.registrado || fila.empty()) return false;
+        tempo::fecharCapturaHabito(instante, *novo);
+        if (!guardarRegistro(*filesystem, *novo, {tempo::eventoHabito(*novo, r, "")}, &fila.front())) return false;
         desfazer_ = std::move(instante);
         if (resultado != nullptr) *resultado = r;
-        for (const auto& item : fila) TempoStorage::enqueueCheckin(*filesystem, item);
-        if (!fila.empty()) {
-            checkinNovo_ = true;   // "Feito" envia logo, mas so depois da janela do "Desfazer"
-            checkinLiberaEmMs_ = nowMs + tempo::kDesfazerMs + 500;
-        }
+        checkinNovo_ = true;
+        checkinLiberaEmMs_ = nowMs + tempo::kDesfazerMs + 500;
         lembretes_.resolvida(estado_, indice);
-        gravarEventoHabito(filesystem, r, "");
-        salvar(filesystem);
         // Um som so: dia completo (todos resolvidos) e nivel valem mais que o "feito" simples.
         const auto totais = tempo::totaisDoDia(estado_);
         const bool diaCompleto = totais.feitas > 0 && totais.pendentes == 0 && totais.esquecidas == 0;
@@ -871,15 +892,15 @@ namespace screens {
     bool TempoScreen::pularHabito(uint32_t nowMs, fs::FS* filesystem, size_t indice) {
         if (filesystem == nullptr) return false;
         if (!carregado_) carregar(filesystem, true, nowMs);
-        garantirDia(nowMs);
-        tempo::InstanteHabito instante = tempo::capturarHabito(estado_, indice);
-        const auto r = tempo::pularOcorrencia(estado_, indice);
+        if (indice >= estado_.dia.ocorrencias.size() || estado_.dia.data != tempo::agora(nowMs).data) return false;
+        auto novo = std::make_unique<tempo::Estado>(estado_);
+        auto instante = tempo::capturarHabito(estado_, indice);
+        const auto r = tempo::pularOcorrencia(*novo, indice);
         if (!r.registrado) return false;
-        tempo::fecharCapturaHabito(instante, estado_);
+        tempo::fecharCapturaHabito(instante, *novo);
+        if (!guardarRegistro(*filesystem, *novo, {tempo::eventoHabito(*novo, r, "")})) return false;
         desfazer_ = std::move(instante);
         lembretes_.resolvida(estado_, indice);
-        gravarEventoHabito(filesystem, r, "");
-        salvar(filesystem);
         return true;
     }
 
@@ -888,19 +909,17 @@ namespace screens {
         const tempo::InstanteHabito instante = desfazer_;
         const bool eraFeito = estado_.dia.ocorrencias[instante.indice].feita;
         const std::string habitoId = estado_.dia.ocorrencias[instante.indice].habitoId;
-        if (!tempo::desfazerOcorrencia(estado_, instante)) return false;
-        desfazer_ = tempo::InstanteHabito{};
+        auto novo = std::make_unique<tempo::Estado>(estado_);
+        if (!tempo::desfazerOcorrencia(*novo, instante)) return false;
+        const auto item = tempo::itemFilaDoHabito(*novo, habitoId);
+        if (!guardarRegistro(*filesystem, *novo, {tempo::eventoHabitoDesfeito(*novo, instante.indice)},
+                             eraFeito ? &item : nullptr, true)) return false;
+        desfazer_ = {};
         if (eraFeito) {
-            bool ok = false;
-            const auto destino = TempoStorage::undoCheckin(*filesystem, tempo::itemFilaDoHabito(estado_, habitoId), ok);
-            if (destino == tempo::DestinoDesfazer::CorrecaoEnfileirada) {   // o check-in antigo ja tinha ido: manda o valor menor
-                checkinNovo_ = true;
-                checkinLiberaEmMs_ = nowMs;
-            }
+            checkinNovo_ = true;
+            checkinLiberaEmMs_ = nowMs;
         }
-        TempoStorage::appendLog(*filesystem, estado_.dia.data, tempo::eventoHabitoDesfeito(estado_, instante.indice));
         lembretes_.jaAvisada(estado_, instante.indice, nowMs);
-        salvar(filesystem);
         return true;
     }
 
@@ -921,6 +940,13 @@ namespace screens {
         if (!carregado_ || filesystem == nullptr || fase_ != Fase::Nenhuma || emFechamento()) return;   // nada durante batalha/reflexao/saque
         const auto agora = tempo::agora(nowMs);
         if (!agora.valida) return;
+        if (avisoRegistro_ == AvisoRegistro::Pendente) {
+            if (nowMs - ultimaRecuperacaoMs_ < 5000) return;
+            ultimaRecuperacaoMs_ = nowMs;
+            if (!TempoStorage::recuperarRegistroHabito(*filesystem)) return;
+            avisoRegistro_ = AvisoRegistro::Nenhum;
+            recargaPedida_ = true;
+        }
         const bool viradaDoDia = !estado_.dia.aberto || !(estado_.dia.data == agora.data);
         const bool reler = tempo::deveReler({viradaDoDia, versaoSync, versaoVista_, recargaPedida_, syncAtiva_});
         if (reler) {
@@ -990,6 +1016,7 @@ namespace screens {
             const auto leitura = filesystem != nullptr ? TempoStorage::loadStateChecked(*filesystem, estado_)
                                                        : tempo::cartao::Leitura::Ausente;
             cartao_ = tempo::cartao::aposCarregar(filesystem != nullptr, leitura);
+            if (filesystem && !TempoStorage::recuperarRegistroHabito(*filesystem)) avisoRegistro_ = AvisoRegistro::Pendente;
             if (cartao_ != tempo::cartao::Situacao::Ok)
                 ESP_LOGW("tempo", "cartao SD: %s", tempo::cartao::aviso(cartao_));
             if (syncAtiva_) {
@@ -1249,11 +1276,10 @@ namespace screens {
         const int streakAntes = estado_.streak;
         const bool abandonou = entradaPend_.abandonou;
         instante_ = tempo::capturarBatalha(estado_);
-        filaMed_.clear();
-        eventoMedPend_.reset();
+        minutoMeditacao_ = -1;
         const auto liquidacao = tempo::aplicarBatalha(estado_, entradaPend_);
         // Meditacao vencida marca a proxima ocorrencia pendente do habito de Meditacao (no horario); o check-in so entra na fila ao confirmar.
-        if (liquidacao.vitoria && categoriaBatalha_ == tempo::Categoria::Meditacao) registrarHabitoMeditacao(filesystem);
+        if (liquidacao.vitoria && categoriaBatalha_ == tempo::Categoria::Meditacao) minutoMeditacao_ = estado_.dia.minutoAtual;
         tempo::selarBatalha(instante_, estado_);
         liquidado_ = true;
 
@@ -1334,12 +1360,9 @@ namespace screens {
         if (filesystem != nullptr && liquidado_) {
             TempoStorage::appendLog(*filesystem, dataPendente_, eventoPendente_);
             TempoStorage::recordBattle(*filesystem, eventoPendente_, estado_.streak);   // resumo.json do Perfil
-            for (const auto& item : filaMed_) TempoStorage::enqueueCheckin(*filesystem, item);
-            if (eventoMedPend_) TempoStorage::appendLog(*filesystem, estado_.dia.data, *eventoMedPend_);
+            if (minutoMeditacao_ >= 0) registrarHabitoMeditacao(filesystem);
         }
-        if (!filaMed_.empty()) checkinNovo_ = true;   // lume.12: o App sincroniza logo ("Feito" envia na hora)
-        filaMed_.clear();
-        eventoMedPend_.reset();
+        minutoMeditacao_ = -1;
         instante_ = tempo::InstanteBatalha{};
     }
 
@@ -1383,8 +1406,7 @@ namespace screens {
         if (!podeDesfazerBatalha(nowMs)) return false;
         if (!tempo::desfazerBatalha(estado_, instante_)) return false;
         instante_ = tempo::InstanteBatalha{};
-        filaMed_.clear();
-        eventoMedPend_.reset();
+        minutoMeditacao_ = -1;
         liquidado_ = false;
         if (filesystem == nullptr) filesystem = fs_;
         salvar(filesystem);

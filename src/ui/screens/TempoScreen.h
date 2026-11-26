@@ -141,6 +141,9 @@ namespace screens {
         // "Feito agora" na ocorrencia `indice` de estado().dia.ocorrencias: paga, grava o log e enfileira o check-in
         // (enviado ao TickTick na proxima sync com Wi-Fi). Devolve false se ja estava feita ou sem SD.
         // `resultado` (opcional) recebe cr/XP/status para a celebracao. Guarda o instante para o "Desfazer" (8 s).
+        enum class AvisoRegistro { Nenhum, Recusado, FilaCheia, Pendente };
+        AvisoRegistro avisoRegistro() const { return avisoRegistro_; }
+        void fecharAvisoRegistro() { if (avisoRegistro_ != AvisoRegistro::Pendente) avisoRegistro_ = AvisoRegistro::Nenhum; }
         bool marcarHabito(uint32_t nowMs, fs::FS* filesystem, size_t indice, tempo::ResultadoOcorrencia* resultado = nullptr);
         // "Desfazer" do ultimo Feito/Pular (Habitos v2): reverte cr/XP/coracoes/eventos do dia, tira o check-in da fila (se ja foi
         // enviado enfileira o valor menor; ver tempo::DestinoDesfazer), anula o evento no log e salva. false = nao da mais.
@@ -254,7 +257,6 @@ namespace screens {
         void sairDoSaque(uint32_t nowMs, fs::FS* filesystem);  // confirma e segue o proximo passo (pausa) sem mudar de tela
         void garantirDia(uint32_t nowMs);
         void registrarHabitoMeditacao(fs::FS* filesystem);     // batalha de Meditacao vencida: marca o habito
-        void gravarEventoHabito(fs::FS* filesystem, const tempo::ResultadoOcorrencia& r, std::string_view origem);
         // Grava o estado, a menos que o cartao esteja sem ler (tempo/Cartao.h): nunca grava estado zerado por cima.
         void salvar(fs::FS* filesystem);
         void pedirSom(som::SomId id);
@@ -291,6 +293,10 @@ namespace screens {
         int duracaoTimerMin_ = 25;             // ultima duracao de TIMER (o BOOT do launcher sempre comeca um Timer)
         bool checkinNovo_ = false;
         uint32_t checkinLiberaEmMs_ = 0;
+        uint32_t ultimaRecuperacaoMs_ = 0;
+        AvisoRegistro avisoRegistro_ = AvisoRegistro::Nenhum;
+        bool guardarRegistro(fs::FS& fs, tempo::Estado& novo, const std::vector<tempo::EventoLog>& eventos,
+                             const tempo::ItemFila* item = nullptr, bool desfazer = false);
         tempo::InstanteHabito desfazer_;     // ultimo Feito/Pular (Habitos v2)
         bool carregado_ = false;
         uint32_t ultimoDesenhoMs_ = 0;
@@ -363,8 +369,7 @@ namespace screens {
         int cicloFocadoMin_ = 0;
         int distracoesPend_ = 0;             // distracoes marcadas na hora (chip)
         tempo::InstanteBatalha instante_;    // estado antes/depois da liquidacao
-        std::vector<tempo::ItemFila> filaMed_;           // check-in da Meditacao por timer, enviado so ao confirmar
-        std::optional<tempo::EventoLog> eventoMedPend_;  // evento de habito da Meditacao, gravado so ao confirmar
+        int minutoMeditacao_ = -1;  // fim da sessão, aplicado ao confirmar o saque
         tempo::EventoLog eventoPendente_;
         tempo::Data dataPendente_;
 

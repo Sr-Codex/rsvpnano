@@ -437,6 +437,13 @@ namespace {
         TEST_ASSERT_EQUAL_INT(1, (int)fila.size());
         aplicarEnvio(fila, b, 201);
         TEST_ASSERT_EQUAL_INT(0, (int)fila.size());
+        // O usuário desfez uma ocorrência enquanto o valor maior estava em voo.
+        fila = {a};
+        aplicarEnvio(fila, b, 200);
+        TEST_ASSERT_EQUAL_UINT(1, fila.size());
+        TEST_ASSERT_EQUAL_FLOAT(1, fila.front().valor);
+        aplicarEnvio(fila, b, 500);
+        TEST_ASSERT_EQUAL_INT(0, fila.front().tentativas);
         // limite de tentativas
         ItemFila c = a;
         c.tentativas = kMaxTentativasFila;

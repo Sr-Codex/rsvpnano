@@ -578,6 +578,7 @@ namespace tempo {
             if (novo.valor > item.valor + 1e-9) {   // mais uma ocorrencia feita: substitui e zera o contador de erro
                 novo.tentativas = 0;
                 novo.ultimoHttp = 0;
+                novo.despachado = item.despachado || item.tentativas > 0;
                 item = std::move(novo);
             }
             return;   // mesmo valor (ou menor): nada a fazer, nunca duplica
@@ -589,13 +590,10 @@ namespace tempo {
     void aplicarEnvio(std::vector<ItemFila>& fila, const ItemFila& enviado, int http) {
         for (auto it = fila.begin(); it != fila.end(); ++it) {
             if (it->id != enviado.id || it->stamp != enviado.stamp) continue;
+            if (it->valor != enviado.valor || it->meta != enviado.meta || it->time != enviado.time ||
+                it->correcao != enviado.correcao) return;
             if (http == 200 || http == 201) {
-                if (it->valor <= enviado.valor + 1e-9) {
-                    fila.erase(it);
-                } else {
-                    it->tentativas = 0;   // entrou valor maior depois do envio: continua pendente
-                    it->ultimoHttp = http;
-                }
+                fila.erase(it);
             } else {
                 if (http > 0) ++it->tentativas;
                 it->ultimoHttp = http;
@@ -698,9 +696,11 @@ namespace tempo {
     }
 
     DestinoDesfazer desfazerNaFila(std::vector<ItemFila>& fila, ItemFila novo) {
+        novo.correcao = true;
         for (auto it = fila.begin(); it != fila.end(); ++it) {
             if (it->id != novo.id || it->stamp != novo.stamp) continue;
-            if (novo.valor <= 1e-9) {
+            novo.despachado = it->despachado || it->tentativas > 0;
+            if (novo.valor <= 1e-9 && !novo.despachado) {
                 fila.erase(it);
                 return DestinoDesfazer::RemovidoDaFila;
             }
@@ -709,6 +709,7 @@ namespace tempo {
             *it = std::move(novo);
             return DestinoDesfazer::SubstituidoNaFila;
         }
+        novo.despachado = true;
         fila.push_back(std::move(novo));
         while (fila.size() > kMaxFila) fila.erase(fila.begin());
         return DestinoDesfazer::CorrecaoEnfileirada;

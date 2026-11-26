@@ -116,6 +116,7 @@ namespace tempo {
         }
         std::optional<Aviso> escolhido;
         int vencidos = 0;
+        bool escolhidoForcado = false;
         for (size_t i = 0; i < e.dia.ocorrencias.size(); ++i) {
             const OcorrenciaDia& oc = e.dia.ocorrencias[i];
             if (oc.feita || oc.status != StatusHabito::Pendente || oc.minuto < 0) continue;   // so com horario e pendente
@@ -156,17 +157,21 @@ namespace tempo {
             if (!disparar) continue;
             ++it.avisos;
             it.ultimoMs = agoraMs;
-            if (!escolhido) {
+            if (escolhido) ++vencidos;
+            if (!escolhido || (it.forcarInicial && !escolhidoForcado)) {
+                escolhidoForcado = it.forcarInicial;
                 Aviso a;
+                a.habitoId = oc.habitoId;
+                a.indiceNoDia = oc.indice;
+                a.stamp = stamp;
                 a.indice = i;
                 a.nome = oc.nome;
                 a.minuto = oc.minuto;
                 a.tipo = oc.tipo;
                 a.repeticao = repeticao;
                 escolhido = std::move(a);
-            } else {
-                ++vencidos;
             }
+            it.forcarInicial = false;
         }
         if (escolhido) escolhido->outros = vencidos;
         return escolhido;

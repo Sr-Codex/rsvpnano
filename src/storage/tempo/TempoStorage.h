@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "storage/tempo/RegistroHabito.h"
 #include "tempo/Cartao.h"
 #include "tempo/Codec.h"
 #include "tempo/Habitos.h"
@@ -16,6 +17,9 @@
 namespace TempoStorage {
 
     bool ensureFolders();
+    bool recuperarRegistroHabito(fs::FS& fs);
+    GravacaoHabito registrarHabito(fs::FS& fs, const tempo::Estado& novo, const std::vector<tempo::EventoLog>& eventos,
+                                   const tempo::ItemFila* item = nullptr, bool desfazer = false);
     // false = ausente/ilegivel/corrompido (saida intacta).
     bool loadProjects(fs::FS& filesystem, tempo::ListaProjetos& out);
     // Valida (tempo::lerProjetos) e grava /tempo/projetos.json de forma atomica (.tmp + rename + .bak).
@@ -44,10 +48,8 @@ namespace TempoStorage {
     bool saveHabitCheckins(fs::FS& filesystem, std::string_view json);   // valida e grava atomico
     // Fila: arquivo ausente = fila vazia. As operacoes abaixo sao serializadas por um mutex (a UI e o job de sync
     // do TickTick mexem na fila de tarefas diferentes) e releem o arquivo antes de gravar.
-    std::vector<tempo::ItemFila> loadQueue(fs::FS& filesystem);
-    bool enqueueCheckin(fs::FS& filesystem, const tempo::ItemFila& item);
-    // "Desfazer" (Habitos v2): aceita valor MENOR que o da fila (tempo::desfazerNaFila). `ok` = gravou.
-    tempo::DestinoDesfazer undoCheckin(fs::FS& filesystem, const tempo::ItemFila& item, bool& ok);
+    std::optional<std::vector<tempo::ItemFila>> loadQueue(fs::FS& filesystem);
+    std::optional<std::vector<tempo::ItemFila>> filaParaEnvio(fs::FS& filesystem);
     // Aplica os resultados dos envios (item enviado, status HTTP; 0 = sem rede) a fila atual do SD.
     bool applyQueueResults(fs::FS& filesystem, const std::vector<std::pair<tempo::ItemFila, int>>& results);
     bool appendLog(fs::FS& filesystem, const tempo::Data& date, const tempo::EventoLog& event);

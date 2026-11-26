@@ -204,7 +204,12 @@ namespace screens {
         filaTotal_ = 0;
         filaParados_ = 0;
         if (filesystem == nullptr) return;
-        for (const auto& item : TempoStorage::loadQueue(*filesystem)) {
+        const auto fila = TempoStorage::loadQueue(*filesystem);
+        if (!fila) {
+            filaTotal_ = -1;
+            return;
+        }
+        for (const auto& item : *fila) {
             ++filaTotal_;
             if (!tempo::devePreEnviar(item)) ++filaParados_;
         }
@@ -304,9 +309,21 @@ namespace screens {
         selecionado_.reset();
     }
 
+    std::optional<tempo::Aviso> HabitosScreen::pegarDose() {
+        auto dose = std::move(dose_);
+        dose_.reset();
+        return dose;
+    }
+
     void HabitosScreen::acaoFeito(ui::Context& ui, const Cena& c, size_t indice) {
         if (indice >= c.n) return;
-        const double janela = tempo::fracaoJanela(c.estado->dia.ocorrencias[indice], c.minuto);
+        const auto& oc = c.estado->dia.ocorrencias[indice];
+        if (tempo::exigeConfirmacao(oc.tipo)) {
+            dose_ = tempo::Aviso{.indice = indice, .nome = oc.nome, .minuto = oc.minuto, .tipo = oc.tipo,
+                                .habitoId = oc.habitoId, .stamp = tempo::stampDe(c.estado->dia.data), .indiceNoDia = oc.indice};
+            return;
+        }
+        const double janela = tempo::fracaoJanela(oc, c.minuto);
         tempo::ResultadoOcorrencia r;
         if (c.tempo->marcarHabito(c.nowMs, c.fs, indice, &r)) {
             iniciarCelebracao(c, indice, r, false, janela);
@@ -477,8 +494,7 @@ namespace screens {
                 rotulo = medicacao ? "MEDICAÇÃO · " + hhmm(v.minuto) : cartao.atrasoMin > 0 ? "AGORA · há " + duracao(cartao.atrasoMin) : "AGORA";
                 corRotulo = medicacao ? kCarmim : kLaranja;
                 if (medicacao) {
-                    nome = "Tomou agora?";
-                    l2 = adiou ? "ok · aviso de novo às " + hhmm(adiouAteMin_) : "registra " + hhmm(c.minuto) + " · toque confirma";
+                    l2 = adiou ? "ok · aviso de novo às " + hhmm(adiouAteMin_) : "registra " + hhmm(c.minuto) + " · revisar dose";
                     j0 = kCarmim; j1 = rgb565(255, 150, 170);
                     corBotao1 = kCarmim; corTextoBotao1 = cTexto;
                 } else {
@@ -491,7 +507,6 @@ namespace screens {
                 j0 = kCarmim; j1 = rgb565(255, 150, 170);
                 corBotao1 = kCarmim; corTextoBotao1 = cTexto;
                 if (medicacao) {
-                    nome = "Tomou agora?";
                     l2 = adiou ? "ok · aviso de novo às " + hhmm(adiouAteMin_) : "era " + hhmm(v.minuto) + " · atrasada " + duracao(cartao.atrasoMin);
                 } else {
                     l2 = "era " + hhmm(v.minuto) + " · ainda vale XP";
@@ -501,7 +516,7 @@ namespace screens {
                 rotulo = "PERDIDO";
                 corRotulo = kCarmim;
                 j0 = kCarmim; j1 = rgb565(255, 150, 170);
-                if (medicacao) { nome = "Tomou agora?"; l2 = "era " + hhmm(v.minuto) + " · registra a hora, sem ganhos"; corBotao1 = kCarmim; corTextoBotao1 = cTexto; }
+                if (medicacao) { l2 = "era " + hhmm(v.minuto) + " · registra a hora, sem ganhos"; corBotao1 = kCarmim; corTextoBotao1 = cTexto; }
                 else l2 = "era " + hhmm(v.minuto) + " · passou da janela";
                 break;
             case ModoCartao::Feito:
@@ -529,7 +544,7 @@ namespace screens {
             }
             // botoes
             if (cartao.podeFeito) {
-                botao1 = medicacao ? "Sim, tomei agora" : "Feito";
+                botao1 = medicacao ? "Registrar dose" : "Feito";
                 botao1Ativo = true;
                 botao1Duas = medicacao;
             } else if (cartao.modo == ModoCartao::Proximo) botao1 = "Ainda cedo";
@@ -579,6 +594,7 @@ namespace screens {
             uint16_t corSync = cMudo;
             if (c.info->sincronizando) { sync = "sincronizando…"; corSync = kAmbar; }
             else if (!c.info->erroSync.empty()) { sync = "erro de sync"; corSync = kCarmim; }
+            else if (filaTotal_ < 0) { sync = "fila indisponível"; corSync = kAmbar; }
             else if (filaParados_ > 0) { sync = std::to_string(filaParados_) + " parados"; corSync = kAmbar; }
             else if (filaTotal_ > 0) sync = std::to_string(filaTotal_) + " aguardam Wi-Fi";
             if (!sync.empty()) b.texto({326, 5, 138, 17}, sync, 13, corSync, TextAlign::Right);
@@ -611,8 +627,8 @@ namespace screens {
         const Rect rPri{472, 22, 160, 76}, rSec{472, 106, 160, 56};
         if (dir == Dir::Botoes) {
             if (botao1Duas) {
-                b.textoEm({rPri.x, 33, rPri.w, 27}, "Sim,", 21, cTexto, kCarmim);
-                b.textoEm({rPri.x, 58, rPri.w, 27}, "tomei agora", 21, cTexto, kCarmim);
+                b.textoEm({rPri.x, 33, rPri.w, 27}, "Registrar", 21, cTexto, kCarmim);
+                b.textoEm({rPri.x, 58, rPri.w, 27}, "dose", 21, cTexto, kCarmim);
             } else if (!botao1.empty()) {
                 const bool ativoGrande = botao1Ativo && !botaoVoltar;
                 b.textoEm({ativoGrande ? rPri.x + 56 : rPri.x, ativoGrande ? 44 : 48, ativoGrande ? 100 : rPri.w, ativoGrande ? 33 : 27}, botao1,
@@ -931,7 +947,7 @@ namespace screens {
             if (!celebraPulo_ && celebraR_.cr > 0.05) b.textoEm({rPri.x + 30, rPri.y + 34, 62, 22}, "+" + numero(celebraR_.xp) + " XP", 15, kTinta, kVerde, TextAlign::Center);
             b.textoEm({rSec.x, rSec.y + 38, rSec.w, 22}, "Desfazer", 13, cMudo, kPainel, TextAlign::Center);
         } else if (medicacao) {
-            b.textoEm({rPri.x, rPri.y + 8, rPri.w, 22}, "Sim, tomei", 17, cTexto, kCarmim);
+            b.textoEm({rPri.x, rPri.y + 8, rPri.w, 22}, "Registrar", 17, cTexto, kCarmim);
             b.textoEm({rPri.x, rPri.y + 32, rPri.w, 20}, "agora", 15, cTexto, kCarmim);
             b.textoEm({rSec.x, rSec.y + 8, rSec.w, 22}, "Ainda", 15, cMudo, kPainel);
             b.textoEm({rSec.x, rSec.y + 30, rSec.w, 22}, "não", 15, cMudo, kPainel);
@@ -1057,7 +1073,7 @@ namespace screens {
                 l.texto({50, y + 29, 116, 20}, sub, 15, cMudo);
                 if (ln.acionavel) {
                     if (ln.med) {
-                        l.textoEm({8, y + 58, 156, 46}, "Sim, tomei agora", 15, cTexto, kCarmim);
+                        l.textoEm({8, y + 58, 156, 46}, "Registrar dose", 15, cTexto, kCarmim);
                         l.textoEm({8, y + 110, 156, 38}, "Ainda não · avisa em 15 min", 13, cMudo, kPainel);
                     } else {
                         const uint16_t corF = ln.cart.modo == ModoCartao::Atrasado ? kCarmim : kLaranja;

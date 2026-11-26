@@ -37,7 +37,7 @@
 #include "ui/screens/TempoScreen.h"
 #include "ui/screens/HomeScreen.h"
 #include "ui/screens/PerfilScreen.h"
-#include "ui/screens/HabitosScreen.h"
+#include "ui/screens/HabitosMesScreen.h"
 #include "ui/cenas/CenaFoco.h"
 #include "tempo/CenaFocoEstado.h"
 #include "focus/FocusOrientation.h"
@@ -107,6 +107,7 @@ private:
     // automatic = desligamento por descanso expirado (pode virar deep sleep com despertador, ADR-009); false = manual.
     void powerOff(uint32_t nowMs, bool automatic = false);
     tempo::DecisaoDespertador decidirSono(uint32_t nowMs);
+    void abrirAvisoHabito(const tempo::Aviso& aviso, bool confirmarDose = false);
     void iniciarLembreteBoot(uint32_t nowMs);
     static void renderStorageStatus(void* context, const char* title, const char* line1, const char* line2,
                                     int progressPercent);
@@ -158,6 +159,8 @@ private:
     screens::HomeScreen homeScreen_;
     screens::PerfilScreen perfilScreen_;
     screens::HabitosScreen habitosScreen_;
+    screens::HabitosMesScreen habitosMes_;
+    bool mostrarMesHabitos_ = false;
     // Habitos (fase 2): lembretes (bipe + aviso no topo), "pegou a placa" (IMU) e orientacao em pe dos Habitos
     focus::OrientationReader motionReader_;
     tempo::DetectorPegada pegada_;

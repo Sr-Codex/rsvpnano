@@ -195,6 +195,7 @@ void App::begin() {
         Board::DeepSleep::rtc().magic = Board::DeepSleep::kRtcMagic;
     }
     if (lembreteBoot_) {
+        mostrarMesHabitos_ = true;
         networkScreen_.startupCheckPending = false;   // nada de Wi-Fi/OTA no despertar
         tickTickTried_ = true;                         // nem sincronizacao do TickTick (economiza bateria)
         tickTickLastMs_ = bootMs_;
@@ -444,6 +445,7 @@ void App::renderScreen(uint32_t nowMs) {
     if (screen_ == screens::Screen::Reader || screen_ == screens::Screen::Home) settingsFromHome_ = false;
     else if (screen_ == screens::Screen::Read && settingsFromHome_) { settingsFromHome_ = false; screen_ = screens::Screen::Home; }
     if (screen_ == screens::Screen::Settings && lastRenderedScreen_ == screens::Screen::Home) settingsFromHome_ = true;
+    if (lastRenderedScreen_ == screens::Screen::Habitos && screen_ != lastRenderedScreen_) mostrarMesHabitos_ = false;
     lastRenderedScreen_ = screen_;
     if (dictionaryWifiReturn_ && (screen_ == screens::Screen::Connections
         || screen_ == screens::Screen::Read || screen_ == screens::Screen::Reader)) {
@@ -766,12 +768,21 @@ void App::renderScreen(uint32_t nowMs) {
         action = perfilScreen_.draw(immediateUi_, nowMs, screen_, storage_.mounted() ? &Board::Storage::filesystem() : nullptr);
         break;
     case screens::Screen::Habitos: {
-        immediateUi_.beginFrame(static_cast<uint8_t>(screen_), 0);
+        if (tempoScreen_.avisoRegistro() != screens::TempoScreen::AvisoRegistro::Nenhum) {
+            immediateUi_.beginFrame(static_cast<uint8_t>(screen_), 20);
+            screens::HabitosMesScreen::mostrarErroRegistro(immediateUi_, tempoScreen_, screen_);
+            break;
+        }
+        immediateUi_.beginFrame(static_cast<uint8_t>(screen_), mostrarMesHabitos_ ? habitosMes_.surface() : 0);
         screens::HabitosInfo habitosInfo;
         habitosInfo.erroSync = habitsError_;
         habitosInfo.sincronizando = silentJobActive();
-        action = habitosScreen_.draw(immediateUi_, nowMs, screen_, tempoScreen_,
-                                     storage_.mounted() ? &Board::Storage::filesystem() : nullptr, habitosInfo);
+        auto* fs = storage_.mounted() ? &Board::Storage::filesystem() : nullptr;
+        if (mostrarMesHabitos_) habitosMes_.draw(immediateUi_, nowMs, screen_, tempoScreen_, fs, habitosInfo);
+        else {
+            action = habitosScreen_.draw(immediateUi_, nowMs, screen_, tempoScreen_, fs, habitosInfo);
+            if (const auto dose = habitosScreen_.pegarDose()) abrirAvisoHabito(*dose, true);
+        }
         break;
     }
     case screens::Screen::TempoHoje:
@@ -817,9 +828,14 @@ void App::handleScreenAction(screens::Action action, uint32_t nowMs) {
         // open the library or a second storage operation over an unfinished job.
         onboardingStorageCancel_.store(true);onboardingScreen_.waitForStorage();renderScreen(nowMs);return;
     }
-    if (backgroundJobActive() && action != screens::Action::None)
+    if (backgroundJobActive() && action != screens::Action::None && action != screens::Action::OpenHabitMonth)
         return;
     switch (action) {
+    case screens::Action::OpenHabitMonth:
+        habitosMes_ = {};
+        mostrarMesHabitos_ = true;
+        screen_ = screens::Screen::Habitos;
+        break;
     case screens::Action::None:
     case screens::Action::OpenBook:
     case screens::Action::OpenBookSettings:
@@ -999,7 +1015,8 @@ void App::handleInput(Input::ActionMask actions, uint32_t nowMs) {
     }
     if (screen_ == screens::Screen::Habitos
         && (Input::hasAction(actions, Input::ActionOpenMenu) || Input::hasAction(actions, Input::ActionBack))) {
-        habitosScreen_.back(screen_);   // PWR nos Habitos volta ao launcher
+        if (mostrarMesHabitos_) habitosMes_.back(screen_);
+        else habitosScreen_.back(screen_);
         renderScreen(nowMs);
         return;
     }
@@ -1596,8 +1613,10 @@ bool App::avisoPermitido() const {
     switch (screen_) {
     case screens::Screen::Status: case screens::Screen::Standby: case screens::Screen::Onboarding:
     case screens::Screen::Usb: case screens::Screen::Sync: case screens::Screen::TouchCheck:
-    case screens::Screen::ButtonMap: case screens::Screen::Habitos:
+    case screens::Screen::ButtonMap:
         return false;
+    case screens::Screen::Habitos:
+        return mostrarMesHabitos_ && !lembreteBoot_ && !companionApi_.active() && !usbTransfer_.active() && !serialCompanion_.active();
     default:
         return !companionApi_.active() && !usbTransfer_.active() && !serialCompanion_.active();
     }
@@ -1630,9 +1649,10 @@ bool App::tickHabitos(uint32_t nowMs) {
     if (!aviso) return false;
     ESP_LOGI("habitos", "lembrete: %s %02d:%02d%s tela=%u", aviso->nome.c_str(), aviso->minuto / 60, aviso->minuto % 60,
              aviso->repeticao ? " (re-aviso)" : "", static_cast<unsigned>(screen_));
-    if (screen_ == screens::Screen::Habitos) {   // ja esta olhando: bipe so no aviso inicial, sem aviso no topo
+    if (screen_ == screens::Screen::Habitos && (lembreteBoot_ || !mostrarMesHabitos_)) {
         if (aviso->tipo == tempo::TipoHabito::Medicacao)
             Board::DeepSleep::rtc().ultimoAvisoMedicacaoEpoch = tempo::epochAgora(nowMs);
+        if (lembreteBoot_) abrirAvisoHabito(*aviso);
         if (!aviso->repeticao || lembreteBoot_) tocarSom(somDoLembrete(aviso->tipo), nowMs);
         return false;
     }
@@ -1640,12 +1660,20 @@ bool App::tickHabitos(uint32_t nowMs) {
         Board::DeepSleep::rtc().ultimoAvisoMedicacaoEpoch = tempo::epochAgora(nowMs);   // base da insistencia no deep sleep
     tocarSom(somDoLembrete(aviso->tipo), nowMs);   // comum: DoisBipes (respeita o silencio); medicacao: AlertaLongo (sempre)
     if (avisoPermitido()) {
+        avisoToque_ = false;
         avisoHabito_ = *aviso;
         avisoAtivo_ = true;
         avisoPintar_ = true;
         avisoAteMs_ = nowMs + tempo::kAvisoVisivelMs;
     }
     return true;
+}
+
+void App::abrirAvisoHabito(const tempo::Aviso& aviso, bool confirmarDose) {
+    habitosMes_.abrirAviso(aviso, confirmarDose);
+    mostrarMesHabitos_ = true;
+    screen_ = screens::Screen::Habitos;
+    immediateUi_.invalidate();
 }
 
 bool App::handleAvisoTouch(uint32_t nowMs) {
@@ -1661,8 +1689,7 @@ bool App::handleAvisoTouch(uint32_t nowMs) {
         if (ui::hasTouch(*touch, ui::TouchTap) && !ui::hasTouch(*touch, ui::TouchCancel)) {
             avisoAtivo_ = false;
             if (screen_ == screens::Screen::Reader) readerScreen_.pauseImmediately(prefs_, nowMs);   // sair da leitura = pausar
-            screen_ = screens::Screen::Habitos;
-            immediateUi_.invalidate();
+            abrirAvisoHabito(avisoHabito_);
             renderScreen(nowMs);
         }
     }

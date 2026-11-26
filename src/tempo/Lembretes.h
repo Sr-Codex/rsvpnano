@@ -56,6 +56,9 @@ namespace tempo {
         int minuto = -1;              // horario planejado
         TipoHabito tipo = TipoHabito::Geral;
         bool repeticao = false;       // false = aviso inicial; true = re-aviso (movimento/insistencia/adiado)
+        std::string habitoId;
+        int stamp = 0;
+        int indiceNoDia = 0;
         int outros = 0;               // outras ocorrencias que venceram no mesmo instante
     };
 

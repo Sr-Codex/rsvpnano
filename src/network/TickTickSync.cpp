@@ -200,10 +200,10 @@ namespace net::ticktick {
         // fila persistente -> POST /habit/{id}/checkin (escopo tasks:write). Devolve "" ou o erro.
         std::string enviarFilaHabitos(Sessao& sessao, const settings::DeviceSecrets& secrets, fs::FS& filesystem) {
             std::string error;
-            const auto queue = TempoStorage::loadQueue(filesystem);
+            const auto queue = TempoStorage::filaParaEnvio(filesystem);
+            if (!queue) return "Fila de hábitos indisponível no cartão SD";
             std::vector<std::pair<tempo::ItemFila, int>> results;
-            for (const auto& item : queue) {
-                if (!tempo::devePreEnviar(item)) continue;
+            for (const auto& item : *queue) {
                 const Reply reply = requestComRetry(sessao, HTTP_METHOD_POST, tempo::ticktick::caminhoPostCheckin(item),
                                                     secrets.ticktickToken, tempo::ticktick::corpoCheckin(item));
                 results.emplace_back(item, reply.status);
@@ -216,7 +216,8 @@ namespace net::ticktick {
                     if (reply.status == 401 || reply.status == 403) break;   // token sem permissão de escrita
                 }
             }
-            if (!results.empty()) TempoStorage::applyQueueResults(filesystem, results);
+            if (!results.empty() && !TempoStorage::applyQueueResults(filesystem, results))
+                return "Não foi possível atualizar a fila no cartão SD";
             return error;
         }
 

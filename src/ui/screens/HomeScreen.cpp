@@ -317,7 +317,7 @@ namespace screens {
             if (ui.tap(rect)) {
                 if (i == 0) screen = Screen::TempoHoje;
                 else if (i == 1) screen = Screen::Read;
-                else if (i == 2) screen = Screen::Habitos;
+                else if (i == 2) return Action::OpenHabitMonth;
                 else screen = Screen::Perfil;
             }
         }

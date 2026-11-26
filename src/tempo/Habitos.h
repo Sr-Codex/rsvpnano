@@ -147,6 +147,8 @@ namespace tempo {
         std::string time;         // "yyyy-MM-ddTHH:mm:ss+0000" (UTC)
         int tentativas = 0;       // respostas HTTP de erro ate agora
         int ultimoHttp = 0;       // ultimo status (0 = falha de rede / nunca enviado)
+        bool correcao = false;    // Desfazer local ainda aguardando confirmação do servidor
+        bool despachado = false;  // houve (ou pode ter havido) envio deste hábito/dia
     };
 
     int stampDe(const Data& data);
